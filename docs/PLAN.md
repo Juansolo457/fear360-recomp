@@ -48,7 +48,9 @@ See [RIPPING.md](RIPPING.md). Output: a clean ISO of each disc, with hashes reco
 ### Phase 3: Runtime, the "hybrid" layer
 Pick a base, a decision to make together once we have your repo list:
 1. **UnleashedRecomp-style** custom runtime: hand-written kernel/XAM shims, a native renderer (D3D12 + Vulkan through plume / RHI), SDL for input and windowing. Fastest at runtime, most work.
-2. **Xenia-derived runtime** for the recompiled code: reuse Xenia's kernel HLE, its GPU command processor (Xenos → D3D12/Vulkan translation), and its XMA decoder, without the CPU JIT. Boots sooner, with some per-frame translation overhead. This is the hybrid approach you described. Several newer recomp SDKs work this way; we'll evaluate whichever repos you send.
+2. **Xenia-derived runtime** for the recompiled code: reuse Xenia's kernel HLE, its GPU command processor (Xenos → D3D12/Vulkan translation), and its XMA decoder, without the CPU JIT. Boots sooner, with some per-frame translation overhead. This is the hybrid approach you described. Several newer recomp toolchains work this way, e.g. ReXGlue, which the GoldenEye 360 PC build used. We'll evaluate it alongside whichever repos you send.
+
+Sister project: `../quake4-360-recomp` has the same pipeline and much better reference source, so it's the likely first target. Runtime pieces that work there carry over to this one.
 
 Either way, the work items are:
 - Memory: the 4 GB guest address space, big-endian loads and stores (handled by the recomp), physical/virtual mirrors
