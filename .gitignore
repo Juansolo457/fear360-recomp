@@ -1,0 +1,24 @@
+# Game data: never commit
+game/
+*.iso
+*.xex
+*.xbe
+*.god
+*.stfs
+
+# Generated recompiled code
+ppc/
+shaders_generated/
+
+# Build output
+build/
+out/
+*.pdb
+
+# Editor / OS
+.vscode/
+.vs/
+.idea/
+__pycache__/
+Thumbs.db
+.DS_Store
