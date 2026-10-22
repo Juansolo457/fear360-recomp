@@ -44,3 +44,9 @@ port-nx/user*/
 port-nx/cache*/
 port-nx/user-smoke/
 port-nx/cache-smoke/
+port-files/assets
+port-files/generated/default/
+port-files/out/
+port-files/logs/
+port-files/user*/
+port-files/cache*/

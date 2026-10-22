@@ -1,0 +1,54 @@
+# fearfiles (port-files): F.E.A.R. Files (Extraction Point + Perseus Mandate) on the same host
+# code as port-nx: fear-nx's patched SDK and Vulkan Xenos renderer, our fixes and options. Only
+# the translation (generated/default, from fear_manifest.toml) is this title's own. The project
+# keeps the name "fear" so generated/rexglue.cmake applies unchanged; the binary is fearfiles.exe.
+
+cmake_minimum_required(VERSION 3.25)
+project(fear LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(NOT REXSDK_DIR)
+    message(FATAL_ERROR "port-files builds the SDK from source: pass -DREXSDK_DIR=<third_party/rexglue-sdk-nx>.")
+endif()
+if(NOT REXGLUE_GPU_XENOS_STATIC)
+    message(FATAL_ERROR "port-files links the Xenos plugin in: pass -DREXGLUE_GPU_XENOS_STATIC=ON.")
+endif()
+
+include(generated/rexglue.cmake)
+
+set(HOST "${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/src")
+set(FEAR_SOURCES
+    ${HOST}/main.cpp
+    ${HOST}/anim_timing.cpp
+    ${HOST}/texture_pack.cpp
+    ${HOST}/crash_report.cpp
+    ${HOST}/display_vblank.cpp
+    ${HOST}/fx_debug.cpp
+    ${HOST}/look_tuning.cpp
+    ${HOST}/native/native_system.cpp
+    ${HOST}/native/native_renderer.cpp
+    ${HOST}/native/native_textures.cpp
+    ${HOST}/native/native_geometry_shaders.cpp
+)
+
+add_executable(fear WIN32 ${FEAR_SOURCES})
+set_target_properties(fear PROPERTIES OUTPUT_NAME fearfiles)
+
+rexglue_setup_target(fear)
+
+target_link_libraries(fear PRIVATE rexgpu-xenos xxHash::xxhash)
+if(WIN32)
+    target_link_libraries(fear PRIVATE dbghelp dxgi)
+endif()
+target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
+set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
+target_include_directories(fear PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"            # generated/default/fear_init.h, from port-nx/src/main.cpp
+    "${HOST}"
+    "${REXSDK_DIR}/src/graphics"
+    "${REXSDK_DIR}/thirdparty/glslang"
+    "${REXSDK_DIR}/thirdparty/renderdoc"
+    $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>
+)

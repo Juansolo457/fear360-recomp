@@ -103,7 +103,7 @@ Asked after play-test 3: what in fear-nx's renderer is a Switch tradeoff that a 
 1. **Saving:** the fix works (the profile is written during play), but play-test 3 was Instant Action, which doesn't checkpoint; one campaign checkpoint to confirm.
 2. **Options and Quit** in the main menu.
 3. **No pop-in on first sight** (the shader/pipeline item above).
-4. **Even pacing: done** (display-locked, play-test 4). Left: **120 fps without the tracer glitch** (the per-frame step in the game's effect code), and the steam/dust haze if it turns out to be frame-rate bound.
+4. **Even pacing: done** (display-locked, play-test 4). Left: **120 fps without the tracer glitch** (the per-frame step in the game's effect code), and any other per-frame step like the animation one fixed in play-test 4.
 5. **A level sweep:** every Interval, the bonus level and the Instant Action maps, played or driven, for crashes and visual faults; the crash reporter catches anything.
 6. **Linux** build; ***F.E.A.R. Files***.
 
@@ -129,7 +129,15 @@ The user's sense: walking feels a little more bouncy than on PC, maybe extra swa
 
 The timer did well in its 30 s too: its drift shows up rarely, as a frame a refresh early or late when the phase crosses a refresh. The display lock removes that by construction. Four frames of 210–245 ms showed up in one menu stretch: the game itself busy (the ring idle, waiting for it), not the renderer.
 
-**New: a haze and brief brightening in vent steam and dusty doorways.** From a 46 s recording, frame by frame: on the rooftop at the start of the map, walking past the steaming air-conditioning units, the screen brightens over 4–5 frames (mean brightness 75 → 88) and drops back in 2 (to 71). In a lit corridor a bright haze builds over ~20 frames and fades again. Neither is a single-frame flash like the earlier load-in one: they are the steam and dust sprites, close to the camera. The open question is whether they are thicker or brighter than on the console. If the 360's effects are emitted per frame (as the tracers' steps are), 80 fps would give ~2.7× the particles of 30. Next: the same spot at 30 fps (`-FrameRate 30 -Timer`, the console's pacing) against 80.
+**New: dark "rocks" and a haze where bullets hit walls.** First seen as a haze in the rooftop steam; the user then pinned it down: "if you shoot into the wall… and then walk past the holes… you'll see that weird haze effect again". In the recording the impact puffs are big, dark, nearly opaque shapes sticking out of the wall, still there over a second later, and walking into one puts a dark round haze over the screen. Not the texture pack (same without it), not the renderer (the draws' blend, depth and constants are what the game sets).
+
+**At 30 fps it's right:** "the old bug is gone… it definitely looks like the smoke sticks around for a little bit… walking through it… just looks like you're going through smoke now". So the game's own code breaks at high frame rates, like the tracers above 90.
+
+**Found and fixed on the way: animation time in whole milliseconds.** The engine steps model animations in whole milliseconds (LithTech's `trk_Update`): the frame time becomes `msDelta = (uint32)(seconds * 1000)` and each tracker steps `(uint32)(msDelta * rate)`. Both drop the fraction: every animation runs 1% slow at 30 fps and 4% at 80, and one slowed below 1/12 of normal speed freezes outright at 80 fps (12 ms x rate < 1). In the 360 code (matched against the SDK and LithTech sources; image dumped with `--fear_dump_image`): `trk_Update` is `sub_82191E40`, the model update computing `msDelta` `sub_822415D0` and `sub_821E4DA8`. Fix (`port-nx/src/anim_timing.*`, `fear_anim_exact_time`, on by default): three `[[entrypoint.midasm_hook]]`s keep the dropped fraction per model and per tracker and add it back, so animations advance by exactly the time that passed.
+
+**Not the rocks, though.** With it: "the smoke puff test looked a lot better, but still saw that same weird artifact": the dust itself now thins out as it should, but dark rock shapes still stick out of the wall at the impacts for seconds, and walking past them still fills the corridor with grey (brightness 80 -> 110). No animation hit a sub-millisecond step in that session (a log line counts them), and the 3D impact-puff model the PC data names (`Stone_bullethole_*` -> `impactmodel4`) isn't it either: a log in its update (`CLTBModelFX::Update`, `sub_82BA9098`, confirmed from the type's method table) stayed empty through impacts. Next suspect: `DebrisSystem`, one of the 18 effect types the 360 registers (table at `0x830F2850`), which spawns physics chunks at impacts; EchoPatch's high-FPS Havok fixes are about objects like these. `fear_debug_model_fx` logs every effect created, by type, to tell.
+
+Ruled out on the way: EchoPatch's PC ClientFX fixes ("Frozen FX effects", "Oversized particles": a 1 ms particle-update skip and batch markers with lifetime -1). The 360 build has the same marker code (`sub_82BB65E0`, `sub_82BB6E40`) but dropped the 1 ms skip, so its markers never reach the screen.
 
 ## Frame pacing: diagnosis
 - The log shows the swapchain in **presentation mode 0 = IMMEDIATE**: no vsync and no triple buffering. The SDK prefers it for latency (`vulkan_presenter.cpp`).
@@ -190,7 +198,7 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 4. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1 (the first session after the fix was too short to reach one).
 5. **Crash:** wait for a `crash-*.txt` from the new reporter.
 6. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
-7. **Frame pacing: done** (display-locked vblank, play-test 4). **Next: the haze in vent steam and dusty doorways** (play-test 4): compare 30 and 80 fps in the same spot, then the renderer's particle path.
+7. **Frame pacing: done** (display-locked vblank, play-test 4). **Next: the rocks and haze at bullet impacts above 30 fps** (play-test 4): which effect type, then its frame-rate dependence.
 8. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
 9. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
 10. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.

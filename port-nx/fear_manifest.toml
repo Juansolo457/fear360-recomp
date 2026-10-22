@@ -94,3 +94,124 @@ includes = []
 0x8292A150 = {}
 0x8292A168 = {}
 0x8292A180 = {}
+
+# F.E.A.R.: model animations step by the exact time that passed, not whole milliseconds a frame
+# (src/anim_timing.h). Each hook runs just before the fctidz that drops the fraction.
+[[entrypoint.midasm_hook]]
+name = "FearAnimFrameMs"       # msDelta = seconds * 1000, model animation update
+address = 0x82241604
+registers = ["r3", "f0"]
+
+[[entrypoint.midasm_hook]]
+name = "FearAnimFrameMs"       # the same, the other caller
+address = 0x821E4DDC
+registers = ["r3", "f0"]
+
+[[entrypoint.midasm_hook]]
+name = "FearAnimTrackerMs"     # msDelta * rate in trk_Update
+address = 0x82191E7C
+registers = ["r3", "f0"]
+
+# Debugging (src/fx_debug.cpp, fear_debug_model_fx): model effects' lifetime, color and scale,
+# just before CLTBModelFX::Update (sub_82BA9098) sets them on its object.
+[[entrypoint.midasm_hook]]
+name = "FearDebugModelFxColor"  # bctrl SetObjectColor(object, r, g, b, a)
+address = 0x82BA9310
+registers = ["r31", "r4", "f31", "f1", "f2", "f3", "f4"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugModelFxScale"  # bctrl SetObjectScale(object, scale)
+address = 0x82BA9378
+registers = ["r31", "f1", "f31"]
+
+# Debugging (src/fx_debug.cpp, fear_debug_model_fx): a ClientFX effect of each type created, at
+# the entry of the type's create function (the type table at 0x830F2850).
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedParticleSystem"
+address = 0x82B8ECB0
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedSprite"
+address = 0x82B8ED20
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedLTBModel"
+address = 0x82B8ED90
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedDynaLight"
+address = 0x82B8EE00
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedSound"
+address = 0x82B8EE70
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedCameraShake"
+address = 0x82B8EEE0
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedCreate"
+address = 0x82B8EF50
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedCreateRay"
+address = 0x82B8EF60
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedFlareSprite"
+address = 0x82B8EF70
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedLightning"
+address = 0x82B8EFE0
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedTracer"
+address = 0x82B8F050
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedLensFlare"
+address = 0x82B8F0C0
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedDebrisSystem"
+address = 0x82B8F130
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedVideoController"
+address = 0x82B8F1A0
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedDecal"
+address = 0x82B8F210
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedOverlay"
+address = 0x82B8F280
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedPolyTrail"
+address = 0x82B8F2F0
+registers = []
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugFxCreatedRumble"
+address = 0x82B8F360
+registers = []

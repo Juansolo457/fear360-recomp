@@ -4,23 +4,29 @@
 # then generates the game translation with that SDK's own rexglue tool, reconfigures, and
 # builds the game. Toolchain: .tools/ (LLVM 20, CMake, Ninja) inside a VS 2022 DevShell.
 #   pwsh -NoProfile -File tools/build-nx.ps1 [-Configuration RelWithDebInfo] [-Jobs 14]
+#   pwsh -NoProfile -File tools/build-nx.ps1 -Project port-files   # F.E.A.R. Files, same host code
 [CmdletBinding()]
 param(
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
-    [ValidateRange(1,64)][int]$Jobs = 14
+    [ValidateRange(1,64)][int]$Jobs = 14,
+    [ValidateSet('port-nx', 'port-files')][string]$Project = 'port-nx'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$port = Join-Path $root 'port-nx'
+$port = Join-Path $root $Project
 $sdk = Join-Path $root 'third_party\rexglue-sdk-nx'
 $tools = Join-Path $root '.tools'
 $cmake = "$tools/cmake/cmake-3.31.8-windows-x86_64/bin/cmake.exe"
 if (!(Test-Path $cmake)) { throw "Toolchain missing at $tools." }
 if (!(Test-Path "$sdk/src/graphics/plugin_main.cpp")) { throw "Patched SDK missing at $sdk." }
 $xex = Join-Path $port 'assets/default.xex'
-$expected = 'e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fca879aaea2792'
+$titles = @{
+    'port-nx' = @('e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fca879aaea2792', 'F.E.A.R.')
+    'port-files' = @('a51deed1dc0842af32a3a2b811674552f4ae5b6339ce8b9abe0eabe14ba6c7eb', 'F.E.A.R. Files')
+}
+$expected, $title = $titles[$Project]
 if ((Get-FileHash $xex -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
-    throw 'port-nx/assets/default.xex is not the supported F.E.A.R. executable.'
+    throw "$Project/assets/default.xex is not the supported $title executable."
 }
 
 $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -version '[17.0,18.0)' -property installationPath
@@ -47,15 +53,18 @@ Push-Location $port
 try {
     & $cmake @configureArgs
     if ($LASTEXITCODE) { throw 'CMake configure failed.' }
-    if (!(Test-Path (Join-Path $port 'generated/default/sources.cmake'))) {
-        # First time: the generated sources do not exist yet, so the configure above
-        # created no fear_recomp target. Generate, then configure again.
-        & $cmake --build --preset $preset --parallel $Jobs --target fear_codegen
-        if ($LASTEXITCODE) { throw 'Code generation failed.' }
+    # Generate (again) when the executable or fear_manifest.toml changed (the target's stamp and
+    # depfile make this a no-op otherwise): the default build does not regenerate on its own,
+    # so a manifest edit (a function hint, a [[midasm_hook]]) would not take effect.
+    $firstTime = !(Test-Path (Join-Path $port 'generated/default/sources.cmake'))
+    & $cmake --build --preset $preset --parallel $Jobs --target fear_codegen
+    if ($LASTEXITCODE) { throw 'Code generation failed.' }
+    if ($firstTime) {
+        # The configure above created no fear_recomp target without the generated sources.
         & $cmake @configureArgs
         if ($LASTEXITCODE) { throw 'CMake re-configure failed.' }
     }
     & $cmake --build --preset $preset --parallel $Jobs
     if ($LASTEXITCODE) { throw 'Build failed.' }
-    Write-Host "Built port-nx/out/build/$preset/fear.exe"
+    Write-Host "Built $Project/out/build/$preset/$(if ($Project -eq 'port-files') { 'fearfiles' } else { 'fear' }).exe"
 } finally { Pop-Location }

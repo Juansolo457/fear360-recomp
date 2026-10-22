@@ -56,8 +56,17 @@ pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot 
 Renderer diagnostics: `--nx_native_trace_output` logs unique resolve/swap states;
 `--nx_native_trace_frame_every N` logs everything one frame in N does (draws with targets,
 masks, scissor, window offset and sampled textures; clear rectangles and colours; mirrored
-clears; resolves). That trace found the tile-clear bug in one run. The 10-second report also
-breaks the render thread's frame down (`swap … (present …)`, `queue lock`, `vkQueueSubmit`).
+clears; resolves; each draw's blend control as `bc=`). That trace found the tile-clear bug in
+one run. With `--fear_texture_log_keys` the log also maps texture addresses to pack keys, which
+`private/texwork/x360.tsv` names (`FX\Impacts\…`). The 10-second report also breaks the render
+thread's frame down (`swap … (present …)`, `queue lock`, `vkQueueSubmit`) and gives a `pacing`
+line. `autoplay.ps1 -KeysUntil 80 -ThenKey E` gets into the game, then keeps firing.
+Game code: `--fear_dump_image private/image/default.bin` writes the decrypted executable image
+(0x82000000) at the first frame, for reading constants and code next to the generated
+`port-nx/generated/default/*.cpp` (each instruction is a comment there). The PC SDK 1.08 game
+code and the LithTech runtime source are public and match the 360 code closely (ClientFX,
+model animation); use them as a map, don't copy them in. A fix in the game code goes in as a
+`[[entrypoint.midasm_hook]]` in `fear_manifest.toml` (inside the entrypoint table: a top-level `[[midasm_hook]]` is ignored without a word) calling our own function (see `src/anim_timing.*`).
 Crashes write `port-nx/logs/crash-<time>.txt` + `.dmp` (`src/crash_report.cpp`): Windows Error
 Reporting is off on the user's PC, so this is the only record.
 - `third_party/rexglue-sdk-nx` (gitignored) = ReXGlue `c94f5eb` + fear-nx's
@@ -69,7 +78,8 @@ Reporting is off on the user's PC, so this is the only record.
 - `tools/build-nx.ps1` already handles: VS DevShell (vcvars64 breaks on a quoted PATH entry),
   `-march=x86-64-v2` (SDK uses SSSE3 intrinsics), compiler-rt builtins linked by path
   (`__udivti3` from fear-nx's clock patch; `--rtlib` is ignored by the MSVC-target driver),
-  `thirdparty/renderdoc` on the include path, codegen → reconfigure on the first build.
+  `thirdparty/renderdoc` on the include path, codegen → reconfigure on the first build, and
+  codegen again whenever `fear_manifest.toml` or the executable changes.
 - `port-nx/assets` is a junction to `port/assets` (3.8 GB extracted disc; gitignored).
 - `port/` is the stock-SDK build (nightly `bd833a2`, D3D12 only). Keep for comparison.
 - The smoke tool opens a window on the user's screen; the user has played in it by mistake.
@@ -88,6 +98,10 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/look_tuning.*`, `tools/gamedb.py` | right-stick options (`fear_look_ramp`, `fear_aim_softlock`): a patched copy of `Loki.gamedb` served through a VFS redirect; reader for the 360's "BDAG" game databases |
 | `port-nx/src/crash_report.*` | crash reports into `port-nx/logs/` |
 | `port-nx/src/display_vblank.*` | the display's vblank (DXGI) and the pacing plan; used by `native_system.cpp` |
+| `port-nx/src/anim_timing.*` | model animation time without the per-frame millisecond truncation; called from the generated code through `[[entrypoint.midasm_hook]]`s in `fear_manifest.toml` |
+| `port-nx/src/fx_debug.*` | `fear_debug_model_fx`: logs ClientFX effects created (by type) and model effects' lifetime, color and scale |
+| `port-files/` | *F.E.A.R. Files*: port-nx's host code with its own manifest and translation (`docs/FILES.md`) |
+| `tools/find_missed_functions.py`, `tools/find_anim_sites.py`, `tools/xexinfo.py` | function entries the analyser missed (from a dumped image); this engine's animation-time sites in a translation; XEX headers |
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
 | `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |

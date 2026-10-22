@@ -3426,7 +3426,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     REXLOG_INFO(
         "[native][frame] f={} d={} skip={} prim={} n={} src={} ps={} c=[{} {} {} {}] z={} "
         "cmask={:04X} zctl={}{}{} f{} s{} f{} p{} sc=({},{} {}x{}) vp=({},{} {}x{}) "
-        "woff=({},{}) vwo={} wod={} pitch={} msaa={} mode={} tex=[{}]",
+        "woff=({},{}) vwo={} wod={} pitch={} msaa={} mode={} bc={:08X} tex=[{}]",
         frame, trace_frame_draw++, int32_t(st.skip_reason), uint32_t(initiator.prim_type),
         guest_count, uint32_t(initiator.source_select), st.ps != nullptr,
         target_text(st.targets.color[0]), target_text(st.targets.color[1]),
@@ -3442,7 +3442,8 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
         uint32_t(r.Get<reg::PA_SC_WINDOW_SCISSOR_TL>().window_offset_disable),
         uint32_t(r.Get<reg::RB_SURFACE_INFO>().surface_pitch),
         uint32_t(r.Get<reg::RB_SURFACE_INFO>().msaa_samples),
-        uint32_t(r.Get<reg::RB_MODECONTROL>().edram_mode), textures_text);
+        uint32_t(r.Get<reg::RB_MODECONTROL>().edram_mode),
+        r[reg::RB_BLENDCONTROL::rt_register_indices[0]] & 0x1FFF1FFF, textures_text);
   }
   if (st.skip_reason != UINT32_MAX) {
     return skip(st.skip_reason);

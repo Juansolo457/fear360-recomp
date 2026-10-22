@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -24,6 +25,7 @@
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/registers.h>
 #include <rex/graphics/xenos.h>
+#include <rex/image_info.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
 #include <rex/memory/utils.h>
@@ -57,6 +59,14 @@ REXCVAR_DEFINE_BOOL(nx_pace_before_present, false, "F.E.A.R. NX",
 REXCVAR_DEFINE_UINT32(nx_min_frame_vblanks, 1, "F.E.A.R. NX",
                       "Native renderer: minimum 60 Hz vblanks between frames (1 = the game's "
                       "own pacing, 2 = an even 30 fps)");
+
+// F.E.A.R.: the game's executable image as loaded (decrypted, decompressed, 0x82000000 on), written
+// once, when the game sets its GPU interrupt callback (or at the first frame), for reading its
+// code and constants offline. Game data: write it to private/, never commit it.
+REXCVAR_DEFINE_STRING(fear_dump_image, "", "F.E.A.R.",
+                      "Write the loaded executable image (0x82000000 on) to this file once it runs");
+// The game's image layout, from the generated translation (fear_init.cpp).
+extern const rex::PPCImageInfo PPCImageConfig;
 
 #if defined(__SWITCH__)
 // Adapted from Project8Recomp (GPL-3.0), src/game/src/native/; generic Xenos GPU code.
@@ -241,6 +251,9 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     callback_data_.store(user_data, std::memory_order_release);
     callback_.store(callback, std::memory_order_release);
     REXLOG_INFO("[native] Interrupt callback {:08X} ({:08X})", callback, user_data);
+    // The executable is loaded and running by now; a game that fails before its first frame
+    // still gets its image written.
+    DumpImage();
   }
 
   void InitializeRingBuffer(uint32_t ptr, uint32_t size_log2) override {
@@ -1396,9 +1409,25 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     pacing_last_refresh_ = refresh;
   }
 
+  void DumpImage() {
+    const std::string path = REXCVAR_GET(fear_dump_image);
+    if (path.empty() || !memory_ || image_dumped_) return;
+    image_dumped_ = true;
+    const uint32_t kImageBase = PPCImageConfig.image_base, kImageSize = PPCImageConfig.image_size;
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (!file) {
+      REXLOG_WARN("[native] Could not write the image to {}", path);
+      return;
+    }
+    std::fwrite(memory_->TranslateVirtual<const uint8_t*>(kImageBase), 1, kImageSize, file);
+    std::fclose(file);
+    REXLOG_INFO("[native] Wrote the image ({:08X}, {} bytes) to {}", kImageBase, kImageSize, path);
+  }
+
   void Present() {
     RecordPacing();
     const uint64_t swap = ++swaps_;
+    if (swap == 1) DumpImage();  // once: already done if the interrupt callback came first
     g_swaps_presented.fetch_add(1, std::memory_order_relaxed);
     counter_.fetch_add(1, std::memory_order_relaxed);
 #if defined(__SWITCH__)
@@ -1615,6 +1644,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   // F.E.A.R.: the display's refreshes, which pace the frames with fear_vblank_source=display (the
   // timer's stand-ins after a fallback) and are otherwise counted for the report.
   bool display_pacing_ = false;
+  bool image_dumped_ = false;  // fear_dump_image
   std::atomic<bool> display_watched_{false};
   std::atomic<uint64_t> display_vblanks_{0};
   std::mutex display_mutex_;

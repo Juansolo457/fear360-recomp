@@ -1,0 +1,169 @@
+# F.E.A.R. Files (Xbox 360, title 565507E8, default.xex SHA-256
+# a51deed1dc0842af32a3a2b811674552f4ae5b6339ce8b9abe0eabe14ba6c7eb), ReXGlue 0.10.
+# The project keeps port-nx's name ("fear") so its CMake glue and host code apply unchanged.
+
+[project]
+name = "fear"
+sdk_version = "0.10.0"
+game_root = "assets"
+
+[entrypoint]
+file_path = "assets/default.xex"
+out_directory_path = "generated/default"
+includes = []
+
+# Tail-call targets the analyser misses (first translation, 2026-10-22, docs/FILES.md).
+[entrypoint.functions]
+0x827C6B58 = {}
+0x822A4D8C = {}
+0x823811B8 = {}
+0x827D8878 = {}
+0x82A04E70 = {}
+# Indirect-call targets found at run time ("Call to invalid or unregistered function").
+0x82511420 = {}
+# Method- and callback-table entries the analyser missed (tools/find_missed_functions.py over the
+# loaded image, 2026-10-22).
+0x821A4880 = {}
+0x821A989C = {}
+0x821A98AC = {}
+0x821AB3E8 = {}
+0x821ACAE8 = {}
+0x821AD0C0 = {}
+0x821AD7E0 = {}
+0x821AD958 = {}
+0x821BC5A8 = {}
+0x821BCBC0 = {}
+0x821BCFD8 = {}
+0x821BD958 = {}
+0x821C0578 = {}
+0x821C05E0 = {}
+0x821E9AD8 = {}
+0x8220DF80 = {}
+0x8220DF98 = {}
+0x8220DFC0 = {}
+0x822271E8 = {}
+0x82227C00 = {}
+0x8222AFA8 = {}
+0x8222B000 = {}
+0x8222B058 = {}
+0x8223D6A0 = {}
+0x82267978 = {}
+0x822679D0 = {}
+0x8226EE00 = {}
+0x8226EE28 = {}
+0x822943B0 = {}
+0x822A4D38 = {}
+0x824E49F0 = {}
+0x825598E0 = {}
+0x825F4788 = {}
+0x82876988 = {}
+0x828792C0 = {}
+0x8287982C = {}
+0x82880110 = {}
+0x8288CB54 = {}
+0x82891440 = {}
+0x82891598 = {}
+0x82891E94 = {}
+0x82891FD4 = {}
+0x8289287C = {}
+0x82893D88 = {}
+0x829BB698 = {}
+0x829FAC90 = {}
+0x829FB3B0 = {}
+0x829FB3B8 = {}
+0x829FC3A8 = {}
+0x829FC3B0 = {}
+0x82A05C90 = {}
+0x82A05CA0 = {}
+0x82A05CA8 = {}
+0x82A05CB8 = {}
+0x82A05CC8 = {}
+0x82A05D08 = {}
+0x82A05D10 = {}
+0x82A07210 = {}
+0x82A082A8 = {}
+0x82A08698 = {}
+0x82A086A0 = {}
+0x82A086B8 = {}
+0x82A086C0 = {}
+0x82A086C8 = {}
+0x82A086D0 = {}
+0x82A086D8 = {}
+0x82A086E8 = {}
+0x82A08700 = {}
+0x82A08710 = {}
+0x82A08718 = {}
+0x82A2A720 = {}
+0x82A2A768 = {}
+0x82A44680 = {}
+0x82A9E558 = {}
+0x82A9E578 = {}
+0x82AA0E18 = {}
+0x82AC8190 = {}
+0x82B983F0 = {}
+0x82BF0598 = {}
+0x82C4CAE0 = {}
+0x82C4CAF0 = {}
+0x82C4CB00 = {}
+0x82C4CF28 = {}
+0x82C4CF50 = {}
+0x82C4CF78 = {}
+0x82C4CFA0 = {}
+0x82C4D3D0 = {}
+0x82C4D3F0 = {}
+0x82C4D418 = {}
+0x82C58BC8 = {}
+0x82C91378 = {}
+0x82CB5A10 = {}
+0x82CDAC68 = {}
+0x82CDD5C4 = {}
+0x82CDD5FC = {}
+0x82CDDFE0 = {}
+0x82CDE140 = {}
+0x82CFCA34 = {}
+0x82DAE048 = {}
+0x82DAE098 = {}
+0x82DAE218 = {}
+0x82DE5DD8 = {}
+0x82F7A404 = {}
+0x8300820C = {}
+0x83019104 = {}
+
+# Callbacks whose addresses are built in code (lis/addi), in gaps the analyser never reached (the
+# same tool, second pass; 0x82920718 ended the first level load).
+0x822281A8 = {}
+0x82920718 = {}
+0x82920730 = {}
+0x82920748 = {}
+0x82920760 = {}
+0x82920778 = {}
+0x829CF338 = {}
+0x82BB79A8 = {}
+0x82BB79B8 = {}
+0x82C4D438 = {}
+0x82C4D448 = {}
+0x82C4D458 = {}
+0x82C4D468 = {}
+0x82C4D478 = {}
+0x82C4D488 = {}
+0x82C4D498 = {}
+0x82C4D4A8 = {}
+0x82C4D4B8 = {}
+0x82C4D4C8 = {}
+
+# Model animations step by the exact time that passed (port-nx/src/anim_timing.h); the
+# addresses are this build's, found by tools/find_anim_sites.py.
+[[entrypoint.midasm_hook]]
+name = "FearAnimFrameMs"       # msDelta = seconds * 1000, model animation update
+address = 0x8221F1EC
+registers = ["r3", "f0"]
+
+[[entrypoint.midasm_hook]]
+name = "FearAnimFrameMs"       # the same, the other caller
+address = 0x8227EED4
+registers = ["r3", "f0"]
+
+[[entrypoint.midasm_hook]]
+name = "FearAnimTrackerMs"     # msDelta * rate in trk_Update
+address = 0x821C6A3C
+registers = ["r3", "f0"]

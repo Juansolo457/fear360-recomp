@@ -7,12 +7,14 @@
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 #   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
+#   ... -Files -Extra '--nx_renderer native'      # F.E.A.R. Files (port-files, port-nx's host code)
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
     [ValidateSet(0,1,2,3,4,5)][int]$Anisotropic = 5,   # SDK enum: 5 = 16x
     [switch]$Windowed,
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
+    [switch]$Files,       # run F.E.A.R. Files (port-files: the same host code as port-nx)
     # The game presents every 2 vblanks: 30 fps at the console's 60 Hz. Above ~90 fps the 360's
     # effect code breaks (bullet tracers twitch and freeze mid-air).
     # port-nx follows the display's own vblank (port-nx/src/display_vblank.h): each frame is
@@ -41,10 +43,12 @@ param(
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
-$port = Join-Path $PSScriptRoot $(if ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
-$running = Get-Process -Name fear -ErrorAction SilentlyContinue
-if ($running) { throw "fear.exe is already running (pid $($running.Id -join ', ')). Quit it first." }
-$executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\fear.exe"
+if ($Files) { $Nx = $true }
+$port = Join-Path $PSScriptRoot $(if ($Files) { '..\port-files' } elseif ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
+$name = if ($Files) { 'fearfiles' } else { 'fear' }
+$running = Get-Process -Name $name -ErrorAction SilentlyContinue
+if ($running) { throw "$name.exe is already running (pid $($running.Id -join ', ')). Quit it first." }
+$executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\$name.exe"
 New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
 $log = Join-Path $port ('logs\run-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
 $arguments = @(

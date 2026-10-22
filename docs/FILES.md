@@ -20,7 +20,13 @@ Unlike F.E.A.R., there is no `Game/database` folder on the disc: the game databa
 ReXGlue 0.10 (our patched SDK), `rexglue init` + `codegen`, in a scratch project under `private/`:
 - The analyser stopped at **5 tail-call targets** outside any known function: `0x827C6B58`, `0x822A4D8C`, `0x823811B8`, `0x827D8878`, `0x82A04E70`. Added as `[entrypoint.functions]` entries (the same kind of hint fear-nx found for F.E.A.R.).
 - Then: **425 files, 226 MB of C++, 100,589 functions, no warnings**, 137 s. F.E.A.R. was 405 files and 215 MB.
-- Not built or run yet. F.E.A.R. needed fear-nx's 78 hints for indirect-call targets found at run time; Files will need its own, found the same way (the crash reporter names the address).
+- F.E.A.R. needed fear-nx's 78 hints for indirect-call targets found at run time; Files needs its own.
+
+## It runs (2026-10-22)
+`port-files/` builds `fearfiles.exe` from port-nx's host code (renderer, pacing, fixes) and its own `fear_manifest.toml` (`tools/build-nx.ps1 -Project port-files`, `tools/launch.ps1 -Files`). The disc data is extracted under the gitignored `private/`.
+- First run: "Call to invalid or unregistered function at 0x82511420" while loading. Rather than one rebuild per crash, `tools/find_missed_functions.py` reads the loaded image (`--fear_dump_image`, now written as soon as the game sets its GPU interrupt) and lists entries the analyser missed: **105 method- and callback-table entries** (words in data pointing into code at a function boundary, next to other code pointers; 2 that turned out to be labels inside functions were dropped when codegen reported branches across them) and **19 callbacks whose addresses are built in code** (`lis`/`addi`, in gaps no function covers).
+- With those: the *F.E.A.R. Files* title screen, the menus, and Extraction Point's Instant Action map *Subway*, played (and lost, and restarted) for 3 minutes by the test script with no crash, at an even 80 fps. The user took the controls during that run: "fear files got in clean, was able to play with the character in instant action… felt pretty good."
+- Not tried yet: the campaigns (Extraction Point, Perseus Mandate), 4K, the texture pack.
 
 ## What carries over from the F.E.A.R. port
 | | F.E.A.R. | Files |
@@ -50,7 +56,7 @@ The aim: open F.E.A.R., and reach *Extraction Point* and *Perseus Mandate* from 
 4. **Saves.** One user folder for both titles (title IDs `565507D9` and `565507E8`).
 
 ## Next steps
-1. **Build and boot Files:** a `port-files` target from the same host code with its own manifest (the 5 hints, the three animation hooks), then play-test to the main menu and into each campaign. Indirect-call targets the analyser missed show up as crash reports with an address.
+1. **Play-test Files:** both campaigns and the Instant Action maps, at 4K. Any further missed function shows up as a crash report with its address.
 2. Port the remaining F.E.A.R. fixes (stick tuning through the catalog), then the PC texture pack for both expansions.
 3. Go through EchoPatch's high-FPS list on both executables, one fix at a time, against the PC SDK and LithTech source.
 4. Add the menu hooks and the title switch; then the first-run disc check.

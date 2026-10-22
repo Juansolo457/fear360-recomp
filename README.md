@@ -26,14 +26,14 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Frame pacing locked to the display: 80 fps on 240 Hz, every frame shown for exactly 3 refreshes ("Frame rate's feeling really good") | the game's vblank follows the display's real one (DXGI, any GPU vendor), each frame held to the fewest refreshes that keep it at or under 90 fps (72 on 144 Hz, 60 on 60 Hz); above ~90 the 360's tracer code breaks; `-FrameRate <n>` sets that limit ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ No white flash as a new area comes into view | textures still streaming in are waited for instead of drawn as the empty texture (to confirm hands-on) |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
-| ⏳ A haze, and brief brightening, in vent steam and dusty doorways (Instant Action) | being checked: the 360's effects tuned at 30 fps, or the renderer ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
+| ⏳ Dark "rocks" and a haze at bullet impacts above 30 fps | being traced; on the way, model animations now run at exactly the time that passed (the engine dropped a fraction of a millisecond every frame) ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
 | ✅ Right stick without the 360's turn ramp (default) | "feels significantly better": the 360's stick tuning patched on the fly from your own data; `-LookRamp console` restores it ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
 | ✅ Saving with any controller (to confirm at a checkpoint) | every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ⏳ Settings and Quit entries in the main menu | not started |
-| ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | not started |
+| ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | boots and plays (Extraction Point's Instant Action, 3 minutes, no crash) on the same host code; the plan for one game with both expansions: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
 
 Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md).

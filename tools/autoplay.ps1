@@ -9,10 +9,14 @@ param(
     [ValidateRange(1,60)][int]$KeyEvery = 2,
     [string]$Key = 'Space',
     [ValidateRange(0,900)][int]$KeysUntil = 0,      # stop tapping after this many seconds (0 = never)
+    # From KeysUntil on, tap this key instead (E = right trigger: fire at whatever is in front).
+    [string]$ThenKey = '',
     [ValidateRange(1,120)][int]$CaptureEvery = 15,
     [string]$Tag = 'run',
     [string]$Extra = '',
     [switch]$Nx,
+    [switch]$Files,       # F.E.A.R. Files (port-files)
+    [switch]$FreshProfile,  # start from an empty test profile (the same path through the menus every run)
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
@@ -36,12 +40,16 @@ public static class AutoInput {
   }
 }
 '@
-$vk = @{ Space = 0x20; Return = 0x0D; Escape = 0x1B; Up = 0x26; Down = 0x28; Left = 0x25; Right = 0x27; W = 0x57; S = 0x53 }[$Key]
+$keys = @{ Space = 0x20; Return = 0x0D; Escape = 0x1B; Up = 0x26; Down = 0x28; Left = 0x25; Right = 0x27; W = 0x57; S = 0x53; E = 0x45 }
+$vk = $keys[$Key]
 if (!$vk) { throw "Unknown key $Key" }
+$thenVk = if ($ThenKey) { $keys[$ThenKey] } else { 0 }
+if ($ThenKey -and !$thenVk) { throw "Unknown key $ThenKey" }
 
-$port = Join-Path $PSScriptRoot $(if ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
-$executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\fear.exe"
+$port = Join-Path $PSScriptRoot $(if ($Files) { '..\port-files' } elseif ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
+$executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\$(if ($Files) { 'fearfiles' } else { 'fear' }).exe"
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+if ($FreshProfile) { Remove-Item -Recurse -Force (Join-Path $port 'user-smoke') -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
 $log = Join-Path $port "logs\autoplay-$Tag-$stamp.log"
 $captures = Join-Path $PSScriptRoot "..\private\captures\autoplay-$Tag-$stamp"
@@ -63,6 +71,8 @@ try {
         }
         if ($elapsed -ge $nextKey -and ($KeysUntil -eq 0 -or $elapsed -lt $KeysUntil)) {
             [AutoInput]::Tap([uint16]$vk); $nextKey += $KeyEvery
+        } elseif ($elapsed -ge $nextKey -and $thenVk) {
+            [AutoInput]::Tap([uint16]$thenVk); $nextKey += $KeyEvery
         }
         if ($elapsed -ge $nextCapture) {
             & (Join-Path $PSScriptRoot 'capture_window.ps1') -ProcessId $process.Id -Out $captures | Out-Null
