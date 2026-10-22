@@ -215,3 +215,10 @@ registers = []
 name = "FearDebugFxCreatedRumble"
 address = 0x82B8F360
 registers = []
+
+# Debugging (src/fx_debug.cpp): a decal's size as CDecalFX::ProjectDecal (sub_82B98960) computes
+# it: width and height times the random scale (ScaleMin..ScaleMax), and the projection depth.
+[[entrypoint.midasm_hook]]
+name = "FearDebugDecalSize"
+address = 0x82B98A40
+registers = ["r31", "f0", "f13", "f1", "f12"]

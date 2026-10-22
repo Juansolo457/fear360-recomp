@@ -1,5 +1,5 @@
-// F.E.A.R. 360 - a log of model effects (ClientFX CLTBModelFX, e.g. the bullet-impact puff
-// models), for finding why they look wrong. Called through [[entrypoint.midasm_hook]]s in
+// F.E.A.R. 360 - a log of ClientFX effects, for finding why one looks wrong: every effect created
+// (by type), model effects (CLTBModelFX) over their life, and decal sizes (CDecalFX). Called through [[entrypoint.midasm_hook]]s in
 // fear_manifest.toml just before the effect sets its object's color and scale
 // (sub_82BA9098, the 360's CLTBModelFX::Update), with the effect (r31), its object (r4), its
 // unit lifetime (f31: 0 at birth, 1 at the end) and the color (f1-f4) or scale (f1).
@@ -84,3 +84,14 @@ FEAR_FX_CREATED(Decal)
 FEAR_FX_CREATED(Overlay)
 FEAR_FX_CREATED(PolyTrail)
 FEAR_FX_CREATED(Rumble)
+
+// A decal's size as CDecalFX::ProjectDecal computes it, just after width and height are scaled.
+void FearDebugDecalSize(PPCRegister& r31, PPCRegister& f0, PPCRegister& f13, PPCRegister& f1,
+                        PPCRegister& f12) {
+  if (!REXCVAR_GET(fear_debug_model_fx)) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_lines >= 3000) return;
+  ++g_lines;
+  REXLOG_INFO("[fx] decal {:08X} width {:.2f} height {:.2f} (scale {:.3f}) depth {:.2f}", r31.u32,
+              f0.f64, f13.f64, f1.f64, f12.f64);
+}
