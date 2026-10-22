@@ -1,9 +1,9 @@
 # Progress Debrief
 
-_Last updated 2026-10-22._
+_Last updated 2026-10-22 (play-test 2)._
 
 ## Where we are
-F.E.A.R. for Xbox 360 is **playable natively on Windows at 4K and 120 fps**. Menus, the intro and menu videos, the campaign and Instant Action all work; game logic, gunplay and physics are the console's own and behave correctly. Hands-on after ~10 minutes: "guns responded very well… game logic is in there, the physics are in there". The resolution, AA and anisotropic filtering made "a huge difference. Very clean image".
+F.E.A.R. for Xbox 360 is **playable natively on Windows at 4K**, presenting at 60 fps for now (see play-test 2). Menus, the intro and menu videos, the campaign and Instant Action all work; game logic, gunplay and physics are the console's own and behave correctly. Hands-on after ~10 minutes: "guns responded very well… game logic is in there, the physics are in there". The resolution, AA and anisotropic filtering made "a huge difference. Very clean image".
 
 Since play-test 1 the **textures** are fixed (an optional pack built from the player's own PC copy replaces 4,710 of the 360's halved textures with the PC originals), and so are the **doubled chapter cards and half frames at cuts** (a renderer bug in how the game's tile clears were applied). What's left before it feels finished: a little **frame-pacing jank** and **Settings / Quit** in the main menu.
 
@@ -26,7 +26,7 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 - fear-nx's renderer drew at the game's 1280×720 only. Added **integer resolution scaling** (`nx_native_resolution_scale` 1–4): render targets, viewports, scissors, clears, resolve copies, resolve images and the swap are scaled; guest-space math is untouched. 3× = 3840×2160. The game's own MSAA and 16× AF apply on top.
 
 ### 5. Frame rate
-- The game presents every 2 virtual vblanks: 30 fps at 60 Hz, as on the console. Raising the virtual vblank rate (`video_mode_refresh_rate`) to 120/240 Hz gives **60/120 fps; both hands-on verified with correct game speed**. 120 is the launcher default and the ceiling of this trick (the SDK clamps at 240 Hz).
+- The game presents every 2 virtual vblanks: 30 fps at 60 Hz, as on the console. Raising the virtual vblank rate (`video_mode_refresh_rate`) to 120/240 Hz lets it run faster with **correct game speed** (hands-on verified). **Correction (2026-10-22):** the renderer's own counters show ~58 presents per second at both the 120 and 240 Hz settings; the "120" sessions were really 60. See play-test 2.
 
 ### 6. PC textures (2026-10-22)
 - An offline tool reads the 360 catalogue and the PC archives, matches textures by path, checks each pair with a quality gate (the PC texture scaled down must look like the 360 one), and writes a local pack. The renderer recognises each 360 texture by a hash of its data when it loads and streams the PC version in instead. Details: [TEXTURES.md](TEXTURES.md).
@@ -45,6 +45,21 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 | **"A little bit of jank", input occasionally behind** | Diagnosed below; `-Present` test option added |
 | Menu needs Settings and Quit | Not started; routes in [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) |
 | **Movement feels "bouncier" than PC: more sway/bob?** (user unsure) | See "Movement feel" below: compare the two versions' tuning data, and check frame-rate dependence |
+
+## Play-test 2 (2026-10-22, 3× scale, PC texture pack)
+"The game looks much better. Everything looks, feels pretty great." Then three things.
+
+**1. The game closed by itself** about 10 minutes in, ~10 s after a level load started. The log just stops; Windows recorded nothing because **Windows Error Reporting is disabled on this PC**. Added `src/crash_report.cpp`: an unhandled exception, the SDK's debug break (the game's `KeBugCheck` lands there), `abort()` and `exit()` (the game's `HalReturnToFirmware`) now leave `port-nx/logs/crash-<time>.txt` (exception, module+offset, symbolised stack; recompiled functions are named `sub_<360 address>`) and a small `.dmp`. Next crash will say where.
+
+**2. Frame rate isn't 120, and isn't even.** Counters added to the 10-second report (`per frame, renderer thread: swap … (present …)`, `all submissions: queue lock …`) show where the render thread's time goes:
+- GPU work is 2–5 ms per frame; texture work and GPU waits ~0. The thread spends **13–15 ms of every frame inside the present**.
+- First layer: the SDK created an (idle) achievement-notification dialog at launch on Windows. Any registered UI dialog makes the presenter paint from the UI thread, whose present held the Vulkan queue lock, so our submits waited on that lock 13–15 ms. Fixed in `patches/rexglue-sdk-nx/0002` (create it on the first achievement, as fear-nx already does on Switch): queue lock wait now 0.00 ms.
+- Second layer: with that gone, **`vkQueuePresentKHR` itself blocks 12–15 ms**, in immediate (no-vsync) mode on a 240 Hz display, with NVIDIA's Vulkan-over-DXGI layer on or off. Several 10-second windows show exactly 601 presents: a 60.1 fps limiter applied inside present, outside the game. RTSS/Afterburner is hooked (its OSD is in every capture) but its frame limit is off (`Limit=0`). Remaining suspects: an NVIDIA driver *Max Frame Rate* (global or per-app, or in the NVIDIA app), or an Afterburner/RTSS setting applied at runtime. To check on the user's side.
+- Why it feels uneven rather than just "60": the game is paced by a 240 Hz virtual vblank and wants a frame every 2 vblanks (8.3 ms), but each present then stalls ~15 ms. Frames reach the screen at a steady 60 while the game's timing and input sampling run on a different rhythm.
+
+**3. Right stick "seam":** "once you first start moving it… then you stop for a little bit… and move it again, you can feel almost like a slight delay." The 360 tuning has exactly the parts for that: in `Game/database/Loki.gamedb` **`GPadAimEdgeAccelTime` / `GPadAimEdgeMaxTurnRate`** (turn speed ramps up over time once the stick reaches its edge), **`TurningSoftLockYawFactor/PitchFactor`** and **`AimAssist.*`** (turning slows near targets); in the profile defaults `Game/ProfileDatabase/Defaults.gamedb` **`YawAccel` / `PitchAccel`**, **`Sensitivity`** and per-binding **`DeadZoneMin/Max`**. A ramp that restarts from zero each time the stick starts moving is the likeliest cause. Next: read their values (LithTech game-database format), check whether the game's own Controls menu exposes acceleration, and offer a "no ramp" option. It would be 360 tuning, not a recomp bug; the PC version (mouse) has no such ramp.
+
+**Also asked for:** saving needs a signed-in profile, and Xbox Live for 360 is gone (same as N3) → give the game a local profile it accepts. And the Options and Quit entries in the main menu.
 
 ## Movement feel: 360 vs PC
 The user's sense: walking feels a little more bouncy than on PC, maybe extra sway. Two ways it could be real, both checkable:
@@ -100,13 +115,16 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 - **For the movement feel specifically:** if it turns out to be console-era tuning or a 30 Hz assumption (head bob, camera smoothing, input filtering), the fix is a small hook on that function, measured against `-FrameRate 30` and against the PC version's values.
 
 ## Open items and next steps
-1. **Play-test 2 with the texture pack** (normal maps change the lighting most; watch for anything that looks wrong-coloured or too bumpy).
-2. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
-3. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
-4. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
-5. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
-6. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
-7. **Linux:** the renderer and SDK are Vulkan; port the build script.
+1. **60 fps cap from outside the game:** check the NVIDIA driver/app *Max Frame Rate* and Afterburner/RTSS; then measure again (the 10-second report shows `present` time per frame).
+2. **Right-stick ramp:** read `GPadAimEdgeAccelTime`, `YawAccel` & co., offer a setting without the ramp.
+3. **Saving without Xbox Live:** a local signed-in profile the game accepts.
+4. **Crash:** wait for a `crash-*.txt` from the new reporter.
+5. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
+6. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
+7. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
+8. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
+9. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
+10. **Linux:** the renderer and SDK are Vulkan; port the build script.
 
 The repository is public: <https://github.com/Juansolo457/fear360-recomp>.
 

@@ -1,0 +1,37 @@
+From b6f23d98f5621b01527bbad4f873c2e1273152c2 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 06:18:32 -0700
+Subject: [PATCH] Create the achievement notification dialog lazily on Windows
+ too
+
+fear-nx already does this on Switch: a dialog registers itself as a UI
+drawer for its whole life, and with any UI drawer registered the presenter
+paints from the UI thread. On Windows the idle dialog kept the UI thread
+presenting, its present held the Vulkan queue lock for most of each frame,
+and the guest output thread waited on that lock (13-15 ms per frame in
+F.E.A.R.).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/ui/rex_app.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index e881af6..b7f4670 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -517,7 +517,10 @@ void ReXApp::LaunchModule() {
+     // Register the achievement notification callback now that the runtime and
+     // KernelState are guaranteed to exist. Done here (not OnCreateDialogs)
+     // because KernelState is null during SetupPresentation.
+-#if REX_PLATFORM_SWITCH
++    // On every platform, not only Switch: on Windows the idle dialog kept painting on the UI
++    // thread, whose present held the Vulkan queue lock most of each frame, and the guest
++    // output thread waited on that lock (F.E.A.R. held near 60 fps at a 240 Hz vblank).
++#if 1
+     // Created on the first achievement, not here. A dialog registers itself as a
+     // UI drawer for its whole life, and with any UI drawer registered the presenter
+     // paints from the UI thread and coalesces requests, discarding frames whose GPU
+-- 
+2.53.0.windows.1
+

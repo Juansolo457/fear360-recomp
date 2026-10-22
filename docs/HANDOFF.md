@@ -65,10 +65,14 @@ pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot 
 Renderer diagnostics: `--nx_native_trace_output` logs unique resolve/swap states;
 `--nx_native_trace_frame_every N` logs everything one frame in N does (draws with targets,
 masks, scissor, window offset and sampled textures; clear rectangles and colours; mirrored
-clears; resolves). That trace found the tile-clear bug in one run.
+clears; resolves). That trace found the tile-clear bug in one run. The 10-second report also
+breaks the render thread's frame down (`swap … (present …)`, `queue lock`, `vkQueueSubmit`).
+Crashes write `port-nx/logs/crash-<time>.txt` + `.dmp` (`src/crash_report.cpp`): Windows Error
+Reporting is off on the user's PC, so this is the only record.
 - `third_party/rexglue-sdk-nx` (gitignored) = ReXGlue `c94f5eb` + fear-nx's
   `patches/native-vulkan/rexglue-sdk.patch` (tree `c7fb3c0f…`, verified) + our
-  `patches/rexglue-sdk-nx/0001` (`REXGLUE_GPU_XENOS_STATIC`). Rebuild it with
+  `patches/rexglue-sdk-nx/0001` (`REXGLUE_GPU_XENOS_STATIC`) and `0002` (achievement dialog
+  created lazily, so no UI-thread painting holds the queue lock). Rebuild it with
   `git clone --no-checkout rexglue-sdk; checkout c94f5eb; git apply --index <fear-nx patch>;
   git am patches/rexglue-sdk-nx/*; git submodule update --init --recursive`.
 - `tools/build-nx.ps1` already handles: VS DevShell (vcvars64 breaks on a quoted PATH entry),

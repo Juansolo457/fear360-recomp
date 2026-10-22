@@ -627,6 +627,23 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       REXLOG_INFO("[native] per frame: {:.1f} waits for the game, {:.1f} ms waiting",
                   double(waits_ - reported_waits_) / double(frames),
                   double(wait_ns_ - reported_wait_ns_) / 1e6 / double(frames));
+      auto ms = [&](uint64_t now, uint64_t before) {
+        return double(now - before) / 1e6 / double(frames);
+      };
+      REXLOG_INFO("[native] per frame, all submissions: queue lock {:.2f} ms, vkQueueSubmit {:.2f} ms",
+                  ms(s.queue_lock_ns, reported_render_.queue_lock_ns),
+                  ms(s.queue_submit_ns, reported_render_.queue_submit_ns));
+      REXLOG_INFO("[native] per frame, renderer thread: swap {:.2f} ms (present {:.2f}: our "
+                  "refresh {:.2f}, its submit {:.2f}), GPU fence waits {:.2f}, recorder drains "
+                  "{:.2f}, texture uploads {:.2f}, texture lookups {:.2f}",
+                  ms(s.swap_ns, reported_render_.swap_ns),
+                  ms(s.present_ns, reported_render_.present_ns),
+                  ms(s.refresh_ns, reported_render_.refresh_ns),
+                  ms(s.refresh_submit_ns, reported_render_.refresh_submit_ns),
+                  ms(s.total_fence_wait_ns, reported_render_.total_fence_wait_ns),
+                  ms(s.total_drain_wait_ns, reported_render_.total_drain_wait_ns),
+                  ms(s.total_upload_wait_ns, reported_render_.total_upload_wait_ns),
+                  ms(s.total_texture_ns, reported_render_.total_texture_ns));
       reported_waits_ = waits_;
     slow_frames_logged_ = 0;
       REXLOG_INFO(

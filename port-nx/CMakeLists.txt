@@ -32,6 +32,7 @@ set(FEAR_NATIVE_SOURCES
 set(FEAR_SOURCES
     src/main.cpp
     src/texture_pack.cpp
+    src/crash_report.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 
@@ -43,6 +44,9 @@ rexglue_setup_target(fear)
 # texture conversion, register file, ...), which the DLL build keeps private.
 # Link the static plugin whole so its cvars and rex_gpu_create survive too.
 target_link_libraries(fear PRIVATE rexgpu-xenos xxHash::xxhash)
+if(WIN32)
+    target_link_libraries(fear PRIVATE dbghelp)   # crash reports (src/crash_report.cpp)
+endif()
 target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
 set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
 target_include_directories(fear PRIVATE

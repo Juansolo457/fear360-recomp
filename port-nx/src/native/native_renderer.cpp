@@ -1208,10 +1208,14 @@ struct Renderer::Impl {
     submit.commandBufferCount = 2;
     submit.pCommandBuffers = buffers;
     {
+      const uint64_t lock_start = NowNs();
       auto queue = device->AcquireQueue(device->queue_family_graphics_compute(), 0);
+      const uint64_t submit_start = NowNs();
       if (dfn().vkQueueSubmit(queue.queue(), 1, &submit, s.fence) != VK_SUCCESS) {
         REXLOG_ERROR("[native] vkQueueSubmit failed");
       }
+      stats().queue_lock_ns += submit_start - lock_start;
+      stats().queue_submit_ns += NowNs() - submit_start;
     }
     s.pending = true;
     recording = false;
@@ -5362,11 +5366,13 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
             resolve_rect.allocation_height);
       }
     }
+    const uint64_t present_start = NowNs();
     presenter->RefreshGuestOutput(
         width, height, display_width, display_height,
         [&](rex::ui::Presenter::GuestOutputRefreshContext& context) -> bool {
           auto& vulkan_context = static_cast<
               rex::ui::vulkan::VulkanPresenter::VulkanGuestOutputRefreshContext&>(context);
+          const uint64_t refresh_start = NowNs();
           BeginRecording();
           EndPass();
           uint32_t slot = uint32_t(submission_number % kSubmissionSlots);
@@ -5425,10 +5431,15 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
               nullptr, 1, &barrier);
           // Submitted before returning, so the presenter's own work comes
           // after it on the queue.
+          const uint64_t submit_start = NowNs();
           Submit();
+          const uint64_t refresh_end = NowNs();
+          stats().refresh_submit_ns += refresh_end - submit_start;
+          stats().refresh_ns += refresh_end - refresh_start;
           context.SetIs8bpc(true);
           return true;
         });
+    stats().present_ns += NowNs() - present_start;
   }
   Submit();
   // Frame boundary.
@@ -5462,6 +5473,10 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   stats().textures_pending = textures.stats().pending;
   stats().textures_replaced = textures.stats().replaced;
   stats().frame_upload_wait_ns = frame_upload_wait_ns;
+  stats().total_upload_wait_ns += frame_upload_wait_ns;
+  stats().total_fence_wait_ns += frame_fence_wait_ns;
+  stats().total_drain_wait_ns += frame_drain_wait_ns;
+  stats().total_texture_ns += frame_texture_ns;
   stats().frame_fence_wait_ns = frame_fence_wait_ns;
   stats().frame_drain_wait_ns = frame_drain_wait_ns;
   stats().frame_texture_ns = frame_texture_ns;
@@ -5724,6 +5739,7 @@ void Renderer::Resolve() {
 void Renderer::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, uint32_t width,
                     uint32_t height) {
   CpuTimer timer(stats_.cpu_ns);
+  CpuTimer swap_timer(stats_.swap_ns);
   impl_->Swap(presenter, frontbuffer, width, height);
 }
 

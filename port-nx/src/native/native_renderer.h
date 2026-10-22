@@ -87,6 +87,21 @@ struct RendererStats {
   uint64_t frame_draws = 0;
   // The part of frame_fence_wait_ns spent waiting for stream space.
   uint64_t frame_stream_wait_ns = 0;
+  // F.E.A.R.: running totals of the above, and of the time in Swap and in the presenter's
+  // hand-off within it (painting and presenting the window on this thread), for the
+  // per-frame report.
+  uint64_t total_upload_wait_ns = 0;
+  uint64_t total_fence_wait_ns = 0;
+  uint64_t total_drain_wait_ns = 0;
+  uint64_t total_texture_ns = 0;
+  uint64_t swap_ns = 0;
+  uint64_t present_ns = 0;
+  // Within present_ns: our refresher callback, and its queue submission.
+  uint64_t refresh_ns = 0;
+  uint64_t refresh_submit_ns = 0;
+  // All submissions: waiting for the queue lock, and in vkQueueSubmit.
+  uint64_t queue_lock_ns = 0;
+  uint64_t queue_submit_ns = 0;
   // Draws skipped, by reason (see SkipReason in the .cpp).
   uint64_t skipped_by_reason[16] = {};
 };

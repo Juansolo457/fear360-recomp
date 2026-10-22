@@ -12,6 +12,7 @@
 #include <rex/rex_app.h>
 #include <rex/system/gpu_plugin.h>
 
+#include "crash_report.h"
 #include "native/native_system.h"
 
 REXCVAR_DEFINE_STRING(fear_gpu_backend, "any", "F.E.A.R.",
@@ -37,6 +38,8 @@ class FearApp : public rex::ReXApp {
 
  protected:
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    fear::crash_report::InstallCrashReporter();
+
     // Either way the DLL loader must not run: there is no plugin file.
     config.gpu_plugin.clear();
 
