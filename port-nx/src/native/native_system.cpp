@@ -602,6 +602,11 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           s.textures_streamed - reported_render_.textures_streamed,
           s.textures_replaced - reported_render_.textures_replaced,
           s.textures_pending - reported_render_.textures_pending);
+      REXLOG_INFO("[native] shader translations and pipelines: {} waited for ({:.1f} ms), {} "
+                  "draws skipped (over the frame's wait budget)",
+                  s.compile_waits - reported_render_.compile_waits,
+                  double(s.compile_wait_ns - reported_render_.compile_wait_ns) / 1e6,
+                  s.compile_skips - reported_render_.compile_skips);
       REXLOG_INFO("[native] streaming textures: {} waited for ({:.1f} ms), {} drawn without "
                   "(over the frame's wait budget)",
                   s.textures_stream_waits - reported_render_.textures_stream_waits,

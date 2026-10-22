@@ -95,6 +95,18 @@ REXCVAR_DEFINE_BOOL(nx_native_async_pipelines, true, "F.E.A.R. NX",
                     "draws that need them until they are ready, instead of stalling the frame");
 REXCVAR_DEFINE_BOOL(nx_native_trace_output, false, "F.E.A.R. NX",
                     "Log bounded unique native renderer swap, viewport, and Xenos resolve state for display diagnostics");
+// F.E.A.R.: a draw whose shader is still being translated, or whose pipeline is still being
+// compiled, waits for it instead of being skipped. Skipping (fear-nx's choice on Switch, where a
+// compile stalls a frame for long) left objects and effects missing for a few frames the first
+// time they were seen: 2,500-2,800 draws per session. The wait is capped per frame.
+REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 0, "F.E.A.R.",
+                      "Longest a frame waits in total for shader translations and pipelines its "
+                      "draws need (0 = skip those draws until ready, fear-nx's Switch behaviour)");
+REXCVAR_DEFINE_BOOL(fear_alias_clears, true, "F.E.A.R.",
+                    "Apply clears drawn through an aliased layout of EDRAM to every image of "
+                    "that EDRAM (MirrorAliasClear); off = only the image drawn to");
+REXCVAR_DEFINE_BOOL(fear_alias_clears_depth, true, "F.E.A.R.",
+                    "MirrorAliasClear also mirrors depth/stencil clears");
 // F.E.A.R.: a full log of sampled frames, to see what a frame does to EDRAM.
 REXCVAR_DEFINE_UINT32(nx_native_trace_frame_every, 0, "F.E.A.R. NX",
                       "Log every draw and resolve of one frame in this many (0 = off)");
@@ -412,6 +424,28 @@ struct Renderer::Impl {
     return every && frame % every == 0;
   }
   uint32_t trace_frame_draw = 0;
+  // fear_shader_wait_ms: time this frame has waited for translations and pipelines.
+  uint64_t frame_compile_wait_ns = 0;
+  // Waits until ready() holds, within what is left of the frame's fear_shader_wait_ms.
+  template <typename Ready>
+  bool WaitForCompile(Ready ready) {
+    if (ready()) return true;
+    const uint64_t budget = uint64_t(REXCVAR_GET(fear_shader_wait_ms)) * 1000000;
+    const uint64_t start = NowNs();
+    bool done = true;
+    while (!ready()) {
+      if (frame_compile_wait_ns + (NowNs() - start) >= budget) {
+        done = false;
+        break;
+      }
+      std::this_thread::yield();
+    }
+    const uint64_t waited = NowNs() - start;
+    frame_compile_wait_ns += waited;
+    stats().compile_wait_ns += waited;
+    ++(done ? stats().compile_waits : stats().compile_skips);
+    return done;
+  }
   // Whether render targets get the game's sample count (nx_native_msaa).
   // The targets are sized in guest pixels whatever the sample count, so one
   // sample changes only the images, the pipelines and the resolves.
@@ -1211,8 +1245,9 @@ struct Renderer::Impl {
       const uint64_t lock_start = NowNs();
       auto queue = device->AcquireQueue(device->queue_family_graphics_compute(), 0);
       const uint64_t submit_start = NowNs();
-      if (dfn().vkQueueSubmit(queue.queue(), 1, &submit, s.fence) != VK_SUCCESS) {
-        REXLOG_ERROR("[native] vkQueueSubmit failed");
+      if (const VkResult result = dfn().vkQueueSubmit(queue.queue(), 1, &submit, s.fence);
+          result != VK_SUCCESS) {
+        REXLOG_ERROR("[native] vkQueueSubmit failed: VkResult {}", int(result));
       }
       stats().queue_lock_ns += submit_start - lock_start;
       stats().queue_submit_ns += NowNs() - submit_start;
@@ -1368,6 +1403,7 @@ struct Renderer::Impl {
                                           uint32_t samp_ps);
   bool EnsureTranslated(VulkanShader::VulkanTranslation* translation, bool* pending_out);
   void DrainTranslations();
+  bool WaitForTranslation(VulkanShader::VulkanTranslation* translation);
   void TranslationThread();
   std::unique_ptr<SpirvShaderTranslator> worker_translator;
   // 1 = being translated on the worker, 2 = done.
@@ -2265,14 +2301,23 @@ bool Renderer::Impl::EnsureTranslated(VulkanShader::VulkanTranslation* translati
         translation_jobs.push_back(translation);
       }
       translation_cv.notify_one();
-      *pending_out = true;
-      return false;
+      if (!WaitForTranslation(translation)) {
+        *pending_out = true;
+        return false;
+      }
     }
-  } else if (state->second == 1) {
+  } else if (state->second == 1 && !WaitForTranslation(translation)) {
     *pending_out = true;
     return false;
   }
   return translation->is_valid() && translation->shader_module() != VK_NULL_HANDLE;
+}
+
+bool Renderer::Impl::WaitForTranslation(VulkanShader::VulkanTranslation* translation) {
+  return WaitForCompile([&] {
+    DrainTranslations();
+    return translation_state[translation] == 2;
+  });
 }
 
 void Renderer::Impl::DrainTranslations() {
@@ -2328,7 +2373,12 @@ VkPipeline Renderer::Impl::GetPipeline(const PipelineKey& key,
   if (it != pipelines.end()) {
     return it->second;
   }
+  auto compiled = [&] {
+    DrainCompletedPipelines();
+    return pipelines.count(hash) != 0;
+  };
   if (pending_pipelines.count(hash)) {
+    if (WaitForCompile(compiled)) return pipelines[hash];
     *pending_out = true;
     return VK_NULL_HANDLE;
   }
@@ -2348,6 +2398,7 @@ VkPipeline Renderer::Impl::GetPipeline(const PipelineKey& key,
       pipeline_jobs.push_back(job);
     }
     pipeline_cv.notify_one();
+    if (WaitForCompile(compiled)) return pipelines[hash];
     *pending_out = true;
     return VK_NULL_HANDLE;
   }
@@ -4120,6 +4171,7 @@ bool Renderer::Impl::InterpretClearColor(float color[4]) {
 // stencil-only clears. Only clears with one constant color and a flat depth, written whole
 // (no blending, full masks), are mirrored.
 void Renderer::Impl::MirrorAliasClear() {
+  if (!REXCVAR_GET(fear_alias_clears)) return;
   const DrawSetup& st = setup;
   const RegisterFile& r = *regs;
   const auto initiator = r.Get<reg::VGT_DRAW_INITIATOR>();
@@ -4292,7 +4344,7 @@ void Renderer::Impl::MirrorAliasClear() {
     }
   };
   if (color) mirror(color, false);
-  if (depth_target) mirror(depth_target, true);
+  if (depth_target && REXCVAR_GET(fear_alias_clears_depth)) mirror(depth_target, true);
 }
 
 
@@ -5488,6 +5540,7 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   frame_stream_wait_ns = 0;
   frame_upload_wait_ns = frame_fence_wait_ns = frame_drain_wait_ns = frame_texture_ns = 0;
   frame_draw_count = 0;
+  frame_compile_wait_ns = 0;
   if (TraceFrame()) {
     REXLOG_INFO("[native][frame] f={} swap frontbuffer={:08X}", frame, frontbuffer);
   }

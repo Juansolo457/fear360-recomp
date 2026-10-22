@@ -20,5 +20,9 @@ Local changes (see `git log -p -- port-nx/src/native`):
   texture still streaming in (`fear_texture_stream_wait_ms` per frame) instead of using the
   empty texture, which flashed; 6 stream workers instead of 2 off Switch.
 - Render-thread timing in the 10-second report (swap, present, queue lock, streaming waits).
+- `fear_shader_wait_ms` (default 0, off): draws wait for their shader translation/pipeline
+  within a per-frame budget instead of being skipped. Off by default: at 3x it loses the
+  device on the first frames (see PROGRESS.md). `fear_alias_clears`/`_depth`: kill switches
+  for MirrorAliasClear. Submit failures now log their VkResult.
 
 The `*_test.cpp` files are kept for reference but are not built here.
