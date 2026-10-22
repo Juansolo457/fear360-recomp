@@ -6,6 +6,8 @@
 // fear_debug_model_fx (off by default) turns the log on: one line per effect each time its
 // unit lifetime crosses a tenth, at most 3000 lines.
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <mutex>
@@ -17,6 +19,10 @@
 
 REXCVAR_DEFINE_BOOL(fear_debug_model_fx, false, "F.E.A.R.",
                     "Log model effects' lifetime, color and scale (debugging)");
+// See FearDebugFireKey below.
+REXCVAR_DEFINE_BOOL(fear_debug_weapon_fire, false, "F.E.A.R.",
+                    "Log weapon fire keys (shot or dropped) and impact effects; with "
+                    "fear_debug_model_fx, only the effects created around a shot (debugging)");
 
 namespace {
 
@@ -28,6 +34,20 @@ struct Effect {
 std::mutex g_mutex;
 std::unordered_map<uint32_t, Effect> g_effects;
 uint32_t g_lines = 0;
+uint32_t g_fire_lines = 0;  // fear_debug_weapon_fire's own budget
+std::atomic<int64_t> g_last_fire{0};
+
+int64_t NowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+// With fear_debug_weapon_fire, effects are logged only within 300 ms of a fire key, so a level's
+// own effects don't use up the budget before the test.
+bool AroundShot() {
+  return !REXCVAR_GET(fear_debug_weapon_fire) || NowMs() - g_last_fire.load() < 300;
+}
 
 }  // namespace
 
@@ -40,7 +60,7 @@ void FearDebugModelFxScale(PPCRegister& r31, PPCRegister& f1, PPCRegister& f31) 
 
 void FearDebugModelFxColor(PPCRegister& r31, PPCRegister& r4, PPCRegister& f31, PPCRegister& f1,
                            PPCRegister& f2, PPCRegister& f3, PPCRegister& f4) {
-  if (!REXCVAR_GET(fear_debug_model_fx)) return;
+  if (!REXCVAR_GET(fear_debug_model_fx) || !AroundShot()) return;
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_lines >= 3000) return;
   if (g_effects.size() > 4096) g_effects.clear();
@@ -57,7 +77,7 @@ void FearDebugModelFxColor(PPCRegister& r31, PPCRegister& r4, PPCRegister& f31, 
 // A ClientFX effect created, by type (the hooks at each type's create function).
 namespace {
 void Created(const char* type) {
-  if (!REXCVAR_GET(fear_debug_model_fx)) return;
+  if (!REXCVAR_GET(fear_debug_model_fx) || !AroundShot()) return;
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_lines >= 3000) return;
   ++g_lines;
@@ -88,10 +108,34 @@ FEAR_FX_CREATED(Rumble)
 // A decal's size as CDecalFX::ProjectDecal computes it, just after width and height are scaled.
 void FearDebugDecalSize(PPCRegister& r31, PPCRegister& f0, PPCRegister& f13, PPCRegister& f1,
                         PPCRegister& f12) {
-  if (!REXCVAR_GET(fear_debug_model_fx)) return;
+  if (!REXCVAR_GET(fear_debug_model_fx) || !AroundShot()) return;
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_lines >= 3000) return;
   ++g_lines;
   REXLOG_INFO("[fx] decal {:08X} width {:.2f} height {:.2f} (scale {:.3f}) depth {:.2f}", r31.u32,
               f0.f64, f13.f64, f1.f64, f12.f64);
+}
+
+// Weapon fire, for the pistol's missing impacts (docs/PROGRESS.md, open item 12): a fire key from
+// the player's animation becomes a shot only if the weapon is still firing (state 2) when the key
+// arrives (CClientWeapon::HandleFireKey, sub_82429E68: the check at 0x8242A034), and every impact
+// a shot makes goes through CWeaponFX::CreateObject (sub_82428A68). fear_debug_weapon_fire logs
+// both, so a session shows whether a pistol shot was dropped, hit nothing, or made an impact whose
+// effects didn't show (fear_debug_model_fx logs those).
+void FearDebugFireKey(PPCRegister& r29, PPCRegister& r3) {
+  if (!REXCVAR_GET(fear_debug_weapon_fire)) return;
+  g_last_fire = NowMs();
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_fire_lines >= 20000) return;
+  ++g_fire_lines;
+  REXLOG_INFO("[fire] key: weapon {:08X} state {} ({})", r29.u32, r3.s32,
+              r3.s32 == 2 ? "shot" : "dropped");
+}
+
+void FearDebugWeaponImpact(PPCRegister& r3) {
+  if (!REXCVAR_GET(fear_debug_weapon_fire)) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_fire_lines >= 20000) return;
+  ++g_fire_lines;
+  REXLOG_INFO("[fire] impact effects {:08X}", r3.u32);
 }

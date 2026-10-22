@@ -242,3 +242,16 @@ name = "FearMenuCommand"
 address = 0x823FF7E8
 registers = ["r3", "r4"]
 return_on_true = true
+
+# Debugging (src/fx_debug.cpp, fear_debug_weapon_fire): CClientWeapon::HandleFireKey's check that
+# the weapon is still firing (state 2) before a fire key becomes a shot, and each impact's
+# CWeaponFX::CreateObject. For the pistol's missing impacts.
+[[entrypoint.midasm_hook]]
+name = "FearDebugFireKey"
+address = 0x8242A034
+registers = ["r29", "r3"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugWeaponImpact"
+address = 0x82428A68
+registers = ["r3"]
