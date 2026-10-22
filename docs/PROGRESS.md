@@ -139,6 +139,10 @@ The timer did well in its 30 s too: its drift shows up rarely, as a frame a refr
 
 **The haze** (a flat grey wash over the screen while passing impacts, with a dark round soft edge crossing it) looks like the impact smoke's soft cloud particles seen from inside. It hasn't come back in the user's two runs since (10:30, 11:03: "no haze effect"). Logs on the way: the 3D puff models (`LTBModel`) didn't spawn at all in those Rooftop runs (the effect-creation log: 1,524 effects, by type); where they do spawn (25 in a campaign run) their life advances smoothly at 80 fps. Every ClientFX update read so far (particles, models, decals, overlays) is time-based. `fear_debug_model_fx` stays in (off by default) for the next sighting.
 
+**The user's verdict on impacts** (after the runs above): "with all the guns except the pistol, it felt like the decals and the smoke was popping up exactly like the PC version. The pistol sometimes looked like it would miss some of the traces… the bullets wouldn't produce the right kind of smoke effects and debris effects. Pretty good overall." Open: the pistol (item 12 below).
+
+**Later, to get the feel exactly right (the user's plan):** the recomp and the PC version side by side at the same point in the game, doing the same actions, at the same frame rate, the PC version with EchoPatch (its high-FPS fixes make the comparison fair). The user records it; we go through the differences (item 13 below).
+
 Ruled out on the way: EchoPatch's PC ClientFX fixes ("Frozen FX effects", "Oversized particles": a 1 ms particle-update skip and batch markers with lifetime -1). The 360 build has the same marker code (`sub_82BB65E0`, `sub_82BB6E40`) but dropped the 1 ms skip, so its markers never reach the screen.
 
 ## Frame pacing: diagnosis
@@ -201,10 +205,12 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 5. **Crash:** wait for a `crash-*.txt` from the new reporter.
 6. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
 7. **Frame pacing: done** (display-locked vblank, play-test 4). The rocks at bullet impacts are the game's own bullet-hole decals (same sizes at 30 fps); the haze hasn't come back since play-test 4 (watching, with `fear_debug_model_fx`).
-8. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
+8. **Main menu Settings and Quit: next** (the user's order: this, then the *F.E.A.R. Files* campaigns). See [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
 9. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
-10. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
+10. ***F.E.A.R. Files*: runs** (Instant Action played; [FILES.md](FILES.md)). **Next after the menu:** both campaigns, Extraction Point and Perseus Mandate, at 4K with the texture pack.
 11. **Linux:** the renderer and SDK are Vulkan; port the build script.
+12. **Pistol impacts:** "the pistol sometimes looked like it would miss some of the traces… wouldn't produce the right kind of smoke effects and debris effects" (every other gun matches the PC). Check its tracer and impact effects (`fear_debug_model_fx` logs every effect created) against an SMG burst on the same wall.
+13. **Side-by-side with the PC version** (the user's plan, for later): the same spot, the same actions, the same frame rate, PC with EchoPatch; the user records both, we list the differences in feel and effects.
 
 The repository is public: <https://github.com/Juansolo457/fear360-recomp>.
 
