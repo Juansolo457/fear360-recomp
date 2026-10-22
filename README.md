@@ -28,7 +28,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
 | ⏳ Chapter cards drawn off-centre and doubled | likely our scaling; needs a 1× comparison |
 | ⏳ Brief flicker at cutscene ↔ gameplay transitions | needs a 1× / 30 fps comparison |
-| ⏳ Low-res textures (360 memory limits) | **PC textures can replace them: 97% of names match** |
+| ⏳ Low-res textures (360 memory limits) | **84% have a 4× larger PC original under the same name**; plan in [docs/TEXTURES.md](docs/TEXTURES.md) |
 | ⏳ Settings and Quit entries in the main menu | not started |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | not started |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
@@ -52,7 +52,7 @@ Put your own `default.xex` (title `565507D9`, SHA-256 `e7fccdf6…2792`) and `Ga
 port-nx/          the working build: app glue (src/), fear-nx renderer + our changes (src/native/), manifest
 port/             stock-SDK build, kept for A/B (menus corrupt)
 patches/          our ReXGlue SDK patch (static GPU plugin)
-tools/            build, launch, smoke test, window capture, ISO extractor, texture-name survey
+tools/            build, launch, smoke test, window capture, ISO extractor, texture surveys
 docs/             progress, handoff, findings, plan, ripping
 ```
 

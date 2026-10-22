@@ -46,9 +46,11 @@ What's left before it feels finished: **textures** (the 360 shipped low-res ones
 - **Real fix (next):** drive the virtual vblank from the display's actual vblank (e.g. DXGI `IDXGIOutput::WaitForVBlank` on Windows) instead of a timer, so the game's "every 2 vblanks" lands exactly on every 2nd refresh at 240 Hz. Or present to an exclusive/independent-flip swapchain so VRR engages.
 
 ## PC textures: feasibility
-- The 360 keeps its textures in `Game/uberCatalog.cat` as `.tex` entries; the PC (Ultimate Shooter Edition) keeps them in `FEAR*.Arch00` as `.dds`. `tools/texture_names.py` compares the names: **6,073 of the 360's 6,252 texture names (97%) exist on PC.** The 360-only ones are its own content (controller prompts, autoshot UI, laser sight, Dell product placement…), which keep their 360 textures.
-- So the upgrade is a **name-based replacement**: when the game loads `X.tex`, the renderer uses the PC's `X.dds` instead. The renderer, not the game, holds the big texture, so the 360's 512 MB memory limit doesn't apply.
-- Work: (1) parse the 360 catalogue's `.tex` entries (header + data) and the PC `.Arch00` format; (2) learn which guest texture is which file, either by hooking the game's texture-load routine (reverse engineering) or by hashing each `.tex` payload offline and matching it when the renderer uploads it; (3) load the PC DDS (DXT/BC formats, more mips) in fear-nx's texture cache. Steps 1 and 3 are straightforward; step 2 is the research.
+Measured, not assumed ([TEXTURES.md](TEXTURES.md) has the full plan):
+- **97% of the 360's texture names exist on PC** (6,069 of 6,251), even with the same folder paths.
+- **84% of those are larger on PC** (5,105), almost all 2× per side (4× the pixels); 963 are the same size. The 360 halved its textures to fit in memory, and the PC has the originals.
+- The 360 textures sit zlib-compressed in `uberCatalog.cat`, each with its Xenos fetch constant in the header; the PC ones are plain DDS in LithTech `LTAR` archives. Both are now readable (`tools/texture_compare.py`).
+- Route: an offline tool builds a local pack keyed by a hash of each 360 texture's data, and fear-nx's texture cache, which already hashes texture data when it creates images, swaps in the PC DDS. No reverse engineering of the game's loader needed. Normal maps (360 DXN) need a format conversion; a downscale-and-compare quality gate catches pairs that aren't the same picture.
 
 ## Direction: recomp, or 360 features into the PC version?
 The question came up after the play-test: would it be easier to take the 360-only features to the PC version, the way the Quake 4 project took the 360 controls to openQ4?
@@ -67,7 +69,7 @@ The question came up after the play-test: would it be easier to take the 360-onl
 1. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
 2. **Chapter cards / transition flicker:** reproduce at `-Scale 1` and `-FrameRate 30` to see whether they're ours (scaling) or upstream; fix accordingly.
 3. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
-4. **PC texture replacement:** catalogue parsing, the name↔texture mapping, loader in the texture cache.
+4. **PC texture replacement:** see [TEXTURES.md](TEXTURES.md); Phase 1 is the offline readers, matching, quality gate and pack.
 5. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
 6. **Linux:** the renderer and SDK are Vulkan; port the build script.
 
