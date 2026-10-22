@@ -1,6 +1,6 @@
 # F.E.A.R. 360 Recompiled
 
-The Xbox 360 F.E.A.R., running natively on PC. 4K, 120 fps, a controller in your hands.
+The Xbox 360 F.E.A.R., running natively on PC. 4K, 90–120 fps, a controller in your hands.
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
@@ -23,7 +23,8 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Boots, menus, intro videos, campaign, Instant Action | `port-nx` with `--nx_renderer native` |
 | ✅ 4K: integer internal resolution scaling (3× = 3840×2160) | our patch to fear-nx's renderer |
 | ✅ The game's own 2×/4× MSAA and 16× anisotropic filtering | on top of the scale |
-| ✅ 120 fps with correct game speed | a 240 Hz virtual vblank (`-FrameRate`), measured: a steady 1,200 frames per 10 s ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
+| ✅ 90 fps (default) / 120 fps with correct game speed | the game's own cap via its virtual vblank (`-FrameRate 30/60/90/120`); 120 measured steady, but bullet tracers glitch in heavy fights at 120, so 90 is the default while that's checked ([PROGRESS](docs/PROGRESS.md#play-test-3-2026-10-22)) |
+| ⏳ Occasional white flicker, more when looking around | to capture on video; `tools/flicker_scan.py` finds the frames |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
@@ -44,7 +45,7 @@ pwsh -NoProfile -File tools/build-nx.ps1        # first time ~15 min: ReXGlue SD
 pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'
 ```
 
-Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 120`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|120`, `-Present immediate|mailbox|fifo`, `-TexturePack <folder>`, `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Extra '<more flags>'`.
+Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 90`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|90|120`, `-Present immediate|mailbox|fifo`, `-TexturePack <folder>`, `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Extra '<more flags>'`.
 
 **PC textures (optional, needs the PC version):** build a pack from your own PC install once (about 6 minutes, 1.3 GB, stays in the gitignored `private/`), then add `-TexturePack private/texture_pack`. Steps in [docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack).
 

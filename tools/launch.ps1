@@ -2,7 +2,7 @@
 # guest told it is on a 1280x720 display (as on a real 360; also avoids the 4:3 squeeze ReXGlue
 # gives on high-DPI desktops), rendering at a multiple of 720p with 16x anisotropic filtering.
 #
-#   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, 120 fps
+#   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, 90 fps
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 #   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
@@ -12,10 +12,12 @@ param(
     [ValidateSet(0,1,2,3,4,5)][int]$Anisotropic = 5,   # SDK enum: 5 = 16x
     [switch]$Windowed,
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
-    # The game presents every 2 virtual vblanks: 30 fps at the console's 60 Hz. 60 raises the
-    # vblank rate to 120 Hz, 120 to 240 Hz (the SDK's maximum). Both verified in play on
-    # port-nx with correct game speed (2026-10-21); 30 is the original console pacing.
-    [ValidateSet(30, 60, 120)][int]$FrameRate = 120,
+    # The game presents every 2 virtual vblanks: 30 fps at the console's 60 Hz, so the frame rate
+    # is set by the vblank rate (FrameRate x 2, up to the SDK's 240 Hz), a cap of the game's own
+    # whatever the display or driver does. 120 was measured steady (2026-10-22) but bullet
+    # tracers glitched in heavy firefights ("twitching in midair"), so 90 is the default while
+    # that is checked; 30 is the original console pacing.
+    [ValidateSet(30, 60, 90, 120)][int]$FrameRate = 90,
     # Swapchain present mode. The SDK picks immediate (no vsync, tearing) when the driver offers
     # it; the game is paced by a software vblank that is not locked to the display, so frames
     # land unevenly. fifo = true vsync (even, adds queue latency), mailbox = no tearing, low

@@ -70,6 +70,12 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 
 **Also asked for:** the Options and Quit entries in the main menu.
 
+## Play-test 3 (2026-10-22)
+4K, true 120 fps for the first time (the driver cap off), PC textures, no stick ramp. 8½ minutes, a steady 120.1 fps average, lowest 10-second window 113 fps, no slow frames, no crash. "With the sticks, it just felt really good."
+- **Bullet tracers glitch in heavy firefights:** "multiple enemies would be shooting bullets and it would just start basically corrupting midair… the traces of the bullets would just start… twitching in midair and be stuck there for a second", unlike the PC version where every tracer flies cleanly. The user suspects the frame rate is more than the 360 code handles. **The launcher default is now 90 fps** (`-FrameRate 90`, a 180 Hz virtual vblank) to compare; next, compare 60/90/120 in the same fight. If it scales with frame rate it's a per-frame step in the effect code (tracer update, particle lifetime); if not, it's the renderer (dynamic vertex data).
+- **White flicker every so often, more when looking around.** To capture on video; `tools/flicker_scan.py` goes through a clip frame by frame and pulls out one- and two-frame events with their neighbours.
+- **Saving still unconfirmed:** nothing was written to `port-nx/user/` in 8½ minutes, while a keyboard test run with both pads connected (after the controller fix) saved its checkpoint. Which mode was played (campaign or Instant Action, which may not checkpoint) is the next question.
+
 ## Movement feel: 360 vs PC
 The user's sense: walking feels a little more bouncy than on PC, maybe extra sway. Two ways it could be real, both checkable:
 - **Different tuning on 360.** Console ports often retuned head bob, weapon sway and look acceleration for a pad. Both versions ship their tuning as a LithTech game database (360: `Game/database`, `database_anim`; PC: `FEAR*.Gamdb00p` inside `FEAR.Arch00`). Diff the player/camera/weapon records (head bob, sway, movement acceleration, look sensitivity) between them. If they differ, the 360's values are what the 360 shipped, and a setting could offer the PC's.
