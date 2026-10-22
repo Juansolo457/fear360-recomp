@@ -255,3 +255,38 @@ registers = ["r29", "r3"]
 name = "FearDebugWeaponImpact"
 address = 0x82428A68
 registers = ["r3"]
+
+# Debugging (src/fx_debug.cpp, with fear_debug_weapon_fire): the particles of each shot's impact,
+# through the game's particle code. CParticleSystemGroup::EmitParticleBatch (sub_82BB6E40) once
+# the batch size is known (r25); RenderParticleSystem (sub_82BB7558, group in r27): each render,
+# the dynamic vertex buffer lock's result, the vertices granted (r10) against those left (r22);
+# CParticleSystemFX::HandleUpdateTime (sub_82BAE3B8, system in r11): update made or skipped.
+[[entrypoint.midasm_hook]]
+name = "FearDebugParticleEmit"
+address = 0x82BB6E84
+registers = ["r29", "r25"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugParticleRender"
+address = 0x82BB7814
+registers = ["r27"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugParticleLock"
+address = 0x82BB7868
+registers = ["r27", "r3"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugParticleGranted"
+address = 0x82BB787C
+registers = ["r27", "r10", "r22"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugParticleUpdate"
+address = 0x82BAE420
+registers = ["r11"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDebugParticleSkip"
+address = 0x82BAE404
+registers = ["r11"]
