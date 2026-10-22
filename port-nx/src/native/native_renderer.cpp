@@ -99,7 +99,7 @@ REXCVAR_DEFINE_BOOL(nx_native_trace_output, false, "F.E.A.R. NX",
 // compiled, waits for it instead of being skipped. Skipping (fear-nx's choice on Switch, where a
 // compile stalls a frame for long) left objects and effects missing for a few frames the first
 // time they were seen: 2,500-2,800 draws per session. The wait is capped per frame.
-REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 0, "F.E.A.R.",
+REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 100, "F.E.A.R.",
                       "Longest a frame waits in total for shader translations and pipelines its "
                       "draws need (0 = skip those draws until ready, fear-nx's Switch behaviour)");
 REXCVAR_DEFINE_BOOL(fear_alias_clears, true, "F.E.A.R.",
@@ -1614,18 +1614,27 @@ bool Renderer::Impl::Initialize() {
     constant_infos[i].offset = 0;
     constant_infos[i].range = constant_ranges[i];
   }
-  VkWriteDescriptorSet writes[2] = {};
+  // F.E.A.R.: one write per constant buffer binding. A single write running across the
+  // bindings is valid only when they all have the same stage flags, and these don't (the
+  // system constants are also read by the geometry shaders): the validation layer reported
+  // bindings 1-4 as never written, and draws then read uninitialized descriptors, which can
+  // lose the device.
+  VkWriteDescriptorSet writes[1 + SpirvShaderTranslator::kConstantBufferCount] = {};
   writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writes[0].dstSet = set_shared;
   writes[0].descriptorCount = shared_binding_count;
   writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   writes[0].pBufferInfo = shared_infos.data();
-  writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  writes[1].dstSet = set_constants;
-  writes[1].descriptorCount = SpirvShaderTranslator::kConstantBufferCount;
-  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-  writes[1].pBufferInfo = constant_infos;
-  dfn().vkUpdateDescriptorSets(vk, 2, writes, 0, nullptr);
+  for (uint32_t i = 0; i < SpirvShaderTranslator::kConstantBufferCount; ++i) {
+    VkWriteDescriptorSet& write = writes[1 + i];
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = set_constants;
+    write.dstBinding = i;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    write.pBufferInfo = &constant_infos[i];
+  }
+  dfn().vkUpdateDescriptorSets(vk, uint32_t(std::size(writes)), writes, 0, nullptr);
 
   // Submissions.
   for (Submission& s : submissions) {
@@ -1677,6 +1686,12 @@ bool Renderer::Impl::Initialize() {
   if (!textures.Initialize(device, memory)) {
     return false;
   }
+  // F.E.A.R.: the texture cache keeps its own frame number, set at the end of each frame; it
+  // started at 0 while this one starts at 1. Upload buffers and images retired during the
+  // first frame were tagged frame 0, counted as already finished at the first swap, and
+  // freed while the GPU still read them (VUID-vkDestroyBuffer-buffer-00922, then the device
+  // lost) whenever a texture finished uploading in frame 1.
+  textures.BeginFrame(frame, completed_frame);
   upload.buffer = stream_buffer;
   upload.resolve_commands = [this]() {
     EndPass();
