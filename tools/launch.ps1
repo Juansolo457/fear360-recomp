@@ -11,6 +11,9 @@ param(
     [ValidateSet(0,1,2,3,4,5)][int]$Anisotropic = 5,   # SDK enum: 5 = 16x
     [switch]$Windowed,
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
+    # Experiment: the game presents every 2 virtual vblanks (30 fps at the default 60 Hz).
+    # 60 raises the vblank rate to 120 Hz, 120 to 240 Hz; game logic may or may not cope.
+    [ValidateSet(30, 60, 120)][int]$FrameRate = 30,
     [string]$Extra = '',  # more flags, space separated
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
@@ -29,6 +32,9 @@ $arguments = @(
 if ($Nx) {
     # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
     $arguments += @('--nx_native_resolution_scale', "$Scale")
+}
+if ($FrameRate -ne 30) {
+    $arguments += @('--video_mode_refresh_rate', "$($FrameRate * 2)")
 }
 $process = Start-Process -FilePath $executable -WorkingDirectory $port -ArgumentList $arguments -PassThru
 "pid $($process.Id), log $log"

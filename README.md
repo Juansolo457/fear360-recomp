@@ -14,7 +14,7 @@ pwsh -NoProfile -File tools/build.ps1
 pwsh -NoProfile -File tools/launch.ps1                 # fullscreen, 4K internal, 16x AF
 pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed
 pwsh -NoProfile -File tools/build-nx.ps1                               # port-nx: builds the patched SDK too
-pwsh -NoProfile -File tools/launch.ps1 -Nx -Scale 3 -Extra '--nx_renderer native'   # 4K internal
+pwsh -NoProfile -File tools/launch.ps1 -Nx -Scale 3 -FrameRate 60 -Extra '--nx_renderer native'   # 4K internal, 60 fps experiment
 ```
 Put your own `default.xex` (title `565507D9`) and `Game/` folder in `port/assets/`.
 

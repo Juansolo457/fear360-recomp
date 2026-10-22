@@ -1,66 +1,100 @@
-# Handoff: F.E.A.R. 360 on Windows
+# Handoff: F.E.A.R. 360 on Windows (2026-10-21, end of day)
 
-Start with [FINDINGS.md](FINDINGS.md) for the disc/XEX facts, then this file.
+Read [FINDINGS.md](FINDINGS.md) for the disc/XEX facts and the history of the menu bug. This
+file is the current state and what to do next.
 
-## Update 2026-10-21 (later): menus fixed by fear-nx's renderer
-`port-nx/` builds fear-nx's patched ReXGlue SDK from source (`third_party/rexglue-sdk-nx`, + our
-`patches/rexglue-sdk-nx/0001` static-plugin option) with Vulkan on, links the Xenos plugin
-into `fear.exe`, and compiles fear-nx's `src/native/` renderer (GPL-3.0). With
-`--nx_renderer native` the **title screen, menu video and text render correctly**; the stock
-plugin on the same patched SDK still shows the font sheet, so the fix is their renderer. Build:
-`tools/build-nx.ps1` (first build ~15 min: whole SDK + codegen with its own 0.10.0 tool). Run:
-`tools/launch.ps1 -Nx -Extra '--nx_renderer native'`; test: `tools/smoke.ps1 -Nx ...`.
-Gotchas solved in the build script: `-march=x86-64-v2` (SSSE3 byte swaps), compiler-rt
-builtins linked by path (`__udivti3` from the clock patch), and `thirdparty/renderdoc` on the
-include path. Their renderer renders at the game's 1280×720 with the game's MSAA and up to
-16× AF (`nx_native_max_anisotropy`). **Internal resolution scaling was added** (same day):
-`--nx_native_resolution_scale N` (1–4; `tools/launch.ps1 -Nx -Scale 3` passes it) scales
-render targets, viewports, scissors, clears, resolve copies, resolve images and the swap by
-an integer while all guest-space math (EDRAM tiles, rectangles, resolve layouts) stays as
-it was; textures sampled from resolve images set `textures_resolution_scaled` for the SDK's
-SPIR-V translator, which was built with the scale. The game's own 2×/4× MSAA still applies on
-top, so 3× with MSAA is heavy supersampling. The legacy tiled-resolve composition
-(`nx_native_shared_resolves=false`) is not scaled and is forced off above 1×. Tested at 3× in
-gameplay: clean. Not yet checked: every post effect, cutscenes, slow motion, and performance
-in heavy scenes at 3× (a 4090 was far from busy at 1×). The section below is the state
-before all this.
+## Where it stands
+**The game is playable on Windows at 4K.** `port-nx/` builds fear-nx's patched ReXGlue SDK from
+source with Vulkan, links the Xenos GPU plugin into `fear.exe`, and compiles fear-nx's Vulkan
+Xenos renderer (`port-nx/src/native/`, GPL-3.0) with our integer resolution scaling added. With
+`--nx_renderer native` the title screen, menu videos, text, HUD and gameplay all render
+correctly. The user played Instant Action and the campaign start: logic, firing and physics
+are fine. At 3× (3840×2160 internal) the image is clean and the RTX 4090 is far from busy.
 
-## Where it stood before (stock renderer)
-- `port/` (a `rexglue init` project + fear-nx's 78 function hints) **builds and runs** on Windows (D3D12, RTX 4090): the intro, Press Start, the main menu and its submenus all work, input works, audio works, and **gameplay renders correctly**. The user played an Instant Action map with a clean image: level, lighting, weapon and HUD.
-- **Still broken: menus, videos and some text.** Behind the menus the screen shows the game's font + button-glyph sheet stretched full-screen. Menu strings sometimes draw with the **right positions but wrong glyphs**. Intro and menu videos (Bink, CPU-decoded; audio plays) never appear. It flickers, and the user once saw the menu fully correct for about 5 seconds. Pattern: anything the game **writes into a texture from the CPU each frame** (glyph caches, Bink frames), or anything it renders to a texture and samples, shows stale or wrong texture contents. 3D world textures, which are static, are fine.
-
-## Tried (no effect on the menu bug unless noted)
-All runs use `tools/smoke.ps1 -Captures 4 -Extra '<flags>'`; screenshots are in `private/captures/`.
-
-| Flags | Result |
+| | |
 |---|---|
-| default (`resolution_scale` 3 or 1) | Font sheet behind the menu, wrong glyphs. Not caused by resolution scaling |
-| `--no-clear_memory_page_state` | Same |
-| `--no-direct_host_resolve` | **The background sometimes shows through** (flickers), per the user; the best of the bunch |
-| `+ --render_target_path_d3d12 rov` | Same flicker / wrong glyphs |
-| `+ --readback_resolve full` | Same |
-| `+ --no-async_shader_compilation` | Black frames, then the font sheet mapped onto **3D geometry** |
-| `--no-gpu_3d_to_2d_texture` (± `--no-direct_host_resolve`) | Menus still broken. Gameplay was clean in this run, but untested without it |
+| Resolution | `--nx_native_resolution_scale 1..4` (our change; `tools/launch.ps1 -Nx -Scale 3`) |
+| Anti-aliasing | the game's own 2×/4× MSAA, honoured by the renderer (`nx_native_msaa`), on top of the scale |
+| Anisotropic filtering | up to 16× by default (`nx_native_max_anisotropy`) |
+| Frame rate | the game presents every 2 virtual vblanks → **30 fps at the default 60 Hz vblank**. Experiment in progress: `tools/launch.ps1 -FrameRate 60` sets `--video_mode_refresh_rate 120` so the same "2 vblanks" give 60 fps game frames (`120` → 240 Hz → 120 fps). Result: see "Frame rate" below |
+| Display | fullscreen at the desktop's 3840×2160; `--resolution 720p` tells the guest it is on a 720p display (fixes ReXGlue's 4:3 squeeze at 200% DPI) |
+| Controls | SDL gamepads. Known trap: a Logitech virtual XInput pad (`046D:0000`) takes slot 0, making the Xbox pad player 2 ("No profile selected", no saves); disable that device |
+| Stock renderer (`--nx_renderer xenos`) | still corrupts menus; kept only for A/B |
 
-Not the cause: missing files (the failed opens are optional probes), the GPU plugin (fixed by `config.gpu_plugin = "xenos"`), or the pipeline count (pipelines load from cache).
+Commits: `a616a08` (port-nx + renderer), `e678aea` (resolution scaling), then the launcher
+`-FrameRate` option.
 
-## Leading theory
-The texture cache in ReXGlue's Xenos plugin (Xenia-derived, D3D12) doesn't invalidate or rebind textures whose memory the CPU or a resolve rewrites, or it confuses textures that share memory or keys (font pages / video planes / render-to-texture). Xenia Canary rates this game **playable on D3D12** ([issue 628](https://github.com/xenia-canary/game-compatibility/issues/628)), so this is a ReXGlue difference or regression rather than an unknown hardware feature.
+## Frame rate: what is known
+- Nothing we changed touches timing. The renderer's log shows it idling ~46 of every 50 ms
+  "waiting for the game": the 30 fps is the game's own cap, as on the console.
+- The native renderer's vblank thread (`native_system.cpp` `VblankLoop`) ticks at
+  `VdQueryVideoMode().refresh_rate` = SDK cvar `video_mode_refresh_rate` (default 60, clamp
+  24–240). The game's D3D `Present(interval 2)` waits for 2 of those interrupts. Raising the
+  cvar is the zero-code way to raise the game's frame rate. The PC version of this engine
+  (LithTech Jupiter EX) runs uncapped with a variable timestep, so the game logic should cope
+  better than N3's fixed 40 Hz tick did, but that is the thing to verify (animation speed,
+  slow-mo duration, physics, scripted timers).
+- Host present is vsynced (`vsync` cvar) to the 240 Hz display. fear-nx's own pacing cvars
+  (`nx_min_frame_vblanks`, `nx_pace_before_present`) only add holds; leave them at defaults.
+- If the vblank trick misbehaves, the Lost Odyssey approach is the model: find the present
+  call site, release its interval there, pace on the host, and fix per-frame logic one case
+  at a time (`../n3-360-recomp/reference/LostOdysseyRecomp/docs/notes/native-90-120fps.md`).
+- A 240 Hz display shows a 30 fps game frame for 8 refreshes; a 60 fps one for 4. Frame
+  interpolation (OpenCE "Smooth Motion") would be the route past the game's own limits.
 
-## Next steps, cheapest first
-1. **Baseline in Xenia Canary** (ask the user before downloading it). If the menus are clean there, diff ReXGlue `bd833a2` against Xenia Canary in `src/graphics/pipeline/texture/cache.cpp`, `shared_memory.cpp`, `d3d12/texture_cache.cpp` and the resolve path. Watch for ReXGlue-only features: `direct_host_resolve`, `gpu_3d_to_2d_texture`, `clear_memory_page_state` (defaults to **true** here, false in Xenia).
-2. **Trace one broken draw:** log the fetch constants (base address, format, size, dimension) of draws during the Press Start screen and check whether the full-screen quad's texture address matches the font texture's. That separates "stale contents" from "wrong binding".
-3. **Port fear-nx's renderer** (GPL-3.0; Vulkan; written for exactly these problems: shared resolve aliases, tiled-resolve invalidation, video planes). The groundwork is done:
-   - `third_party/rexglue-sdk-nx/`: ReXGlue `c94f5eb` + `fear-nx/patches/native-vulkan/rexglue-sdk.patch` (sha256 `9db89714…`), `write-tree` = `c7fb3c0f1a588b268115bf0dceb24f0c26eb1ae0` (verified to match). Submodules were being fetched (`git submodule update --init --recursive --depth 1`); confirm they're complete.
-   - `third_party/fear-nx/src-repo/`: their repo at `acad80d`. The renderer is in `src/native/`; `#if defined(__SWITCH__)` guards show it was meant to build elsewhere too, and on non-Switch `nx_renderer` defaults to `"xenos"` (`--nx_renderer native` selects theirs).
-   - **Blocker:** on Windows the SDK builds `rexgpu-xenos` as a **SHARED plugin with everything PRIVATE** (`src/graphics/CMakeLists.txt` ~l.102), but their renderer needs the graphics internals linked in (on Switch it's STATIC and `gpu_plugin_loader.cpp` calls `rex_gpu_create` directly). Make it STATIC on Windows too, enable `REXGLUE_USE_VULKAN`, build the port with `-DREXSDK_DIR=third_party/rexglue-sdk-nx` in its own binary dir, add `src/native/*.cpp` + include dirs (`${REXSDK_DIR}/thirdparty/{imgui,glslang,xxHash}`, `${REXSDK_DIR}/src/graphics`), and in `FearApp::OnPreSetup` set `config.graphics = fear_nx::native::CreateGraphicsSystem()` when `fear_nx::native::Enabled()`. Their CMake (`third_party/fear-nx/src-repo/CMakeLists.txt`) is the Switch reference. Codegen will rerun with that SDK's own `rexglue` (0.10.0).
-   - Licensing: using their renderer makes those parts GPL-3.0; note it in NOTICE (as the Quake 4 repo does for its patches).
+## How it is built and run
+```
+pwsh -NoProfile -File tools/build-nx.ps1            # SDK from source + codegen + game, ~15 min first time
+pwsh -NoProfile -File tools/launch.ps1 -Nx -Scale 3 -FrameRate 60 -Extra '--nx_renderer native'
+pwsh -NoProfile -File tools/smoke.ps1 -Nx -Seconds 55 -Captures 3 -Extra '--nx_renderer native --nx_native_resolution_scale 3'
+pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot even when covered
+```
+- `third_party/rexglue-sdk-nx` (gitignored) = ReXGlue `c94f5eb` + fear-nx's
+  `patches/native-vulkan/rexglue-sdk.patch` (tree `c7fb3c0f…`, verified) + our
+  `patches/rexglue-sdk-nx/0001` (`REXGLUE_GPU_XENOS_STATIC`). Rebuild it with
+  `git clone --no-checkout rexglue-sdk; checkout c94f5eb; git apply --index <fear-nx patch>;
+  git am patches/rexglue-sdk-nx/*; git submodule update --init --recursive`.
+- `tools/build-nx.ps1` already handles: VS DevShell (vcvars64 breaks on a quoted PATH entry),
+  `-march=x86-64-v2` (SDK uses SSSE3 intrinsics), compiler-rt builtins linked by path
+  (`__udivti3` from fear-nx's clock patch; `--rtlib` is ignored by the MSVC-target driver),
+  `thirdparty/renderdoc` on the include path, codegen → reconfigure on the first build.
+- `port-nx/assets` is a junction to `port/assets` (3.8 GB extracted disc; gitignored).
+- `port/` is the stock-SDK build (nightly `bd833a2`, D3D12 only). Keep for comparison.
+- The smoke tool opens a window on the user's screen; the user has played in it by mistake.
+  Say so before running it. **Never close the user's game**; ask them to quit.
 
-## Running it
-- Build: `pwsh -NoProfile -File tools/build.ps1` (DevShell + `.tools/` junction to the N3 toolchain, ReXGlue nightly `bd833a2` prebuilt).
-- Play: `pwsh -NoProfile -File tools/launch.ps1 [-Scale 1..3] [-Windowed]` (fullscreen, `--resolution 720p` for the high-DPI 4:3 fix, 16x AF).
-- Tests: `pwsh -NoProfile -File tools/smoke.ps1 -Seconds 50 -Captures 4 -Extra '--flag ...'` runs its own windowed copy (own profile and cache), screenshots it, then stops it. Warn the user first: the window appears on their screen, and they may otherwise play in it, thinking it's theirs.
-- **Controller:** a Logitech virtual XInput pad (`046D:0000`, "HID-compliant game controller") holds slot 0, so the Xbox pad is player 2 and the game says "No profile selected". The user is disabling it.
+## Where things live
+| | |
+|---|---|
+| `port-nx/src/fear_app.h` | app glue: picks fear-nx's renderer or calls the statically linked `rex_gpu_create` (`--fear_gpu_backend any/d3d12/vulkan`) |
+| `port-nx/src/native/native_system.cpp` | fear-nx's graphics system: vblank thread, MMIO/ring, pacing, present (`Swap`) |
+| `port-nx/src/native/native_renderer.cpp` | the Vulkan Xenos renderer (12.8k lines with textures): render targets, draws, resolves, swap. Our scaling: `Impl::scale`, `host_width/height`, `hx0/hy0/hwidth/hheight` in `Resolve()` |
+| `port-nx/src/native/native_textures.cpp` | texture cache; resolve destination images (scaled by `resolution_scale_`), `last_resolved()` |
+| `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
+| `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
+| `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
 
-## Goal reminder (from the user)
-A full Windows (then Linux) PC version in the spirit of OpenCE: point it at your own files, launch, and get real options (4K, widescreen, anisotropic filtering, frame rate, controls). Tune for the user's machine first (Ryzen 7 9800X3D, RTX 4090, 4K 240 Hz at 200% scaling), then scale down. fear-nx's Switch-specific performance cuts are not wanted.
+## Next steps (the user's list)
+1. **Frame rate:** settle the 60/120 experiment (see above); then decide between the vblank
+   trick, a Lost Odyssey-style present-interval hook, or interpolation.
+2. **Quit button in the main menu.** Options, cheapest first:
+   - Host-side: ReXGlue's ImGui overlay. `rex::ReXApp::OnCreateDialogs(ui::ImGuiDrawer*)` is
+     the hook; the SDK already has a debug overlay and a cvar settings overlay (WK2D's N3
+     project mentions changing cvars "through the SDK overlay"). A keyboard/controller
+     shortcut that opens a small dialog with Quit (and later Options) needs no game patching.
+   - In-game: the way WK2D added a "Graphics" entry to N3's main menu: derive a modified
+     menu layout from the game's own UI data at first run (never ship it) and hook the
+     menu's action handler for the new entry. For F.E.A.R. the UI is LithTech's (`Game/`
+     database and `.cat` catalogues); more reverse engineering, but it looks native.
+3. **Options menu** (resolution scale, AA, AF, frame rate, controls): same two routes.
+   Settings persist via ReXGlue's TOML config (`<user_data_root>/…toml`, see how WK2D's
+   `profile_config.cpp` writes typed TOML atomically).
+4. **Later:** FXAA/SMAA post-AA (MSAA + 3× is already heavy supersampling), ultrawide/HUD
+   scaling, Linux build (the SDK and this renderer are Vulkan; the Windows-only bits are the
+   DevShell/MSVC CRT details in `build-nx.ps1` and the presenter), save/profile handling for
+   whichever pad is slot 0, and upstreaming the scaling to fear-nx (GPL, so publishable).
+
+## Licensing reminders
+`port-nx/src/native` is GPL-3.0-or-later (fear-nx ← Project8Recomp ← nfsmw-nx); builds that
+link it are GPL. ReXGlue is BSD-3-Clause with Xenia notices. The MIT license covers our own
+files only; see `NOTICE`. Never commit game data, generated translations, captures or saves.

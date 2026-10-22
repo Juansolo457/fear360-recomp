@@ -1,6 +1,6 @@
 # fear360-recomp
 
-Native Windows (then Linux) build of the Xbox 360 **F.E.A.R.**, statically recompiled with ReXGlue. The goal is an OpenCE-style PC version, not a bare port: point it at your own files, launch, and get real options (resolution, widescreen, filtering, frame rate, controls). Roadmap: [docs/PLAN.md](docs/PLAN.md). **Current state and next steps: [docs/HANDOFF.md](docs/HANDOFF.md)** (menus/videos render with stale textures; gameplay renders fine). Disc dumping: [docs/RIPPING.md](docs/RIPPING.md). Sister projects: `../n3-360-recomp` (same toolchain, parked) and `../quake4-360-recomp`.
+Native Windows (then Linux) build of the Xbox 360 **F.E.A.R.**, statically recompiled with ReXGlue. The goal is an OpenCE-style PC version, not a bare port: point it at your own files, launch, and get real options (resolution, widescreen, filtering, frame rate, controls). Roadmap: [docs/PLAN.md](docs/PLAN.md). **Current state and next steps: [docs/HANDOFF.md](docs/HANDOFF.md)** (playable at 4K on fear-nx's renderer; frame rate and menu additions are next). Disc dumping: [docs/RIPPING.md](docs/RIPPING.md). Sister projects: `../n3-360-recomp` (same toolchain, parked) and `../quake4-360-recomp`.
 
 ## Hard rules
 - Never commit game data: ISOs, XEX files, extracted assets, generated translations (`port/generated/default/`), logs or saves. All are gitignored.
