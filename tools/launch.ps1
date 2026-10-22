@@ -23,6 +23,11 @@ param(
     [ValidateSet('immediate', 'mailbox', 'fifo')][string]$Present = 'immediate',
     # A texture pack folder built by tools/texture_pack.py (port-nx only); see docs/TEXTURES.md.
     [string]$TexturePack = '',
+    # Right stick at its edge (port-nx): console = as shipped (0.3 s wait, then a 0.4 s ramp up
+    # to 360 deg/s, restarting every time the stick stops), nodelay, instant, or off (no boost,
+    # turn rate follows the stick). See port-nx/src/look_tuning.h.
+    [ValidateSet('console', 'nodelay', 'instant', 'off')][string]$LookRamp = 'console',
+    [switch]$NoSoftLock,  # no aim-assist slowdown of turning near enemies
     [string]$Extra = '',  # more flags, space separated
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
@@ -40,7 +45,8 @@ $arguments = @(
     '--cache_root', "$port\cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
 if ($Nx) {
     # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
-    $arguments += @('--nx_native_resolution_scale', "$Scale")
+    $arguments += @('--nx_native_resolution_scale', "$Scale", '--fear_look_ramp', $LookRamp)
+    if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
 }
 if ($TexturePack) {
     if (!$Nx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }

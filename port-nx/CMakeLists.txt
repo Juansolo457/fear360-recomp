@@ -33,6 +33,7 @@ set(FEAR_SOURCES
     src/main.cpp
     src/texture_pack.cpp
     src/crash_report.cpp
+    src/look_tuning.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 

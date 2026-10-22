@@ -27,8 +27,9 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
-| ⏳ Right stick: a "seam" when you start turning again; movement may feel bouncier than PC | the 360 tuning has a gamepad edge-acceleration ramp and per-profile yaw/pitch acceleration; next to measure |
-| ⏳ Saving needs a signed-in profile (Xbox Live is gone) | a local profile that the game accepts, as for N3 |
+| ✅ Right stick without the 360's turn ramp (option) | `-LookRamp off/nodelay/instant`, `-NoSoftLock`: the 360's stick tuning patched on the fly from your own data ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)); needs a hands-on verdict |
+| ✅ Saving with any controller | every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
+| ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ⏳ Settings and Quit entries in the main menu | not started |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | not started |
@@ -43,7 +44,7 @@ pwsh -NoProfile -File tools/build-nx.ps1        # first time ~15 min: ReXGlue SD
 pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'
 ```
 
-Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 120`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|120`, `-Present immediate|mailbox|fifo`, `-TexturePack <folder>`, `-Windowed`, `-Extra '<more flags>'`.
+Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 120`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|120`, `-Present immediate|mailbox|fifo`, `-TexturePack <folder>`, `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Extra '<more flags>'`.
 
 **PC textures (optional, needs the PC version):** build a pack from your own PC install once (about 6 minutes, 1.3 GB, stays in the gitignored `private/`), then add `-TexturePack private/texture_pack`. Steps in [docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack).
 

@@ -46,8 +46,8 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 | Menu needs Settings and Quit | Not started; routes in [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) |
 | **Movement feels "bouncier" than PC: more sway/bob?** (user unsure) | See "Movement feel" below: compare the two versions' tuning data, and check frame-rate dependence |
 
-## Play-test 2 (2026-10-22, 3× scale, PC texture pack)
-"The game looks much better. Everything looks, feels pretty great." Then three things.
+## Play-test 2 (2026-10-22)
+3× scale, PC texture pack. "The game looks much better. Everything looks, feels pretty great." Then four things.
 
 **1. The game closed by itself** about 10 minutes in, ~10 s after a level load started. The log just stops; Windows recorded nothing because **Windows Error Reporting is disabled on this PC**. Added `src/crash_report.cpp`: an unhandled exception, the SDK's debug break (the game's `KeBugCheck` lands there), `abort()` and `exit()` (the game's `HalReturnToFirmware`) now leave `port-nx/logs/crash-<time>.txt` (exception, module+offset, symbolised stack; recompiled functions are named `sub_<360 address>`) and a small `.dmp`. Next crash will say where.
 
@@ -57,9 +57,15 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 - Second layer: with that gone, **`vkQueuePresentKHR` itself blocks 12–15 ms**, in immediate (no-vsync) mode on a 240 Hz display, with NVIDIA's Vulkan-over-DXGI layer on or off. Several 10-second windows show exactly 601 presents: a 60.1 fps limiter applied inside present, outside the game. RTSS/Afterburner is hooked (its OSD is in every capture) but its frame limit is off (`Limit=0`). Remaining suspects: an NVIDIA driver *Max Frame Rate* (global or per-app, or in the NVIDIA app), or an Afterburner/RTSS setting applied at runtime. To check on the user's side.
 - Why it feels uneven rather than just "60": the game is paced by a 240 Hz virtual vblank and wants a frame every 2 vblanks (8.3 ms), but each present then stalls ~15 ms. Frames reach the screen at a steady 60 while the game's timing and input sampling run on a different rhythm.
 
-**3. Right stick "seam":** "once you first start moving it… then you stop for a little bit… and move it again, you can feel almost like a slight delay." The 360 tuning has exactly the parts for that: in `Game/database/Loki.gamedb` **`GPadAimEdgeAccelTime` / `GPadAimEdgeMaxTurnRate`** (turn speed ramps up over time once the stick reaches its edge), **`TurningSoftLockYawFactor/PitchFactor`** and **`AimAssist.*`** (turning slows near targets); in the profile defaults `Game/ProfileDatabase/Defaults.gamedb` **`YawAccel` / `PitchAccel`**, **`Sensitivity`** and per-binding **`DeadZoneMin/Max`**. A ramp that restarts from zero each time the stick starts moving is the likeliest cause. Next: read their values (LithTech game-database format), check whether the game's own Controls menu exposes acceleration, and offer a "no ramp" option. It would be 360 tuning, not a recomp bug; the PC version (mouse) has no such ramp.
+**3. Right stick "seam":** "once you first start moving it… then you stop for a little bit… and move it again, you can feel almost like a slight delay." The 360 tuning has exactly the parts for that: in `Game/database/Loki.gamedb` **`GPadAimEdgeAccelTime` / `GPadAimEdgeMaxTurnRate`** (turn speed ramps up over time once the stick reaches its edge), **`TurningSoftLockYawFactor/PitchFactor`** and **`AimAssist.*`** (turning slows near targets); in the profile defaults `Game/ProfileDatabase/Defaults.gamedb` **`YawAccel` / `PitchAccel`**, **`Sensitivity`** and per-binding **`DeadZoneMin/Max`**. A ramp that restarts from zero each time the stick starts moving is the likeliest cause. It is 360 tuning, not a recomp bug; the PC version (mouse) has no such ramp.
 
-**Also asked for:** saving needs a signed-in profile, and Xbox Live for 360 is gone (same as N3) → give the game a local profile it accepts. And the Options and Quit entries in the main menu.
+**Read** (`tools/gamedb.py`, a reader for the 360's big-endian "BDAG" databases): `Client/Shared` has `GPadAimEdgeThreshold` 0.95, `GPadAimEdgeDelayTime` **0.3 s**, `GPadAimEdgeAccelTime` **0.4 s**, `GPadAimEdgeMaxTurnRate` 360°/s, `GPadAimAspectRatio` 0.5; `Client/SoftLock` has `TurningSoftLockYawFactor` **0.3** and `PitchFactor` 0.5. So: past 95% stick, the game waits 0.3 s, then ramps the turn rate up over 0.4 s to 360°/s, and every stop restarts the wait; near an enemy, turning drops to 30%.
+
+**Option** (`port-nx/src/look_tuning.cpp`, launcher `-LookRamp`, `-NoSoftLock`): at startup a patched copy of the player's own `Loki.gamedb` goes to `<user>/overrides/Game/database/`, and the game's database folder is redirected to it (a VFS symbolic link to a read-only device that falls back to the original `Game` folder for everything else). Modes: `console` (as shipped, default), `nodelay` (ramp starts at once), `instant` (full boost at once), `off` (no boost: turn rate follows the stick). The log confirms the game read it ("the game reached the patched database folder"). Untested by hand: `off` may turn too slowly at full stick (raise Look Sensitivity in the game's options, or try `nodelay`).
+
+**4. Saving.** The game said it would play without a profile. Same cause as N3: the runtime signs in only player 1 (a local profile, no Live needed), and SDL numbers controllers in connection order: a Logitech XInput device (`046D`) was slot 0, the Xbox Series pad slot 1, so the pad was player 2, not signed in. Proof: the keyboard-driven test runs (always player 1) have `checkpoint.sav` files; the hands-on profile has none. **Fix:** `fear_shared_controllers` (default on) installs the SDK's `SharedAssignment` in the app's input factory: every controller and the keyboard drive player 1. Needs a hands-on check that a checkpoint save appears under `port-nx/user/`.
+
+**Also asked for:** the Options and Quit entries in the main menu.
 
 ## Movement feel: 360 vs PC
 The user's sense: walking feels a little more bouncy than on PC, maybe extra sway. Two ways it could be real, both checkable:
@@ -116,8 +122,8 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 
 ## Open items and next steps
 1. **60 fps cap from outside the game:** check the NVIDIA driver/app *Max Frame Rate* and Afterburner/RTSS; then measure again (the 10-second report shows `present` time per frame).
-2. **Right-stick ramp:** read `GPadAimEdgeAccelTime`, `YawAccel` & co., offer a setting without the ramp.
-3. **Saving without Xbox Live:** a local signed-in profile the game accepts.
+2. **Right stick:** hands-on verdict on `-LookRamp off` / `nodelay` (and `-NoSoftLock`); make the preferred one the default.
+3. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1.
 4. **Crash:** wait for a `crash-*.txt` from the new reporter.
 5. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
 6. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).

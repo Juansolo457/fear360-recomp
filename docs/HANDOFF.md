@@ -93,6 +93,9 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/native/native_textures.cpp` | texture cache; resolve destination images (scaled by `resolution_scale_`), `last_resolved()` |
 | `port-nx/src/texture_pack.*`, `port-nx/tools/texindex.cpp`, `tools/texture_pack.py` | PC texture pack: runtime lookup/streaming, offline key indexer, pack builder ([TEXTURES.md](TEXTURES.md)) |
 | `tools/autoplay.ps1`, `tools/ab_pairs.py` | unattended runs (taps A, screenshots) and A/B frame pairing |
+| `port-nx/src/fear_app.h` (`fear_shared_controllers`) | every controller drives player 1, the signed-in local profile that saves |
+| `port-nx/src/look_tuning.*`, `tools/gamedb.py` | right-stick options (`fear_look_ramp`, `fear_aim_softlock`): a patched copy of `Loki.gamedb` served through a VFS redirect; reader for the 360's "BDAG" game databases |
+| `port-nx/src/crash_report.*` | crash reports into `port-nx/logs/` |
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
 | `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
