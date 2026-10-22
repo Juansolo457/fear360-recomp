@@ -935,9 +935,13 @@ struct TextureCache::Impl {
     // Reused through this frame: the content checks would not look at the
     // texture's data before then (see ChangeDetector::TrustedUntil).
     uint64_t valid_until;
+    // Answered with a resolve image (resolution scaled).
+    bool resolved = false;
   };
   // Set by GetViewUncached for the memo.
   uint64_t last_valid_until = 0;
+  bool last_resolved = false;
+  bool out_resolved = false;
   // What the last GetView answered from (last_texture(), last_valid_until()).
   Texture* out_texture = nullptr;
   uint64_t out_valid_until = 0;
@@ -1582,6 +1586,8 @@ void* TextureCache::last_texture() const { return impl_->out_texture; }
 
 uint64_t TextureCache::last_valid_until() const { return impl_->out_valid_until; }
 
+bool TextureCache::last_resolved() const { return impl_->out_resolved; }
+
 void TextureCache::Touch(void* texture, uint64_t submission) {
   auto* t = static_cast<Texture*>(texture);
   t->last_used_submission = submission;
@@ -1666,16 +1672,18 @@ void TextureCache::CopyToSized(ResolveDestination& dest, VkCommandBuffer command
     if (!width || !height) continue;
     if (sized->storage_view && dest.view && impl_->compute_copy &&
         impl_->compute_copy(commands, dest.view, sized->storage_view,
-                            int32_t(sized->origin_x), int32_t(sized->origin_y), 0, 0,
-                            width, height)) {
+                            int32_t(sized->origin_x * resolution_scale_),
+                            int32_t(sized->origin_y * resolution_scale_), 0, 0,
+                            width * resolution_scale_, height * resolution_scale_)) {
       sized->filled = width == sized->width && height == sized->height;
       continue;
     }
     VkImageCopy region = {};
     region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.dstSubresource = region.srcSubresource;
-    region.srcOffset = {int32_t(sized->origin_x), int32_t(sized->origin_y), 0};
-    region.extent = {width, height, 1};
+    region.srcOffset = {int32_t(sized->origin_x * resolution_scale_),
+                        int32_t(sized->origin_y * resolution_scale_), 0};
+    region.extent = {width * resolution_scale_, height * resolution_scale_, 1};
     dfn.vkCmdCopyImage(commands, dest.image, VK_IMAGE_LAYOUT_GENERAL, sized->image,
                        VK_IMAGE_LAYOUT_GENERAL, 1, &region);
     VkMemoryBarrier to_sample = {VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
@@ -2365,7 +2373,8 @@ ResolveDestination* TextureCache::GetResolveDestination(uint32_t address, uint32
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = format;
-  info.extent = {width, height, 1};
+  // Guest size times the draw resolution scale; width/height stay guest.
+  info.extent = {width * resolution_scale_, height * resolution_scale_, 1};
   info.mipLevels = 1;
   info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -2454,14 +2463,17 @@ VkImageView TextureCache::GetView(const xenos::xe_gpu_texture_fetch_t& fetch,
     }
     im.out_texture = memo.texture;
     im.out_valid_until = memo.texture ? memo.valid_until : im.frame;
+    im.out_resolved = memo.resolved;
     return memo.view;
   }
   im.last_valid_until = im.frame;
   VkImageView result_view = GetViewUncached(fetch, dimension, is_signed, upload, null_view);
   // GetViewUncached may have cleared the memo (a texture was replaced).
   im.memo[memo_key] = Impl::Memo{im.frame, result_view, im.last_texture,
-                                 im.last_texture ? im.last_valid_until : im.frame};
+                                 im.last_texture ? im.last_valid_until : im.frame,
+                                 im.last_resolved};
   im.out_texture = im.last_texture;
+  im.out_resolved = im.last_resolved;
   im.out_valid_until = im.last_texture ? im.last_valid_until : im.frame;
   return result_view;
 }
@@ -2473,6 +2485,7 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
   const auto& dfn = im.device->functions();
   VkDevice d = im.device->device();
   im.last_texture = nullptr;
+  im.last_resolved = false;
 
   uint32_t width_minus_1, height_minus_1, depth_minus_1, base_page, mip_page, mip_max_level;
   texture_util::GetSubresourcesFromFetchConstant(fetch, &width_minus_1, &height_minus_1,
@@ -2552,6 +2565,7 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
     }
 
     if (resolved) {
+      im.last_resolved = true;
       ResolveDestination& dest = *resolved;
       const uint32_t swizzle = GuestToHostSwizzle(fetch.swizzle, dest.host_swizzle);
       const uint32_t fetch_width = width_minus_1 + 1;
@@ -2580,7 +2594,7 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
               info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
               info.imageType = VK_IMAGE_TYPE_2D;
               info.format = dest.format;
-              info.extent = {fetch_width, fetch_height, 1};
+              info.extent = {fetch_width * resolution_scale_, fetch_height * resolution_scale_, 1};
               info.mipLevels = 1;
               info.arrayLayers = 1;
               info.samples = VK_SAMPLE_COUNT_1_BIT;

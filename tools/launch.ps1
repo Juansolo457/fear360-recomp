@@ -26,5 +26,9 @@ $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
     '--cache_root', "$port\cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
+if ($Nx) {
+    # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
+    $arguments += @('--nx_native_resolution_scale', "$Scale")
+}
 $process = Start-Process -FilePath $executable -WorkingDirectory $port -ArgumentList $arguments -PassThru
 "pid $($process.Id), log $log"

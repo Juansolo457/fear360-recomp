@@ -13,8 +13,17 @@ plugin on the same patched SDK still shows the font sheet, so the fix is their r
 Gotchas solved in the build script: `-march=x86-64-v2` (SSSE3 byte swaps), compiler-rt
 builtins linked by path (`__udivti3` from the clock patch), and `thirdparty/renderdoc` on the
 include path. Their renderer renders at the game's 1280×720 with the game's MSAA and up to
-16× AF (`nx_native_max_anisotropy`); **internal resolution scaling does not exist in it yet**,
-which is the next feature for 4K. The section below is the state before this.
+16× AF (`nx_native_max_anisotropy`). **Internal resolution scaling was added** (same day):
+`--nx_native_resolution_scale N` (1–4; `tools/launch.ps1 -Nx -Scale 3` passes it) scales
+render targets, viewports, scissors, clears, resolve copies, resolve images and the swap by
+an integer while all guest-space math (EDRAM tiles, rectangles, resolve layouts) stays as
+it was; textures sampled from resolve images set `textures_resolution_scaled` for the SDK's
+SPIR-V translator, which was built with the scale. The game's own 2×/4× MSAA still applies on
+top, so 3× with MSAA is heavy supersampling. The legacy tiled-resolve composition
+(`nx_native_shared_resolves=false`) is not scaled and is forced off above 1×. Tested at 3× in
+gameplay: clean. Not yet checked: every post effect, cutscenes, slow motion, and performance
+in heavy scenes at 3× (a 4090 was far from busy at 1×). The section below is the state
+before all this.
 
 ## Where it stood before (stock renderer)
 - `port/` (a `rexglue init` project + fear-nx's 78 function hints) **builds and runs** on Windows (D3D12, RTX 4090): the intro, Press Start, the main menu and its submenus all work, input works, audio works, and **gameplay renders correctly**. The user played an Instant Action map with a clean image: level, lighting, weapon and HUD.

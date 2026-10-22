@@ -214,6 +214,13 @@ class TextureCache {
   void WaitForUploads();
 
   const TextureCacheStats& stats() const { return stats_; }
+
+  // Draw resolution scale of resolve images (see Renderer::Impl::scale): the
+  // images are this multiple of the guest sizes recorded in ResolveDestination.
+  void SetResolutionScale(uint32_t scale) { resolution_scale_ = scale ? scale : 1; }
+  uint32_t resolution_scale() const { return resolution_scale_; }
+  // Whether the last GetView answered with a resolve image.
+  bool last_resolved() const;
   // Changes whenever image views are destroyed, so descriptor sets cached by
   // view handle must be dropped (a new view may reuse a handle).
   uint64_t views_epoch() const;
@@ -235,6 +242,7 @@ class TextureCache {
   struct Impl;
   std::unique_ptr<Impl> impl_;
   TextureCacheStats stats_;
+  uint32_t resolution_scale_ = 1;
 };
 
 }  // namespace fear_nx::native

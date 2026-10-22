@@ -21,7 +21,7 @@ F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions.
 This project is not affiliated with or endorsed by Monolith Productions,
 Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.
 
-port-nx/src/native/ is an unmodified copy of src/native/ from fear-nx
+port-nx/src/native/ is a copy (with local changes, listed in its UPSTREAM.md) of src/native/ from fear-nx
 (https://github.com/infriker/fear-nx, commit acad80d), GPL-3.0-or-later,
 itself adapted from Project8Recomp (https://github.com/R-drg/project8-sw)
 and nfsmw-nx (https://github.com/StevensND/nfsmw-nx). The port-nx build that

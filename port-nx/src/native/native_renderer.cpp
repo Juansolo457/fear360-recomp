@@ -82,6 +82,10 @@ REXCVAR_DEFINE_BOOL(nx_native_record_thread, false, "F.E.A.R. NX",
 REXCVAR_DEFINE_BOOL(nx_native_shared_resolves, true, "F.E.A.R. NX",
                     "Write validated tiled resolves directly into one shared destination resource")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_UINT32(nx_native_resolution_scale, 1, "F.E.A.R. NX",
+                      "Native renderer: draw at this integer multiple of the game's "
+                      "resolution (1-4; 3 makes a 1280x720 frame 3840x2160). The game's "
+                      "MSAA still applies on top.");
 REXCVAR_DEFINE_BOOL(nx_native_msaa, true, "F.E.A.R. NX",
                     "Render with the multisampling the game asks for; off draws every target "
                     "with one sample, which costs the GPU much less memory bandwidth");
@@ -248,6 +252,9 @@ struct RenderTarget {
   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
   uint32_t width = 0;
   uint32_t height = 0;
+  // The image's size: width and height times the draw resolution scale.
+  uint32_t host_width = 0;
+  uint32_t host_height = 0;
   uint64_t last_used_frame = 0;
   // The last actual color write determines its guest EDRAM sample layout.
   uint32_t last_draw_guest_msaa = UINT32_MAX;
@@ -399,6 +406,10 @@ struct Renderer::Impl {
   // The targets are sized in guest pixels whatever the sample count, so one
   // sample changes only the images, the pipelines and the resolves.
   bool multisample = true;
+  // Draw resolution scale: host render targets and resolve images are this
+  // multiple of the guest's size. Guest-space math (EDRAM tiles, rectangles,
+  // resolve layouts) is untouched; the scale applies where Vulkan sees sizes.
+  uint32_t scale = 1;
   // D24_UNORM_S8_UINT for the game's kD24S8 buffers (nx_native_depth24).
   bool depth24 = false;
   // The float24 ones (here only shadow maps) become D32_SFLOAT without
@@ -638,6 +649,7 @@ struct Renderer::Impl {
     uint64_t fetch_generation = 0;
     uint64_t index_generation = 0;
     uint32_t used_mask = 0;
+    uint32_t scaled_mask = 0;
   };
   SystemInputs system_inputs;
   struct RetiredRenderTarget {
@@ -665,6 +677,8 @@ struct Renderer::Impl {
     const VulkanShader* ps = nullptr;
     const PipelineLayout* layout = nullptr;
     uint32_t used_mask = 0;
+    // Fetch constants answered with a resolve image, which is resolution scaled.
+    uint32_t scaled_mask = 0;
     uint32_t slots = 0;
     VkDescriptorSet sets[2] = {};
     // Reusable in later frames through this one: no texture behind it is due
@@ -694,11 +708,14 @@ struct Renderer::Impl {
     VkImageView view = VK_NULL_HANDLE;
     void* texture = nullptr;
     uint64_t valid_until = 0;
+    // Answered with a resolve image, which is resolution scaled.
+    bool resolved = false;
   };
   SlotViewEntry slot_views[32][8];
   // Set by SlotView: the texture behind its answer and how long it holds.
   void* slot_texture = nullptr;
   uint64_t slot_valid_until = 0;
+  bool slot_resolved = false;
   struct SlotSamplerEntry {
     bool valid = false;
     uint32_t words[6] = {};
@@ -718,12 +735,14 @@ struct Renderer::Impl {
         !std::memcmp(e.words, words, sizeof(e.words))) {
       slot_texture = e.texture;
       slot_valid_until = e.valid_until;
+      slot_resolved = e.resolved;
       return e.view;
     }
     VkImageView view =
         textures.GetView(regs->GetTextureFetch(slot), dimension, is_signed, upload);
     e.texture = slot_texture = textures.last_texture();
     e.valid_until = slot_valid_until = textures.last_valid_until();
+    e.resolved = slot_resolved = textures.last_resolved();
     e.frame = frame;
     e.submission = submission_number;
     e.views_epoch = textures.views_epoch();
@@ -1390,7 +1409,7 @@ struct Renderer::Impl {
   void MirrorStencilClear();
   void MirrorZeroDepthColorClear();
   void UpdateSystemConstants(bool primitive_polygonal, const draw_util::ViewportInfo& viewport,
-                             uint32_t used_texture_mask, uint32_t vertex_index_endian_flags,
+                             uint32_t used_texture_mask, uint32_t scaled_texture_mask,
                              const VulkanShader* vs, const VulkanShader* ps);
   void Resolve();
   bool resolve_barrier_pending = false;
@@ -1421,12 +1440,16 @@ bool Renderer::Impl::Initialize() {
   }
   specialize_signs = REXCVAR_GET(gpu_specialize_texture_signs);
   multisample = REXCVAR_GET(nx_native_msaa);
+  scale = std::clamp(REXCVAR_GET(nx_native_resolution_scale), 1u, 4u);
+  textures.SetResolutionScale(scale);
+  REXLOG_INFO("[native] Draw resolution scale: {}x ({}x{} for a 1280x720 frame)", scale,
+              1280 * scale, 720 * scale);
   REXLOG_INFO("[native] MSAA: {}",
               multisample ? "honoring guest sample count" : "disabled (single-sample host targets)");
   ubo_alignment = std::max<VkDeviceSize>(properties.minUniformBufferOffsetAlignment, 16);
 
   translator = std::make_unique<SpirvShaderTranslator>(SpirvShaderTranslator::Features(device),
-                                                       true, true, false);
+                                                       true, true, false, scale, scale);
 
   VkShaderStageFlags guest_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                                     (properties.geometryShader ? VK_SHADER_STAGE_GEOMETRY_BIT : 0);
@@ -1628,7 +1651,7 @@ bool Renderer::Impl::Initialize() {
     record_threaded = true;
   }
   worker_translator = std::make_unique<SpirvShaderTranslator>(
-      SpirvShaderTranslator::Features(device), true, true, false);
+      SpirvShaderTranslator::Features(device), true, true, false, scale, scale);
   translation_thread = std::thread([this]() { TranslationThread(); });
   if (!rex::ui::vulkan::util::CreateDedicatedAllocationBuffer(
           device, kDepthScratchSize,
@@ -2534,6 +2557,8 @@ RenderTarget* Renderer::Impl::GetRenderTarget(const RenderTargetKey& key, uint32
   rt->key = key;
   rt->width = std::max(key.pitch, 1u);
   rt->height = rex::align(min_height, 16u);
+  rt->host_width = rt->width * scale;
+  rt->host_height = rt->height * scale;
   rt->samples = VkSampleCountFlagBits(1u << key.msaa);
   rt->format = key.is_depth ? DepthFormatFor(key.format)
                             : ColorFormatToVk(xenos::ColorRenderTargetFormat(key.format));
@@ -2542,7 +2567,7 @@ RenderTarget* Renderer::Impl::GetRenderTarget(const RenderTargetKey& key, uint32
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
   info.format = rt->format;
-  info.extent = {rt->width, rt->height, 1};
+  info.extent = {rt->host_width, rt->host_height, 1};
   info.mipLevels = 1;
   info.arrayLayers = 1;
   info.samples = rt->samples;
@@ -2606,7 +2631,7 @@ RenderTarget* Renderer::Impl::GetRenderTarget(const RenderTargetKey& key, uint32
     VkImageCopy copy = {};
     copy.srcSubresource = {aspect, 0, 0, 1};
     copy.dstSubresource = copy.srcSubresource;
-    copy.extent = {std::min(old->width, rt->width), old->height, 1};
+    copy.extent = {std::min(old->host_width, rt->host_width), old->host_height, 1};
     VkMemoryBarrier memory_barrier = {VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
                                       VK_ACCESS_TRANSFER_WRITE_BIT |
                                           VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
@@ -2706,8 +2731,8 @@ bool Renderer::Impl::BeginPass(const PassTargets& targets) {
       colors[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
       colors[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
       color_count = i + 1;
-      width = std::min(width, rt->width);
-      height = std::min(height, rt->height);
+      width = std::min(width, rt->host_width);
+      height = std::min(height, rt->host_height);
     }
   }
   VkRenderingAttachmentInfo depth = {};
@@ -2717,8 +2742,8 @@ bool Renderer::Impl::BeginPass(const PassTargets& targets) {
     depth.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    width = std::min(width, targets.depth->width);
-    height = std::min(height, targets.depth->height);
+    width = std::min(width, targets.depth->host_width);
+    height = std::min(height, targets.depth->host_height);
   }
   if (width == UINT32_MAX) {
     return false;
@@ -2743,7 +2768,7 @@ bool Renderer::Impl::BeginPass(const PassTargets& targets) {
 
 void Renderer::Impl::UpdateSystemConstants(bool primitive_polygonal,
                                            const draw_util::ViewportInfo& viewport,
-                                           uint32_t used_texture_mask, uint32_t,
+                                           uint32_t used_texture_mask, uint32_t scaled_texture_mask,
                                            const VulkanShader* vs, const VulkanShader* ps) {
   // VulkanCommandProcessor::UpdateSystemConstantValues for host render
   // targets, without EDRAM, tessellation or memory export.
@@ -2832,7 +2857,7 @@ void Renderer::Impl::UpdateSystemConstants(bool primitive_polygonal,
     uint8_t signs = rex::graphics::texture_util::SwizzleSigns(r.GetTextureFetch(index));
     word = (word & ~(0xFFu << shift)) | (uint32_t(signs) << shift);
   }
-  sc.textures_resolution_scaled = 0;
+  sc.textures_resolution_scaled = scale > 1 ? scaled_texture_mask : 0;
   sc.alpha_test_reference = r.Get<float>(rex::graphics::XE_GPU_REG_RB_ALPHA_REF);
   sc.alpha_to_mask = rb_colorcontrol.alpha_to_mask_enable
                          ? (rb_colorcontrol.value >> 24) | (UINT32_C(1) << 8)
@@ -3012,15 +3037,17 @@ bool Renderer::Impl::BuildDrawSetup(uint32_t initiator_value) {
   uint32_t guest_msaa = uint32_t(surface_info.msaa_samples);
   uint32_t msaa = HostMsaa(surface_info.msaa_samples);
   draw_util::GetScissor(r, st.scissor);
-  draw_util::GetHostViewportInfo(r, 1, 1, false, properties.maxViewportDimensions[0],
+  draw_util::GetHostViewportInfo(r, scale, scale, false, properties.maxViewportDimensions[0],
                                  properties.maxViewportDimensions[1], true, depth_control, false,
                                  true, ps && ps->writes_depth(), st.viewport);
   // Rows the draw can touch: the viewport, cut by the scissor. The scissor
   // alone is often the 8192-pixel default and made every target 2048 tall.
   uint32_t needed_height = st.scissor.offset[1] + st.scissor.extent[1];
   if (st.viewport.xy_extent[1]) {
-    needed_height =
-        std::min(needed_height, st.viewport.xy_offset[1] + st.viewport.xy_extent[1]);
+    // The host viewport is scaled; the EDRAM row count below is in guest rows.
+    needed_height = std::min(
+        needed_height,
+        (st.viewport.xy_offset[1] + st.viewport.xy_extent[1] + scale - 1) / scale);
   }
   PassTargets& targets = st.targets;
   for (uint32_t i = 0; i < 4; ++i) {
@@ -3641,6 +3668,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
         info.imageView = SlotView(binding.fetch_constant, binding.dimension,
                                   bool(binding.is_signed));
         info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        if (slot_resolved) tb.scaled_mask |= 1u << binding.fetch_constant;
         tb.valid_until = std::min(tb.valid_until, slot_valid_until);
         if (tb.view_count < 24) {
           tb.views[tb.view_count] = info.imageView;
@@ -3733,11 +3761,13 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
                      system_inputs.setup_generation == setup_generation &&
                      system_inputs.fetch_generation == owner->fetch_generation_ &&
                      system_inputs.index_generation == owner->index_generation_ &&
-                     system_inputs.used_mask == tb.used_mask;
+                     system_inputs.used_mask == tb.used_mask &&
+                     system_inputs.scaled_mask == tb.scaled_mask;
   if (!system_same) {
-    UpdateSystemConstants(st.primitive_polygonal, st.viewport, tb.used_mask, 0, vs, ps);
+    UpdateSystemConstants(st.primitive_polygonal, st.viewport, tb.used_mask, tb.scaled_mask,
+                          vs, ps);
     system_inputs = {setup_generation, owner->fetch_generation_, owner->index_generation_,
-                     tb.used_mask};
+                     tb.used_mask, tb.scaled_mask};
     system_same = last_system.submission == submission_number &&
                   !std::memcmp(&last_system_constants, &system_constants,
                                sizeof(system_constants));
@@ -3802,10 +3832,12 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     bound_viewport = st.vp;
   }
   VkRect2D sr;
-  sr.offset.x = int32_t(std::min(st.scissor.offset[0], pass_extent.width));
-  sr.offset.y = int32_t(std::min(st.scissor.offset[1], pass_extent.height));
-  sr.extent.width = std::min(st.scissor.extent[0], pass_extent.width - uint32_t(sr.offset.x));
-  sr.extent.height = std::min(st.scissor.extent[1], pass_extent.height - uint32_t(sr.offset.y));
+  sr.offset.x = int32_t(std::min(st.scissor.offset[0] * scale, pass_extent.width));
+  sr.offset.y = int32_t(std::min(st.scissor.offset[1] * scale, pass_extent.height));
+  sr.extent.width =
+      std::min(st.scissor.extent[0] * scale, pass_extent.width - uint32_t(sr.offset.x));
+  sr.extent.height =
+      std::min(st.scissor.extent[1] * scale, pass_extent.height - uint32_t(sr.offset.y));
   if (REXCVAR_GET(nx_native_trace_output) && trace_draw_geometries.size() < 32) {
     const uint32_t surface_pitch = r.Get<reg::RB_SURFACE_INFO>().surface_pitch;
     const std::array<uint32_t, 15> trace_key = {
@@ -4013,19 +4045,22 @@ bool Renderer::Impl::GetFastClearRectangle(StencilClearRect& rect, bool require_
   const float y1 = std::max({ys[0], ys[1], ys[2]});
   if (!(x0 < x1 && y0 < y1)) return false;
   // Avoid interpreting clip-plane intersections or partial viewport coverage.
-  if (x0 < st.vp.x || y0 < st.vp.y || x1 > st.vp.x + st.vp.width ||
-      y1 > st.vp.y + st.vp.height) return false;
+  // The host viewport and scissor are scaled; this rectangle is in guest pixels.
+  const float s = float(scale);
+  if (x0 < st.vp.x / s || y0 < st.vp.y / s || x1 > (st.vp.x + st.vp.width) / s ||
+      y1 > (st.vp.y + st.vp.height) / s) return false;
   uint32_t corners = 0;
   for (uint32_t i = 0; i < 3; ++i) {
     if ((xs[i] != x0 && xs[i] != x1) || (ys[i] != y0 && ys[i] != y1)) return false;
     corners |= 1u << (uint32_t(xs[i] == x1) | (uint32_t(ys[i] == y1) << 1));
   }
   if (rex::bit_count(corners) != 3) return false;
+  const int32_t si = int32_t(scale);
   rect = {
-      std::max(int32_t(x0), bound_scissor.offset.x),
-      std::max(int32_t(y0), bound_scissor.offset.y),
-      std::min(int32_t(x1), int32_t(bound_scissor.offset.x + bound_scissor.extent.width)),
-      std::min(int32_t(y1), int32_t(bound_scissor.offset.y + bound_scissor.extent.height))};
+      std::max(int32_t(x0), bound_scissor.offset.x / si),
+      std::max(int32_t(y0), bound_scissor.offset.y / si),
+      std::min(int32_t(x1), int32_t(bound_scissor.offset.x + bound_scissor.extent.width) / si),
+      std::min(int32_t(y1), int32_t(bound_scissor.offset.y + bound_scissor.extent.height) / si)};
 
   return rect.x0 < rect.x1 && rect.y0 < rect.y1;
 }
@@ -4097,8 +4132,9 @@ void Renderer::Impl::MirrorStencilClear() {
     attachment.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
     attachment.clearValue.depthStencil.stencil = ref.stencilref;
     VkClearRect clear{};
-    clear.rect.offset = {mapped.x0, mapped.y0};
-    clear.rect.extent = {uint32_t(mapped.x1 - mapped.x0), uint32_t(mapped.y1 - mapped.y0)};
+    clear.rect.offset = {mapped.x0 * int32_t(scale), mapped.y0 * int32_t(scale)};
+    clear.rect.extent = {uint32_t(mapped.x1 - mapped.x0) * scale,
+                         uint32_t(mapped.y1 - mapped.y0) * scale};
     clear.layerCount = 1;
     dfn().vkCmdClearAttachments(cmd(), 1, &attachment, 1, &clear);
     EndPass();
@@ -4190,8 +4226,9 @@ void Renderer::Impl::MirrorZeroDepthColorClear() {
     attachment.colorAttachment = 0;
     attachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
     VkClearRect clear{};
-    clear.rect.offset = {mapped.x0, mapped.y0};
-    clear.rect.extent = {uint32_t(mapped.x1 - mapped.x0), uint32_t(mapped.y1 - mapped.y0)};
+    clear.rect.offset = {mapped.x0 * int32_t(scale), mapped.y0 * int32_t(scale)};
+    clear.rect.extent = {uint32_t(mapped.x1 - mapped.x0) * scale,
+                         uint32_t(mapped.y1 - mapped.y0) * scale};
     clear.layerCount = 1;
     dfn().vkCmdClearAttachments(cmd(), 1, &attachment, 1, &clear);
     EndPass();
@@ -4288,6 +4325,10 @@ void Renderer::Impl::Resolve() {
   uint32_t width = uint32_t(x1 - x0);
   uint32_t height = std::min(uint32_t(y1 - y0), source->height - std::min(uint32_t(y0), source->height));
   if (!height) return;
+  // The rectangle above is in guest pixels; the images are scaled.
+  const int32_t hs = int32_t(scale);
+  const int32_t hx0 = x0 * hs, hy0 = y0 * hs;
+  const uint32_t hwidth = width * scale, hheight = height * scale;
 
   // Copy.
   uint32_t dest_base = r[rex::graphics::XE_GPU_REG_RB_COPY_DEST_BASE];
@@ -4456,7 +4497,9 @@ void Renderer::Impl::Resolve() {
     // Invalidate before recording the write. This is a no-op for addresses
     // with no composite, while protecting against stale images when a reused
     // resolve root is written through any layout outside the supported path.
-    const bool shared_mode = REXCVAR_GET(nx_native_shared_resolves);
+    // The legacy tiled composition is not resolution scaled; above 1x only the
+    // shared path runs.
+    const bool shared_mode = REXCVAR_GET(nx_native_shared_resolves) || scale > 1;
     std::optional<resolve_layout::SharedWrite> shared_write;
     if (shared_mode) {
       const bool supported_format = !dest_info.copy_dest_array && !dest_info.copy_dest_slice &&
@@ -4530,6 +4573,7 @@ void Renderer::Impl::Resolve() {
                                                 dest_width, dest_height};
       }
     }
+    const int32_t hdx = dest_x * hs, hdy = dest_y * hs;
     if (dest) {
       if (is_depth) {
         // Depth cannot be copied into a color image directly. It goes through
@@ -4541,7 +4585,7 @@ void Renderer::Impl::Resolve() {
         // the stencil byte that way to tell the player from the scene: with
         // depth alone in every channel, a post effect meant to skip the skater
         // drew him doubled with a light halo.
-        const uint64_t texels = uint64_t(width) * height;
+        const uint64_t texels = uint64_t(hwidth) * hheight;
         const VkDeviceSize stencil_offset = rex::align(VkDeviceSize(texels * 4), VkDeviceSize(256));
         const VkDeviceSize packed_offset =
             rex::align(stencil_offset + VkDeviceSize(texels), VkDeviceSize(256));
@@ -4578,13 +4622,13 @@ void Renderer::Impl::Resolve() {
               writes[i].pImageInfo = &images[i];
             }
             dfn().vkUpdateDescriptorSets(vk, 2, writes, 0, nullptr);
-            int32_t params[6] = {x0, y0, dest_x, dest_y, int32_t(width), int32_t(height)};
+            int32_t params[6] = {hx0, hy0, hdx, hdy, int32_t(hwidth), int32_t(hheight)};
             dfn().vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_COMPUTE, depth_copy_pipeline);
             dfn().vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE, depth_copy_layout, 0,
                                           1, &set, 0, nullptr);
             dfn().vkCmdPushConstants(c, depth_copy_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                      sizeof(params), params);
-            dfn().vkCmdDispatch(c, (width + 7) / 8, (height + 7) / 8, 1);
+            dfn().vkCmdDispatch(c, (hwidth + 7) / 8, (hheight + 7) / 8, 1);
           }
           // Readers: the draws, CopyToSized below, and the next depth test.
           VkMemoryBarrier after_compute = {VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
@@ -4602,8 +4646,8 @@ void Renderer::Impl::Resolve() {
                    packed_offset + texels * 4 <= kDepthScratchSize) {
           VkBufferImageCopy regions[2] = {};
           regions[0].imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1};
-          regions[0].imageOffset = {x0, y0, 0};
-          regions[0].imageExtent = {width, height, 1};
+          regions[0].imageOffset = {hx0, hy0, 0};
+          regions[0].imageExtent = {hwidth, hheight, 1};
           regions[1] = regions[0];
           regions[1].bufferOffset = stencil_offset;
           regions[1].imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
@@ -4636,7 +4680,7 @@ void Renderer::Impl::Resolve() {
                                      0, nullptr);
           VkBufferImageCopy out = regions[0];
           out.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-          out.imageOffset = {dest_x, dest_y, 0};
+          out.imageOffset = {hdx, hdy, 0};
           dfn().vkCmdCopyBufferToImage(c, depth_scratch, dest->image, VK_IMAGE_LAYOUT_GENERAL, 1,
                                        &out);
           // The words only for unorm depth: float24 would need its own
@@ -4670,21 +4714,21 @@ void Renderer::Impl::Resolve() {
         VkImageResolve resolve = {};
         resolve.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         resolve.dstSubresource = resolve.srcSubresource;
-        resolve.srcOffset = {x0, y0, 0};
-        resolve.dstOffset = {dest_x, dest_y, 0};
-        resolve.extent = {width, height, 1};
+        resolve.srcOffset = {hx0, hy0, 0};
+        resolve.dstOffset = {hdx, hdy, 0};
+        resolve.extent = {hwidth, hheight, 1};
         vkCmdResolveImage(c, source->image, VK_IMAGE_LAYOUT_GENERAL, dest->image,
                                 VK_IMAGE_LAYOUT_GENERAL, 1, &resolve);
       } else if (source->samples == VK_SAMPLE_COUNT_1_BIT && textures.StorageCapable(dest->format) &&
-                 ComputeColorCopy(c, source->view, dest->view, x0, y0, dest_x, dest_y, width, height)) {
+                 ComputeColorCopy(c, source->view, dest->view, hx0, hy0, hdx, hdy, hwidth, hheight)) {
         // Done by compute (see copy_color.cs.glsl).
       } else {
         VkImageCopy region = {};
         region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.dstSubresource = region.srcSubresource;
-        region.srcOffset = {x0, y0, 0};
-        region.dstOffset = {dest_x, dest_y, 0};
-        region.extent = {width, height, 1};
+        region.srcOffset = {hx0, hy0, 0};
+        region.dstOffset = {hdx, hdy, 0};
+        region.extent = {hwidth, hheight, 1};
         dfn().vkCmdCopyImage(c, source->image, VK_IMAGE_LAYOUT_GENERAL, dest->image,
                              VK_IMAGE_LAYOUT_GENERAL, 1, &region);
       }
@@ -4827,9 +4871,10 @@ void Renderer::Impl::Resolve() {
         }
       }
       VkClearRect rect = {};
-      rect.rect.offset = {x0, y0};
-      rect.rect.extent = {std::min(width, pass_extent.width - std::min(uint32_t(x0), pass_extent.width)),
-                          std::min(height, pass_extent.height - std::min(uint32_t(y0), pass_extent.height))};
+      rect.rect.offset = {hx0, hy0};
+      rect.rect.extent = {
+          std::min(hwidth, pass_extent.width - std::min(uint32_t(hx0), pass_extent.width)),
+          std::min(hheight, pass_extent.height - std::min(uint32_t(hy0), pass_extent.height))};
       rect.layerCount = 1;
       if (rect.rect.extent.width && rect.rect.extent.height) {
         dfn().vkCmdClearAttachments(c, count, attachments, 1, &rect);
@@ -4919,6 +4964,9 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   if (presenter && source_view) {
     width = std::min(width ? width : source_width, source_width);
     height = std::min(height ? height : source_height, source_height);
+    // The resolve image is scale times the guest size; present all of it.
+    width *= scale;
+    height *= scale;
     rex::system::X_VIDEO_MODE mode;
     rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
     uint32_t display_width = std::max(1u, uint32_t(mode.display_width));
