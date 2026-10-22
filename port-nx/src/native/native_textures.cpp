@@ -10,6 +10,7 @@
 #include "native_textures.h"
 #include "native_hash.h"
 #include "native_resolve_layout.h"
+#include "texture_pack.h"
 
 #include <algorithm>
 #include <array>
@@ -475,6 +476,10 @@ void RunUntile(const UntileJob& j) {
 // its own with the untiled data, which a later submission copies in.
 struct StreamJob {
   UntileJob untile;
+  // A texture pack replacement: the staging data comes from its DDS file instead of
+  // untiling guest memory (untile.levels then describe the replacement's mips).
+  const fear::texture_pack::Entry* replacement = nullptr;
+  uint64_t replacement_key = 0;
   VkImageCreateInfo info = {};
   VkImage image = VK_NULL_HANDLE;
   VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -522,6 +527,9 @@ struct TextureCache::Texture {
   uint64_t last_used_submission = 0;
   uint64_t key_hash = 0;
   uint64_t content_hash = 0;
+  // Made from a texture pack replacement (texture_pack.h), at the replacement's size:
+  // never refilled in place with guest data.
+  bool replaced = false;
   // Still being created by the streaming worker.
   std::shared_ptr<StreamJob> stream;
   uint32_t level_count = 0;
@@ -1053,7 +1061,13 @@ struct TextureCache::Impl {
       }
       if (job->ok) {
         job->untile.staging = static_cast<uint8_t*>(mapping);
-        RunUntile(job->untile);
+        if (job->replacement) {
+          job->ok = fear::texture_pack::ReadData(*job->replacement, job->untile.staging,
+                                                 job->staging_size);
+          if (!job->ok) fear::texture_pack::MarkBad(job->replacement_key);
+        } else {
+          RunUntile(job->untile);
+        }
       }
       job->done.store(true, std::memory_order_release);
     }
@@ -1428,6 +1442,7 @@ void TextureCache::BeginFrame(uint64_t frame, uint64_t completed_frame) {
   im.PollTiledReadbacks();
   im.tiled_resolve_roots.clear();
   im.sync_creates_left = kSyncCreatesPerFrame;
+  fear::texture_pack::ReportStats();
   // Destroy what the GPU no longer uses.
   auto it = std::remove_if(im.retired.begin(), im.retired.end(), [&](Impl::Retired& r) {
     if (r.frame > completed_frame) {
@@ -2913,11 +2928,35 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
     pending.stream.reset();
     ++stats_.streamed;
   }
+  // F.E.A.R.: a texture pack replacement, looked up once per new content. A replaced
+  // texture is never refilled in place (its image has the replacement's size), and a
+  // replacement always gets a new image.
+  const fear::texture_pack::Entry* replacement = nullptr;
+  uint64_t pack_key = 0;
+  if ((existing == im.textures.end() || existing->second->content_hash != texture_hash) &&
+      base_data && base_size && layers == 1 &&
+      fetch.dimension == xenos::DataDimension::k2DOrStacked &&
+      (fear::texture_pack::Enabled() || fear::texture_pack::LogKeys())) {
+    pack_key = fear::texture_pack::ReplacementKey(base_data, base_size, uint32_t(format),
+                                                  width, height, fetch.tiled, fetch.pitch);
+    if (fear::texture_pack::LogKeys()) {
+      static std::unordered_set<uint64_t> logged_keys;
+      if (logged_keys.size() < 65536 && logged_keys.insert(pack_key).second) {
+        REXLOG_INFO("[texpack] key={:016X} format={} size={}x{} tiled={} pitch={} base={} "
+                    "packed={} mips={} address={:08X}",
+                    pack_key, uint32_t(format), width, height, uint32_t(fetch.tiled),
+                    uint32_t(fetch.pitch), base_size, uint32_t(fetch.packed_mips),
+                    mip_max_level, base_page << 12);
+      }
+    }
+    replacement = fear::texture_pack::Find(pack_key);
+    if (fear::texture_pack::Enabled()) fear::texture_pack::CountLookup(replacement != nullptr);
+  }
   if (existing != im.textures.end()) {
     Texture& old = *existing->second;
     if (old.content_hash == texture_hash) {
       texture = &old;
-    } else if (old.last_used_submission < upload.submission) {
+    } else if (old.last_used_submission < upload.submission && !old.replaced && !replacement) {
       texture = &old;
       reuse_image = true;
     } else {
@@ -2934,6 +2973,66 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
       im.memo.clear();
       ++im.answers_epoch;
     }
+  }
+  if (!texture && replacement) {
+    // F.E.A.R.: the replacement streams in from its DDS file at its own size and mips.
+    auto job = std::make_shared<StreamJob>();
+    job->replacement = replacement;
+    job->replacement_key = pack_key;
+    UntileJob& u = job->untile;
+    u.level_count = std::min<uint32_t>(replacement->mip_count, xenos::kTextureMaxMips);
+    u.layers = 1;
+    u.width = replacement->width;
+    u.height = replacement->height;
+    u.block_width = replacement->block_width;
+    u.block_height = replacement->block_height;
+    VkDeviceSize replacement_total = 0;
+    for (uint32_t level = 0; level < u.level_count; ++level) {
+      LevelLayout& l = u.levels[level];
+      l.width = std::max(replacement->width >> level, 1u);
+      l.height = std::max(replacement->height >> level, 1u);
+      l.blocks_x = (l.width + u.block_width - 1) / u.block_width;
+      l.blocks_y = (l.height + u.block_height - 1) / u.block_height;
+      l.host_row_bytes = l.blocks_x * replacement->block_bytes;
+      l.host_rows = l.blocks_y;
+      l.layer_bytes = VkDeviceSize(l.host_row_bytes) * l.host_rows;
+      l.offset = replacement_total;
+      replacement_total += l.layer_bytes;
+    }
+    job->staging_size = std::max<VkDeviceSize>(replacement_total, replacement->data_size);
+    VkImageCreateInfo& info = job->info;
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = replacement->format;
+    info.extent = {replacement->width, replacement->height, 1};
+    info.mipLevels = u.level_count;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto created = std::make_unique<Texture>();
+    created->dimension = fetch.dimension;
+    created->format_unorm = replacement->format;
+    created->format_snorm = VK_FORMAT_UNDEFINED;
+    // The pack keeps the 360 host format's channel layout, so the view swizzle is the same.
+    created->host_format_swizzle = host_format.swizzle;
+    created->key_hash = key_hash;
+    created->content_hash = texture_hash;
+    created->level_count = u.level_count;
+    created->layers = 1;
+    created->last_used_frame = im.frame;
+    created->replaced = true;
+    created->stream = job;
+    im.textures.emplace(key_hash, std::move(created));
+    {
+      std::lock_guard<std::mutex> lock(im.stream_mutex);
+      im.stream_jobs.push_back(job);
+    }
+    im.stream_cv.notify_one();
+    ++stats_.uploads;
+    stats_.upload_bytes += job->staging_size;
+    return null_view;
   }
   if (!texture || reuse_image) {
     // Upload (into a new image, or the existing one).

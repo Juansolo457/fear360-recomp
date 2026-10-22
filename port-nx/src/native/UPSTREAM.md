@@ -5,5 +5,8 @@ Xenos Vulkan renderer, itself based on nfsmw-nx.
 Local changes (see `git log -p -- port-nx/src/native`):
 - Integer draw-resolution scaling (`nx_native_resolution_scale`, 1-4): host render
   targets, resolve images and the swap are scaled; guest-space math is untouched.
+- Texture pack hooks in `native_textures.cpp` (marked `F.E.A.R.`): a replacement key per new
+  texture content, a streamed upload from the pack's DDS instead of untiling guest memory,
+  and no in-place refill of replaced images. The pack itself is `port-nx/src/texture_pack.*`.
 
 The `*_test.cpp` files are kept for reference but are not built here.

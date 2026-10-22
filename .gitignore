@@ -42,3 +42,5 @@ port-nx/out/
 port-nx/logs/
 port-nx/user*/
 port-nx/cache*/
+port-nx/user-smoke/
+port-nx/cache-smoke/

@@ -31,6 +31,7 @@ set(FEAR_NATIVE_SOURCES
 
 set(FEAR_SOURCES
     src/main.cpp
+    src/texture_pack.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 
@@ -50,3 +51,10 @@ target_include_directories(fear PRIVATE
     "${REXSDK_DIR}/thirdparty/renderdoc"   # rex/ui/renderdoc_api.h, private to the plugin
     $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>
 )
+
+# Offline texture pack indexer (tools/texture_pack.py runs it): the SDK's own layout and
+# untiling code and the renderer's pack key, so offline and runtime keys agree by construction.
+add_executable(fear_texindex tools/texindex.cpp src/texture_pack.cpp)
+target_include_directories(fear_texindex PRIVATE src "${REXSDK_DIR}/src/graphics")
+target_link_libraries(fear_texindex PRIVATE rexgpu-xenos rex::runtime xxHash::xxhash)
+add_dependencies(fear fear_texindex)
