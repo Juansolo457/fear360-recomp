@@ -1,0 +1,43 @@
+From de0f0e2efb3ca76cdbf99091167f93906ea78773 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 08:18:46 -0700
+Subject: [PATCH] Allow a guest refresh rate up to 480 Hz
+
+A game that presents every second vblank (F.E.A.R.) is capped at 120 fps by the 240 Hz limit; 480 Hz lets it run at up to 240 fps on high-refresh displays.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kernel/xboxkrnl/xboxkrnl_video.cpp | 3 ++-
+ src/ui/window.cpp                      | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_video.cpp b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+index 1254710..5b54880 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_video.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+@@ -74,7 +74,8 @@ uint32_t GetConfiguredVideoModeHeight() {
+ }
+ 
+ float GetConfiguredVideoModeRefreshRate() {
+-  double refresh_rate_hz = std::clamp(REXCVAR_GET(video_mode_refresh_rate), 24.0, 240.0);
++  // Up to 480 Hz: games that present every second vblank (F.E.A.R.) reach 240 fps there.
++  double refresh_rate_hz = std::clamp(REXCVAR_GET(video_mode_refresh_rate), 24.0, 480.0);
+   return float(refresh_rate_hz);
+ }
+ 
+diff --git a/src/ui/window.cpp b/src/ui/window.cpp
+index b4e045f..c077fd6 100644
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -62,7 +62,7 @@ REXCVAR_DEFINE_STRING(resolution, "", "Display",
+ 
+ REXCVAR_DEFINE_DOUBLE(video_mode_refresh_rate, 60.0, "Display",
+                       "Guest video mode refresh rate in Hz")
+-    .range(24.0, 240.0)
++    .range(24.0, 480.0)
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
+ namespace rex {
+-- 
+2.53.0.windows.1
+

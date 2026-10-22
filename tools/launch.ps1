@@ -13,13 +13,13 @@ param(
     [switch]$Windowed,
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
     # The game presents every 2 virtual vblanks: 30 fps at the console's 60 Hz, so the frame rate
-    # is set by the vblank rate (FrameRate x 2, up to the SDK's 240 Hz), a cap of the game's own
-    # whatever the display or driver does. 120 was measured steady (2026-10-22) but bullet
-    # tracers glitched in heavy firefights ("twitching in midair"), so 90 is the default while
-    # that is checked; 30 is the original console pacing. On a fixed-refresh display pick a
-    # divisor of its rate for even frame times: 80 or 120 on 240 Hz (90 alternates 2 and 3
-    # refreshes per frame), 72 on 144 Hz, 60 on 60 Hz.
-    [ValidateSet(30, 60, 72, 80, 90, 120)][int]$FrameRate = 90,
+    # is set by the vblank rate (FrameRate x 2, up to 480 Hz with SDK patch 0003), a cap of the
+    # game's own whatever the display or driver does. 120 was measured steady (2026-10-22) but
+    # bullet tracers glitched in heavy firefights ("twitching in midair"), so 90 is the default
+    # while that is checked; 30 is the original console pacing. On a fixed-refresh display pick
+    # a divisor of its rate for even frame times: 80, 120 or 240 on 240 Hz (90 alternates 2 and
+    # 3 refreshes per frame), 72 or 144 on 144 Hz, 60 on 60 Hz.
+    [ValidateSet(30, 60, 72, 80, 90, 120, 144, 240)][int]$FrameRate = 90,
     # Swapchain present mode. The SDK picks immediate (no vsync, tearing) when the driver offers
     # it; the game is paced by a software vblank that is not locked to the display, so frames
     # land unevenly. fifo = true vsync (even, adds queue latency), mailbox = no tearing, low
