@@ -70,6 +70,17 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   pipelines). The user: the opening felt smooth. What's left in the load spikes is pipeline
   creation (23 to 33 per spike, with the driver cache) and texture uploads; the 16 shaders were
   new to the list. Next: record pipeline keys the same way and create them in the background.
+- **Changed (pipelines, same day):** the pre-warm file (version 2) also holds the key of each
+  pipeline a run creates (`NotePrewarmPipeline` in `GetPipeline`). The key names everything a
+  pipeline needs: both shaders (hash and modification), the geometry shader's key, the layout's
+  binding counts, the formats and fixed-function state. At the next start the keys wait in
+  `prewarm_pipeline_pending`; each frame `PrewarmPipelinesStep` (ring thread, up to 64 keys a
+  frame) turns those whose shaders are translated into jobs for the pipeline worker, which takes
+  the jobs draws are waiting for first; a draw that needs a queued one moves it to the front. A
+  version-1 file still loads its shaders. A build whose `PipelineKey` changed size skips the
+  keys. Type-checked, not yet run. *To verify:* two runs again (the first writes version 2);
+  the second logs "Shader pre-warm: ... N pipelines to follow" and "Pipeline pre-warm done", and
+  its load spikes show few pipelines ("slow frame N ms: ... N pipelines").
 
 ### P1. Texture eviction counted frames, not time — **Changed**
 - *Where:* `port-nx/src/native/native_textures.cpp`, `TextureCache::BeginFrame` (eviction at

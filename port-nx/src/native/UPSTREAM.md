@@ -45,6 +45,7 @@ Local changes (see `git log -p -- port-nx/src/native`):
 - Shader pre-warm (`fear_shader_prewarm`, `native_renderer.cpp`, marked `F.E.A.R.`): every
   translation a run asks for is recorded with its shader's microcode and saved per title and
   device next to the driver cache; at the next start they are queued for the translation worker,
-  behind any draw is waiting for. See `docs/REVIEW.md`.
+  behind any draw is waiting for. Pipelines too: each one's key is recorded, and at the next
+  start created on the pipeline worker once its shaders are translated. See `docs/REVIEW.md`.
 
 The `*_test.cpp` files are kept for reference but are not built here.

@@ -1468,6 +1468,22 @@ struct Renderer::Impl {
   std::vector<std::pair<uint64_t, VkPipeline>> pipelines_completed;
   std::atomic<uint32_t> pipelines_completed_count{0};
   bool pipeline_stop = false;
+  // F.E.A.R.: pipeline pre-warm, with the shader pre-warm (fear_shader_prewarm). Each pipeline a
+  // run creates is recorded by its key, which names everything else (both shaders, the geometry
+  // shader, the layout's binding counts); at the next start each key whose shaders are translated
+  // becomes a job for the pipeline worker, behind any a draw is waiting for. The ring thread owns
+  // the map and the pending list; prewarm_pipeline_jobs and the "all queued" flag are under
+  // pipeline_mutex.
+  std::unordered_map<uint64_t, PipelineKey> prewarm_pipelines;  // by hash
+  std::vector<PipelineKey> prewarm_pipeline_pending;
+  size_t prewarm_pipeline_cursor = 0;
+  std::deque<PipelineJob> prewarm_pipeline_jobs;
+  bool prewarm_pipelines_all_queued = false;
+  bool prewarm_pipelines_reported = false;
+  size_t prewarm_pipelines_loaded = 0;
+  std::chrono::steady_clock::time_point prewarm_pipelines_started;
+  void NotePrewarmPipeline(uint64_t hash, const PipelineKey& key);
+  void PrewarmPipelinesStep();
 
   // --- Render targets ------------------------------------------------------------
 
@@ -2452,6 +2468,16 @@ VkPipeline Renderer::Impl::GetPipeline(const PipelineKey& key,
     return pipelines.count(hash) != 0;
   };
   if (pending_pipelines.count(hash)) {
+    // F.E.A.R.: queued by the pre-warm behind others: a draw needs it now.
+    {
+      std::lock_guard<std::mutex> lock(pipeline_mutex);
+      auto queued = std::find_if(prewarm_pipeline_jobs.begin(), prewarm_pipeline_jobs.end(),
+                                 [&](const PipelineJob& job) { return job.hash == hash; });
+      if (queued != prewarm_pipeline_jobs.end()) {
+        pipeline_jobs.push_front(*queued);
+        prewarm_pipeline_jobs.erase(queued);
+      }
+    }
     if (WaitForCompile(compiled)) return pipelines[hash];
     *pending_out = true;
     return VK_NULL_HANDLE;
@@ -2463,6 +2489,7 @@ VkPipeline Renderer::Impl::GetPipeline(const PipelineKey& key,
   job.pixel = ps ? ps->shader_module() : VK_NULL_HANDLE;
   job.geometry = geometry;
   job.layout = layout;
+  NotePrewarmPipeline(hash, key);
   if (REXCVAR_GET(nx_native_async_pipelines) && pipeline_thread.joinable()) {
     // Compiled on the worker. Until it is ready the draws that need it are
     // skipped, a frame or two of missing objects instead of a frozen frame.
@@ -2513,16 +2540,36 @@ void Renderer::Impl::PipelineThread() {
 #endif
   while (true) {
     PipelineJob job;
+    bool prewarm_finished = false;
     {
       std::unique_lock<std::mutex> lock(pipeline_mutex);
-      pipeline_cv.wait(lock, [&] { return pipeline_stop || !pipeline_jobs.empty(); });
+      pipeline_cv.wait(lock, [&] {
+        return pipeline_stop || !pipeline_jobs.empty() || !prewarm_pipeline_jobs.empty();
+      });
       if (pipeline_stop) {
         return;
       }
-      job = pipeline_jobs.front();
-      pipeline_jobs.pop_front();
+      if (!pipeline_jobs.empty()) {
+        job = pipeline_jobs.front();
+        pipeline_jobs.pop_front();
+      } else {
+        job = prewarm_pipeline_jobs.front();
+        prewarm_pipeline_jobs.pop_front();
+        if (prewarm_pipeline_jobs.empty() && prewarm_pipelines_all_queued &&
+            !prewarm_pipelines_reported) {
+          prewarm_pipelines_reported = true;
+          prewarm_finished = true;
+        }
+      }
     }
     VkPipeline pipeline = CreatePipeline(job);
+    if (prewarm_finished) {
+      REXLOG_INFO("[native] Pipeline pre-warm done: {} keys loaded, last created {:.1f} s in",
+                  prewarm_pipelines_loaded,
+                  std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                prewarm_pipelines_started)
+                      .count());
+    }
     std::lock_guard<std::mutex> lock(pipeline_mutex);
     pipelines_completed.emplace_back(job.hash, pipeline);
     pipelines_completed_count.fetch_add(1, std::memory_order_release);
@@ -5593,7 +5640,8 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
       now - last_pipeline_time > std::chrono::seconds(5) && !driver_cache_writing.load()) {
     SaveDriverCache();
   }
-  // F.E.A.R.: the shader pre-warm list, the same way.
+  // F.E.A.R.: the pre-warm: pipelines whose shaders are ready, and the list, saved the same way.
+  PrewarmPipelinesStep();
   if (prewarm_dirty && now - prewarm_changed > std::chrono::seconds(5) &&
       !prewarm_writing.load()) {
     SavePrewarm(false);
@@ -5765,10 +5813,11 @@ void Renderer::Impl::SaveDriverCache() {
 
 // F.E.A.R.: shader pre-warm. The file: kPrewarmMagic, payload size, XXH3 of the payload; the
 // payload: version, count, then per shader its microcode hash, type, dword count, modification
-// count, the microcode (host order) and the modifications.
+// count, the microcode (host order) and the modifications; from version 2, the number of pipeline
+// keys, the key size (a build whose PipelineKey differs skips them), and the keys.
 namespace {
 constexpr uint64_t kPrewarmMagic = 0x314D525750524546ull;  // "FEPRWRM1"
-constexpr uint32_t kPrewarmVersion = 1;
+constexpr uint32_t kPrewarmVersion = 2;  // 2: the pipelines' keys after the shaders
 
 template <typename T>
 bool ReadValue(const std::vector<uint8_t>& data, size_t& pos, T& value) {
@@ -5802,6 +5851,14 @@ void Renderer::Impl::NotePrewarm(VulkanShader::VulkanTranslation* translation) {
   }
 }
 
+void Renderer::Impl::NotePrewarmPipeline(uint64_t hash, const PipelineKey& key) {
+  if (prewarm_path.empty()) return;
+  if (prewarm_pipelines.try_emplace(hash, key).second) {
+    prewarm_dirty = true;
+    prewarm_changed = std::chrono::steady_clock::now();
+  }
+}
+
 void Renderer::Impl::LoadPrewarm() {
   std::vector<uint8_t> data;
   if (FILE* file = rex::filesystem::OpenFile(prewarm_path, "rb")) {
@@ -5818,12 +5875,13 @@ void Renderer::Impl::LoadPrewarm() {
   }
   size_t pos = 0;
   uint32_t version = 0, count = 0;
-  if (!ReadValue(data, pos, version) || version != kPrewarmVersion ||
+  if (!ReadValue(data, pos, version) || version < 1 || version > kPrewarmVersion ||
       !ReadValue(data, pos, count)) {
     return;
   }
   std::vector<VulkanShader::VulkanTranslation*> jobs;
   size_t shaders_loaded = 0;
+  bool shaders_complete = true;
   for (uint32_t i = 0; i < count; ++i) {
     uint64_t hash = 0;
     uint32_t type = 0, dwords = 0, mod_count = 0, reserved = 0;
@@ -5831,6 +5889,7 @@ void Renderer::Impl::LoadPrewarm() {
         !ReadValue(data, pos, dwords) || !ReadValue(data, pos, mod_count) ||
         !ReadValue(data, pos, reserved) || type > 1 || !dwords || dwords > 65536 ||
         mod_count > 4096 || pos + size_t(dwords) * 4 + size_t(mod_count) * 8 > data.size()) {
+      shaders_complete = false;
       break;
     }
     PrewarmShader entry;
@@ -5862,20 +5921,125 @@ void Renderer::Impl::LoadPrewarm() {
     prewarm[hash] = std::move(entry);
     ++shaders_loaded;
   }
-  if (jobs.empty() || !translation_thread.joinable()) {
+  // Version 2: the pipelines' keys, if this build's key is the same size.
+  uint32_t pipeline_count = 0, key_size = 0;
+  if (version >= 2 && shaders_complete && ReadValue(data, pos, pipeline_count) &&
+      ReadValue(data, pos, key_size) && key_size == sizeof(PipelineKey) &&
+      pos + size_t(pipeline_count) * key_size <= data.size()) {
+    prewarm_pipeline_pending.reserve(pipeline_count);
+    for (uint32_t i = 0; i < pipeline_count; ++i) {
+      PipelineKey key;
+      std::memcpy(&key, data.data() + pos, sizeof(key));
+      pos += sizeof(key);
+      if (prewarm_pipelines.try_emplace(XXH3_64bits(&key, sizeof(key)), key).second) {
+        prewarm_pipeline_pending.push_back(key);
+      }
+    }
+    prewarm_pipelines_loaded = prewarm_pipeline_pending.size();
+    prewarm_pipelines_started = std::chrono::steady_clock::now();
+  }
+  if (!jobs.empty() && !translation_thread.joinable()) {
     // No worker (nx_native_async_pipelines off): draws translate as they come, as before.
     for (auto* translation : jobs) translation_state.erase(translation);
+    jobs.clear();
+  }
+  if (!pipeline_thread.joinable()) {
+    prewarm_pipeline_pending.clear();
+  }
+  if (!jobs.empty()) {
+    prewarm_started = std::chrono::steady_clock::now();
+    prewarm_queued = jobs.size();
+    {
+      std::lock_guard<std::mutex> lock(translation_mutex);
+      prewarm_jobs.insert(prewarm_jobs.end(), jobs.begin(), jobs.end());
+    }
+    translation_cv.notify_one();
+  }
+  REXLOG_INFO("[native] Shader pre-warm: {} translations of {} shaders queued, {} pipelines to "
+              "follow, from {}",
+              jobs.size(), shaders_loaded, prewarm_pipeline_pending.size(),
+              prewarm_path.string());
+}
+
+// Each frame (ring thread): up to 64 of the loaded pipeline keys looked at; those whose shaders
+// are translated become jobs, those waiting on a translation stay, the rest are dropped.
+void Renderer::Impl::PrewarmPipelinesStep() {
+  if (prewarm_pipeline_pending.empty()) {
     return;
   }
-  prewarm_started = std::chrono::steady_clock::now();
-  prewarm_queued = jobs.size();
-  {
-    std::lock_guard<std::mutex> lock(translation_mutex);
-    prewarm_jobs.insert(prewarm_jobs.end(), jobs.begin(), jobs.end());
+  DrainTranslations();
+  DrainCompletedPipelines();
+  // The module of a translated shader: 2 with it, 1 to wait, 0 to give up on the key.
+  auto module_of = [&](uint64_t shader_hash, uint64_t modification, VkShaderModule& out) {
+    auto shader = shaders.find(shader_hash);
+    if (shader == shaders.end()) return 0;
+    const auto& translations = shader->second->translations();
+    auto found = translations.find(modification);
+    if (found == translations.end()) return 0;
+    auto* translation = static_cast<VulkanShader::VulkanTranslation*>(found->second);
+    auto state = translation_state.find(translation);
+    if (state == translation_state.end()) return 0;
+    if (state->second != 2) return 1;
+    if (!translation->is_valid() || !translation->shader_module()) return 0;
+    out = translation->shader_module();
+    return 2;
+  };
+  std::vector<PipelineJob> ready;
+  for (int looked = 0; looked < 64 && !prewarm_pipeline_pending.empty(); ++looked) {
+    if (prewarm_pipeline_cursor >= prewarm_pipeline_pending.size()) {
+      prewarm_pipeline_cursor = 0;
+    }
+    const PipelineKey key = prewarm_pipeline_pending[prewarm_pipeline_cursor];
+    PipelineJob job;
+    job.key = key;
+    job.hash = XXH3_64bits(&key, sizeof(key));
+    int outcome = pipelines.count(job.hash) || pending_pipelines.count(job.hash) ? 0 : 2;
+    if (outcome == 2) {
+      outcome = module_of(key.vs_hash, key.vs_modification, job.vertex);
+    }
+    if (outcome == 2 && key.ps_hash) {
+      outcome = module_of(key.ps_hash, key.ps_modification, job.pixel);
+    }
+    if (outcome == 2 && key.geometry_shader) {
+      GeometryShaderKey gs_key;
+      gs_key.key = key.geometry_shader;
+      auto it = geometry_shaders.find(gs_key.key);
+      if (it == geometry_shaders.end()) {
+        it = geometry_shaders.emplace(gs_key.key, CreateGeometryShader(device, gs_key)).first;
+      }
+      job.geometry = it->second;
+      if (!job.geometry) outcome = 0;
+    }
+    if (outcome == 2) {
+      const PipelineLayout* layout = GetPipelineLayout(
+          uint32_t(key.layout >> 48) & 0xFFFF, uint32_t(key.layout >> 32) & 0xFFFF,
+          uint32_t(key.layout >> 16) & 0xFFFF, uint32_t(key.layout) & 0xFFFF);
+      if (layout && layout->layout) {
+        job.layout = layout->layout;
+      } else {
+        outcome = 0;
+      }
+    }
+    if (outcome == 1) {
+      ++prewarm_pipeline_cursor;
+      continue;
+    }
+    if (outcome == 2) {
+      pending_pipelines.insert(job.hash);
+      ready.push_back(job);
+    }
+    prewarm_pipeline_pending[prewarm_pipeline_cursor] = prewarm_pipeline_pending.back();
+    prewarm_pipeline_pending.pop_back();
   }
-  translation_cv.notify_one();
-  REXLOG_INFO("[native] Shader pre-warm: {} translations of {} shaders queued from {}",
-              jobs.size(), shaders_loaded, prewarm_path.string());
+  const bool all_queued = prewarm_pipeline_pending.empty();
+  if (!ready.empty() || all_queued) {
+    {
+      std::lock_guard<std::mutex> lock(pipeline_mutex);
+      prewarm_pipeline_jobs.insert(prewarm_pipeline_jobs.end(), ready.begin(), ready.end());
+      prewarm_pipelines_all_queued = all_queued;
+    }
+    pipeline_cv.notify_one();
+  }
 }
 
 void Renderer::Impl::SavePrewarm(bool wait) {
@@ -5899,6 +6063,11 @@ void Renderer::Impl::SavePrewarm(bool wait) {
     payload.insert(payload.end(), ucode, ucode + entry.ucode.size() * 4);
     const auto* modifications = reinterpret_cast<const uint8_t*>(entry.modifications.data());
     payload.insert(payload.end(), modifications, modifications + entry.modifications.size() * 8);
+  }
+  WriteValue(payload, uint32_t(prewarm_pipelines.size()));
+  WriteValue(payload, uint32_t(sizeof(PipelineKey)));
+  for (const auto& [hash, key] : prewarm_pipelines) {
+    WriteValue(payload, key);
   }
   auto data = std::make_shared<std::vector<uint8_t>>(std::move(payload));
   const std::filesystem::path path = prewarm_path;
