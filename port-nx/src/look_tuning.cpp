@@ -10,8 +10,11 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <rex/cvar.h>
@@ -19,6 +22,8 @@
 #include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xmemory.h>
 
 REXCVAR_DEFINE_STRING(fear_look_ramp, "off", "F.E.A.R.",
                       "Right-stick turn boost at the stick's edge: console (as shipped: 0.3 s "
@@ -40,6 +45,30 @@ constexpr const char* kDatabase = "Game/database/Loki.gamedb";
 constexpr const char* kGuestFolder = "\\Device\\Harddisk0\\Partition1\\Game\\database";
 constexpr const char* kOverrideMount = "\\Device\\FearOverride";
 constexpr uint32_t kTypeFloat = 2;
+
+// The values the settings change, by attribute (and console variable) name; empty as shipped.
+std::vector<std::pair<std::string, float>> Changes() {
+  const std::string ramp = REXCVAR_GET(fear_look_ramp);
+  std::vector<std::pair<std::string, float>> changes;
+  if (ramp == "nodelay") {
+    changes = {{"GPadAimEdgeDelayTime", 0.0f}};
+  } else if (ramp == "instant") {
+    changes = {{"GPadAimEdgeDelayTime", 0.0f}, {"GPadAimEdgeAccelTime", 0.001f}};
+  } else if (ramp == "off") {
+    changes = {{"GPadAimEdgeThreshold", 2.0f}};  // past any stick reading: the boost never starts
+  }
+  if (!REXCVAR_GET(fear_aim_softlock)) {
+    changes.emplace_back("TurningSoftLockYawFactor", 1.0f);
+    changes.emplace_back("TurningSoftLockPitchFactor", 1.0f);
+  }
+  return changes;
+}
+
+// The database path of each attribute.
+std::string DatabasePath(const std::string& name) {
+  return (name.starts_with("TurningSoftLock") ? "Client/SoftLock/SoftLock/"
+                                              : "Client/Shared/Shared/") + name;
+}
 
 uint32_t ReadWord(const std::vector<uint8_t>& data, size_t pos) {
   uint32_t value;
@@ -129,36 +158,27 @@ void WriteFloat(std::vector<uint8_t>& data, size_t pos, float value) {
 void Apply(rex::Runtime& runtime) {
   const std::string ramp = REXCVAR_GET(fear_look_ramp);
   const bool softlock = REXCVAR_GET(fear_aim_softlock);
-  if (ramp == "console" && softlock) return;
+  const auto changes = Changes();
+  if (changes.empty()) return;
 
   const auto source = runtime.game_data_root() / kDatabase;
+  std::error_code exists_error;
+  if (!std::filesystem::exists(source, exists_error)) {
+    // F.E.A.R. Files: the database is in the catalogue; FearConsoleVarDefault does it.
+    REXLOG_INFO("F.E.A.R.: look tuning: stick edge boost '{}', soft lock {} (as the game sets "
+                "up its console variables)", ramp, softlock ? "on" : "off");
+    return;
+  }
   std::ifstream in(source, std::ios::binary);
   std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)), {});
-  std::map<std::string, size_t> at = {
-      {"Client/Shared/Shared/GPadAimEdgeThreshold", 0},
-      {"Client/Shared/Shared/GPadAimEdgeDelayTime", 0},
-      {"Client/Shared/Shared/GPadAimEdgeAccelTime", 0},
-      {"Client/SoftLock/SoftLock/TurningSoftLockYawFactor", 0},
-      {"Client/SoftLock/SoftLock/TurningSoftLockPitchFactor", 0},
-  };
+  std::map<std::string, size_t> at;
+  for (const auto& [name, value] : changes) at[DatabasePath(name)] = 0;
   if (data.empty() || !FindFloats(data, at)) {
     REXLOG_ERROR("F.E.A.R.: look tuning: could not read {}; the console tuning stays",
                  source.string());
     return;
   }
-  if (ramp == "nodelay") {
-    WriteFloat(data, at["Client/Shared/Shared/GPadAimEdgeDelayTime"], 0.0f);
-  } else if (ramp == "instant") {
-    WriteFloat(data, at["Client/Shared/Shared/GPadAimEdgeDelayTime"], 0.0f);
-    WriteFloat(data, at["Client/Shared/Shared/GPadAimEdgeAccelTime"], 0.001f);
-  } else if (ramp == "off") {
-    // Past any stick reading: the boost never starts.
-    WriteFloat(data, at["Client/Shared/Shared/GPadAimEdgeThreshold"], 2.0f);
-  }
-  if (!softlock) {
-    WriteFloat(data, at["Client/SoftLock/SoftLock/TurningSoftLockYawFactor"], 1.0f);
-    WriteFloat(data, at["Client/SoftLock/SoftLock/TurningSoftLockPitchFactor"], 1.0f);
-  }
+  for (const auto& [name, value] : changes) WriteFloat(data, at[DatabasePath(name)], value);
 
   std::error_code error;
   const auto root = runtime.user_data_root() / "overrides" / "Game";
@@ -185,3 +205,24 @@ void Apply(rex::Runtime& runtime) {
 }
 
 }  // namespace fear::look_tuning
+
+void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
+  static const auto changes = fear::look_tuning::Changes();  // the cvars are final by now
+  if (changes.empty() || !r5.u32) return;
+  const auto* name = reinterpret_cast<const char*>(
+      rex::system::kernel_memory()->virtual_membase() + r5.u32);
+  const std::string_view view(name, strnlen(name, 64));
+  for (const auto& [wanted, value] : changes) {
+    if (view != wanted) continue;
+    static std::mutex mutex;
+    static std::set<std::string> logged;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (logged.insert(wanted).second) {
+        REXLOG_INFO("F.E.A.R.: look tuning: {} = {} (the game's {})", wanted, value, f1.f64);
+      }
+    }
+    f1.f64 = value;
+    return;
+  }
+}

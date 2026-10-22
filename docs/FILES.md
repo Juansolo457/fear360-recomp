@@ -34,6 +34,13 @@ ReXGlue 0.10 (our patched SDK), `rexglue init` + `codegen`, in a scratch project
 - Missed functions: data words pointing into code that no known function covers. Files has 49 such targets; nearly all are zero words in padding (not code), the same picture as F.E.A.R. (42), which plays through. Nothing to add up front; a campaign that calls a missed function ends with a crash report naming it.
 - To play: `tools/launch.ps1 -Files -TexturePack private/files/texture_pack -Extra '--nx_renderer native'` (4K from the first-run settings).
 
+## Play-test (2026-10-22): "running really well"
+4K, the texture pack, 80 fps. The user: "It seems to be running really well… I think it ran better out of the box than Fear 1 did." The log: an even 80 fps (3 refreshes per frame at 240 Hz), and in 12 of 37 ten-second windows one frame of 50 to 112 ms (hitches, for the optimisation pass). No crash.
+
+The user's order from here: 1. a pass on the smoke plumes; 2. the right stick (as in F.E.A.R.); 3. an optimisation pass on Files.
+
+**Right stick: ported. The user: "feels great".** The log of that run: `GPadAimEdgeThreshold = 2 (the game's 0.95)`. F.E.A.R. patches `Loki.gamedb` as a file; Files has none loose (`Database\Loki.gamedb` is inside `uberCatalog.cat`, compressed). But the game copies each tuning value into a console variable of the same name: `sub_82350318` reads `GPadAimEdgeThreshold`, `…DelayTime`, `…AccelTime`, `…MaxTurnRate`, `TurningSoftLockYawFactor`, `…PitchFactor` from the database and hands each to `VarTrack::Init` (`sub_822C4B28`: name in r5, value in f1; it applies the value only when it creates the variable). A hook at its entry (`FearConsoleVarDefault`, `port-nx/src/look_tuning.*`) swaps in the same values as F.E.A.R.'s `fear_look_ramp` / `fear_aim_softlock`, by name; the log names each value it changed. F.E.A.R. has the same pattern (`sub_82379B38`), so the hook would serve it too, without the file copy.
+
 ## What carries over from the F.E.A.R. port
 | | F.E.A.R. | Files |
 |---|---|---|
@@ -41,7 +48,7 @@ ReXGlue 0.10 (our patched SDK), `rexglue init` + `codegen`, in a scratch project
 | Display-locked pacing, frame-rate limit | done | host side, unchanged |
 | Every controller on player 1, crash reports | done | host side, unchanged |
 | Animation time without the millisecond truncation (impact puffs) | `0x82191E7C`, `0x82241604`, `0x821E4DDC` | **found:** `trk_Update` `sub_821C6A00` (`0x821C6A3C`), model update `sub_8221F1B8` (`0x8221F1EC`) and `sub_8227EEA0` (`0x8227EED4`), by `tools/find_anim_sites.py`, which also finds exactly F.E.A.R.'s three |
-| Right-stick tuning (patched `Loki.gamedb` through a VFS redirect) | done | the database is not a loose file: needs a redirect into the catalog, or the patch applied in memory |
+| Right-stick tuning (patched `Loki.gamedb` through a VFS redirect) | done | **done** ("feels great"): the values swapped as the game copies them into console variables (`FearConsoleVarDefault`, below) |
 | PC texture pack | 4,710 textures | **built: 7,607 textures**, the same builder with the PC expansions' archives first (`--expansions FEARXP2,FEARXP`; docs/TEXTURES.md) |
 | Tracers break above ~90 fps | open | expected the same |
 
@@ -60,10 +67,14 @@ The aim: open F.E.A.R., and reach *Extraction Point* and *Perseus Mandate* from 
 2. **Two titles, one runtime.** Both executables load at `0x82000000`, and every translated function is named `sub_<address>`, so the two can't share one process. One host code base (renderer, pacing, fixes) builds `fear.exe` and `fearfiles.exe`. Switching titles restarts into the other, as the console does when a game launches another (`XamLoaderLaunchTitle`): a few seconds of loading.
 3. **The menu.** F.E.A.R.'s main menu is built in code (on PC, the SDK's `ScreenMain`). A hook in the 360's main-screen builder adds *Extraction Point* and *Perseus Mandate*; choosing one relaunches into Files and opens that campaign. Files' menu gets *F.E.A.R.* back the same way. It's the same mechanism as the animation fix (`[[entrypoint.midasm_hook]]` calling our code). *PC Settings* and *Quit to Desktop* were added this way first (`port-nx/src/fear_menu.*`, docs/PROGRESS.md); Files' main screen needs its own addresses.
 4. **Saves.** One user folder for both titles (title IDs `565507D9` and `565507E8`).
-5. **One launcher for all of them (the user's idea, for after the Files campaigns):** "one global launcher with all of the games launchable from one menu instead of having to jump different games". A small front end lists F.E.A.R., *Extraction Point* and *Perseus Mandate* (and could list the other recomps), checks each disc once, and starts the right executable with the right campaign; the restart *PC Settings* uses (`port-nx/src/fear_settings.cpp`: relaunch with arguments, the new run waits for the old one to exit) carries over to switching titles from inside a game.
+5. **A collection, like the Master Chief Collection (the user's question, 2026-10-22):** "recomp both the Files and the Fear 1 and then make one super kind of executable that has all of the game files in it in one spot… run them interchangeably, at least the instant action modes to begin with, and then maybe the full games later."
+   - *Both translations in one process at once* can't work as they are: both executables load at `0x82000000` into the same guest address space (F.E.A.R. up to `0x835C0000`, Files up to `0x83720000`), and each translation is ~100,000 functions named by address, the same names with different code.
+   - *What gives the same experience:* one app with one front menu (F.E.A.R., *Extraction Point*, *Perseus Mandate*; campaign or Instant Action), one settings file, one save folder, one install folder holding both discs' data; it runs the chosen game's translation, and a *Switch game* entry in each game's menu goes back to it. Switching costs a few seconds of loading, as switching games in the MCC does. The restart already written for *PC Settings* (relaunch with arguments; the new run waits for the old to exit) is the mechanism; a command line can go straight to a game's Instant Action list.
+   - *Later, if it's worth it:* each translation as a DLL loaded on demand in one process (what the MCC does), which saves the process start but means tearing the runtime and GPU state down and up again; or running F.E.A.R.'s Instant Action maps inside Files' newer executable (same engine, later build), a quick experiment once the rest works, since F.E.A.R.'s data lives in its own catalogue and may not match the newer build's database.
+6. **One launcher for all of them (the user's idea, for after the Files campaigns):** "one global launcher with all of the games launchable from one menu instead of having to jump different games". A small front end lists F.E.A.R., *Extraction Point* and *Perseus Mandate* (and could list the other recomps), checks each disc once, and starts the right executable with the right campaign; the restart *PC Settings* uses (`port-nx/src/fear_settings.cpp`: relaunch with arguments, the new run waits for the old one to exit) carries over to switching titles from inside a game.
 
 ## Next steps
 1. **Play-test Files:** both campaigns and the Instant Action maps, at 4K. Any further missed function shows up as a crash report with its address.
-2. Port the remaining F.E.A.R. fixes (stick tuning through the catalog), then the PC texture pack for both expansions.
+2. ~~Port the remaining F.E.A.R. fixes (stick tuning), then the PC texture pack for both expansions.~~ Done (2026-10-22).
 3. Go through EchoPatch's high-FPS list on both executables, one fix at a time, against the PC SDK and LithTech source.
 4. Add the menu hooks and the title switch; then the first-run disc check.

@@ -19,8 +19,16 @@
 // own Loki.gamedb is written to <user data>/overrides/ at startup and the game's path to the
 // database is redirected to it (a VFS symbolic link to a second, read-only device). The game
 // files are not changed.
+//
+// F.E.A.R. Files has no loose database (it is inside uberCatalog.cat), so there the values are
+// changed on their way out of it instead: the game copies each one into a console variable of the
+// same name (VarTrack::Init, which applies the value only when it creates the variable), and
+// FearConsoleVarDefault, a [[entrypoint.midasm_hook]] at that function's entry in
+// port-files/fear_manifest.toml, swaps in ours by name.
 
 #pragma once
+
+#include <rex/ppc/context.h>
 
 namespace rex {
 class Runtime;
@@ -32,3 +40,6 @@ namespace fear::look_tuning {
 void Apply(rex::Runtime& runtime);
 
 }  // namespace fear::look_tuning
+
+// VarTrack::Init(this, client, name (r5), string default, float default (f1)), at its entry.
+void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1);
