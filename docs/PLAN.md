@@ -1,5 +1,7 @@
 # F.E.A.R. Xbox 360 Static Recompilation: Roadmap
 
+> **2026-10-21:** superseded in practice. The project uses ReXGlue (not XenonRecomp) and fear-nx's renderer; the game is playable at 4K / 120 fps. Current state and decisions: [PROGRESS.md](PROGRESS.md). This file is the original roadmap.
+
 Goal: run the Xbox 360 versions of **F.E.A.R.** and **F.E.A.R. Files** (*Extraction Point* + *Perseus Mandate*) natively on Windows and Linux. That means no full-system emulator, unlocked frame rate, gamepad and TV ("10-foot") UI out of the box, and game data supplied by the user from their own discs.
 
 Approach: **static recompilation** of the PowerPC `default.xex` into C++, the same way [UnleashedRecomp](https://github.com/hedge-dev/UnleashedRecomp) did with [XenonRecomp](https://github.com/hedge-dev/XenonRecomp). It is not a matching decompilation. A decomp can come later, one function at a time, by swapping recompiled functions for hand-written source.

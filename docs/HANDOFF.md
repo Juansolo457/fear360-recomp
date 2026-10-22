@@ -1,7 +1,9 @@
 # Handoff: F.E.A.R. 360 on Windows (2026-10-21, end of day)
 
-Read [FINDINGS.md](FINDINGS.md) for the disc/XEX facts and the history of the menu bug. This
-file is the current state and what to do next.
+Read [PROGRESS.md](PROGRESS.md) first: status, the first play-test's findings, the frame-pacing
+diagnosis, the PC-texture feasibility and the recomp-vs-PC decision. [FINDINGS.md](FINDINGS.md)
+has the disc/XEX facts and the history of the menu bug. This file is the build/run detail and
+where things live.
 
 ## Where it stands
 **The game is playable on Windows at 4K.** `port-nx/` builds fear-nx's patched ReXGlue SDK from
@@ -85,6 +87,10 @@ pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot 
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
 
 ## Next steps (the user's list)
+Play-test 1 added: frame-pacing jank (`-Present` test, then lock the virtual vblank to the
+display), chapter cards off-centre/doubled and cutscene-transition flicker (compare at 1×),
+PC texture replacement (97% of names match). Details in [PROGRESS.md](PROGRESS.md).
+
 1. **Frame rate:** 120 fps via the vblank rate is the default and plays right. Before
    calling it done, check slow-mo duration, cutscenes and scripted timers against 30 fps,
    and add a frame-time counter (the renderer only logs frames over 50 ms) to see whether

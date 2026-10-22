@@ -1,23 +1,72 @@
-# fear360-recomp
+# F.E.A.R. 360 Recompiled
 
-An unofficial static recompilation of the Xbox 360 releases of **F.E.A.R.** and **F.E.A.R. Files** for Windows and Linux, with native performance, an unlocked frame rate, and controller-first play.
+The Xbox 360 F.E.A.R., running natively on PC. 4K, 120 fps, a controller in your hands.
 
-**Status (2026-10-21):** two Windows builds run. `port/` (stock ReXGlue) renders gameplay correctly but corrupts menus and videos; `port-nx/` (fear-nx's patched SDK and Vulkan renderer, GPL-3.0) renders menus, videos and gameplay correctly, with integer resolution scaling (3× = 3840×2160), the game's MSAA, 16× anisotropic filtering, and 120 fps via the virtual vblank rate (game speed verified in play). See [docs/HANDOFF.md](docs/HANDOFF.md). See [docs/PLAN.md](docs/PLAN.md).
+> Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
-The goal is a full PC version in the spirit of [OpenCE](https://github.com/OpenCommunityEdition/OpenCE): point it at your own game files, launch, and get real options. Windows first, then Linux.
+## Why
 
-This repository contains no game data. You need your own legally dumped discs; see [docs/RIPPING.md](docs/RIPPING.md).
+The 360 version came out about a year after the PC original and is the more complete one: **Instant Action** mode, a dual-wieldable machine pistol and an extra bonus level that the PC never got. It has been stuck on the console ever since, at 720p and 30 fps. The plan is to free it, then add *F.E.A.R. Files* (Extraction Point + Perseus Mandate, 360) so the whole F.E.A.R. 1 package lives in one place.
+
+## What it is
+
+A **static recompilation**: the game's PowerPC code is translated to native x86-64 C++ ahead of time ([ReXGlue](https://github.com/rexglue/rexglue-sdk)), and a game-specific runtime stands in for the Xbox. It is not an emulator and not a decompilation.
+
+- **CPU:** the 360's `default.xex`, recompiled. All game logic, AI and physics are the console's own.
+- **GPU:** [fear-nx](https://github.com/infriker/fear-nx)'s Vulkan Xenos renderer, which fixed the menu and video corruption the stock ReXGlue renderer has with this game, plus our resolution scaling.
+- **Your data:** the game files come from your own disc; nothing proprietary is in this repo.
+
+## Status
+
+| | |
+|---|---|
+| ✅ Boots, menus, intro videos, campaign, Instant Action | `port-nx` with `--nx_renderer native` |
+| ✅ 4K: integer internal resolution scaling (3× = 3840×2160) | our patch to fear-nx's renderer |
+| ✅ The game's own 2×/4× MSAA and 16× anisotropic filtering | on top of the scale |
+| ✅ 60 and 120 fps with correct game speed | virtual vblank rate (`-FrameRate`), hands-on verified |
+| ✅ Logic, gunplay, physics intact | 10-minute play-test |
+| ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
+| ⏳ Chapter cards drawn off-centre and doubled | likely our scaling; needs a 1× comparison |
+| ⏳ Brief flicker at cutscene ↔ gameplay transitions | needs a 1× / 30 fps comparison |
+| ⏳ Low-res textures (360 memory limits) | **PC textures can replace them: 97% of names match** |
+| ⏳ Settings and Quit entries in the main menu | not started |
+| ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | not started |
+| ⏳ Linux | the renderer is Vulkan already; build untested |
+
+Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Build and run (Windows)
+
+```powershell
+pwsh -NoProfile -File tools/build-nx.ps1        # first time ~15 min: ReXGlue SDK from source + codegen + game
+pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'
 ```
-pwsh -NoProfile -File tools/build.ps1
-pwsh -NoProfile -File tools/launch.ps1                 # fullscreen, 4K internal, 16x AF
-pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed
-pwsh -NoProfile -File tools/build-nx.ps1                               # port-nx: builds the patched SDK too
-pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # 4K internal, 120 fps (defaults)
+
+Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 120`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|120`, `-Present immediate|mailbox|fifo`, `-Windowed`, `-Extra '<more flags>'`.
+
+Put your own `default.xex` (title `565507D9`, SHA-256 `e7fccdf6…2792`) and `Game/` folder in `port/assets/` ([docs/RIPPING.md](docs/RIPPING.md); `python -I tools/xdvdfs.py <disc.iso> extract port/assets` unpacks an ISO). The SDK source recipe is in [docs/HANDOFF.md](docs/HANDOFF.md#how-it-is-built-and-run).
+
+## Layout
+
 ```
-Put your own `default.xex` (title `565507D9`) and `Game/` folder in `port/assets/`.
+port-nx/          the working build: app glue (src/), fear-nx renderer + our changes (src/native/), manifest
+port/             stock-SDK build, kept for A/B (menus corrupt)
+patches/          our ReXGlue SDK patch (static GPU plugin)
+tools/            build, launch, smoke test, window capture, ISO extractor, texture-name survey
+docs/             progress, handoff, findings, plan, ripping
+```
+
+## Legal
+
+- No assets, executables, generated code or proprietary code are distributed.
+- `port-nx/src/native/` is GPL-3.0-or-later (fear-nx ← Project8Recomp ← nfsmw-nx), so builds that link it are GPL. ReXGlue is BSD-3-Clause with Xenia's notices.
+- Our own tools, docs and glue are MIT ([LICENSE](LICENSE), [NOTICE](NOTICE)).
+- F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions. Not affiliated with Monolith, Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.
 
 ## Credits
-- [fear-nx](https://github.com/infriker/fear-nx) found the function entry points that F.E.A.R. needs under ReXGlue.
-- [ReXGlue](https://github.com/rexglue/rexglue-sdk) and the [Xenia](https://github.com/xenia-project/xenia) contributors.
+
+- Monolith Productions and Day 1 Studios: F.E.A.R. and its Xbox 360 port
+- infriker: [fear-nx](https://github.com/infriker/fear-nx), the function hints and the Vulkan renderer that made the menus work; R-drg ([Project8 SW](https://github.com/R-drg/project8-sw)) and StevensND ([nfsmw-nx](https://github.com/StevensND/nfsmw-nx)) before them
+- Tom Clay and contributors: [ReXGlue](https://github.com/rexglue/rexglue-sdk); the [Xenia](https://github.com/xenia-project/xenia) team
+- Inspiration: [UnleashedRecomp](https://github.com/hedge-dev/UnleashedRecomp), [Lost Odyssey Recomp](https://github.com/freefrank/LostOdysseyRecomp), [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), [EchoPatch](https://github.com/Wemino/EchoPatch)
+- Built with [Claude Code](https://claude.com/claude-code). Play-tested by a human.

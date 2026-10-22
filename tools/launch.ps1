@@ -15,6 +15,11 @@ param(
     # vblank rate to 120 Hz, 120 to 240 Hz (the SDK's maximum). Both verified in play on
     # port-nx with correct game speed (2026-10-21); 30 is the original console pacing.
     [ValidateSet(30, 60, 120)][int]$FrameRate = 120,
+    # Swapchain present mode. The SDK picks immediate (no vsync, tearing) when the driver offers
+    # it; the game is paced by a software vblank that is not locked to the display, so frames
+    # land unevenly. fifo = true vsync (even, adds queue latency), mailbox = no tearing, low
+    # latency, still uneven.
+    [ValidateSet('immediate', 'mailbox', 'fifo')][string]$Present = 'immediate',
     [string]$Extra = '',  # more flags, space separated
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
@@ -36,6 +41,14 @@ if ($Nx) {
 }
 if ($FrameRate -ne 30) {
     $arguments += @('--video_mode_refresh_rate', "$($FrameRate * 2)")
+}
+# The presenter takes the first allowed mode of immediate > mailbox > fifo_relaxed > fifo.
+switch ($Present) {
+    'mailbox' { $arguments += @('--no-vulkan_allow_present_mode_immediate') }
+    'fifo' {
+        $arguments += @('--no-vulkan_allow_present_mode_immediate', '--no-vulkan_allow_present_mode_mailbox',
+            '--no-vulkan_allow_present_mode_fifo_relaxed')
+    }
 }
 $process = Start-Process -FilePath $executable -WorkingDirectory $port -ArgumentList $arguments -PassThru
 "pid $($process.Id), log $log"
