@@ -63,6 +63,13 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   translations of M shaders queued" and "Shader pre-warm done: N translations in X s", and its
   "shader translations and pipelines: N waited for" and "skipped by reason: 6:" counts drop.
   Pipelines (skip reason 13) are not pre-warmed; the driver cache keeps them fast to create.
+  **Verified (2026-10-22, F.E.A.R., two runs):** the second run logged "Shader pre-warm: 148
+  translations of 110 shaders queued" and "done: 148 translations in 0.1 s" at startup. Shaders
+  translated inside slow frames: 61 in the first run, 16 in the second (most of the second run was
+  the boot and level load, where these spikes are; its 333 ms load frame had 0 shaders, 23
+  pipelines). The user: the opening felt smooth. What's left in the load spikes is pipeline
+  creation (23 to 33 per spike, with the driver cache) and texture uploads; the 16 shaders were
+  new to the list. Next: record pipeline keys the same way and create them in the background.
 
 ### P1. Texture eviction counted frames, not time — **Changed**
 - *Where:* `port-nx/src/native/native_textures.cpp`, `TextureCache::BeginFrame` (eviction at
