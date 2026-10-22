@@ -25,7 +25,10 @@ set(FEAR_SOURCES
     ${HOST}/texture_pack.cpp
     ${HOST}/crash_report.cpp
     ${HOST}/display_vblank.cpp
+    ${HOST}/fear_collection.cpp
     ${HOST}/fear_menu.cpp
+    ${HOST}/fear_panel.cpp
+    ${HOST}/fear_process.cpp
     ${HOST}/fear_settings.cpp
     ${HOST}/fx_debug.cpp
     ${HOST}/look_tuning.cpp
@@ -37,6 +40,8 @@ set(FEAR_SOURCES
 
 add_executable(fear WIN32 ${FEAR_SOURCES})
 set_target_properties(fear PROPERTIES OUTPUT_NAME fearfiles)
+# Which game the host code is built for (port-nx/src/fear_title.h): the menu hooks' addresses.
+target_compile_definitions(fear PRIVATE FEAR_TITLE_FILES)
 
 rexglue_setup_target(fear)
 

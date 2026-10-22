@@ -8,20 +8,13 @@
 // the game again without those flags (and waits for this run to exit first), so what was saved
 // applies. Window mode and animation timing apply at once; the rest on the next start.
 //
-// Driven with the controller (D-pad or left stick, A, B), the keyboard (arrows, Enter, Escape) or
-// the mouse. While a panel is open the game gets no input, and after it closes not until the
-// buttons are let go, so the press that closed it doesn't reach the menu behind it.
+// The panels' look and input are fear_panel.h's; the restart is fear_process.h's.
 
 #pragma once
 
 #include <filesystem>
-#include <functional>
 
-struct ImFontAtlas;
-
-namespace rex::ui {
-class ImGuiDrawer;
-}
+#include "fear_panel.h"
 
 namespace fear::settings {
 
@@ -29,19 +22,7 @@ namespace fear::settings {
 // first-run settings (resolution from the display) if there are none, and loads them.
 void Load(const std::filesystem::path& user_data_root);
 
-// In ReXApp::OnConfigureFonts: the panel's font (Bahnschrift or Segoe UI, from Windows).
-void AddFonts(ImFontAtlas* atlas);
-
-// For InputSystem::SetActiveCallback: whether the game gets the controller and keyboard now.
-bool GameGetsInput();
-
-struct Host {
-  rex::ui::ImGuiDrawer* drawer = nullptr;
-  // Runs a function on the UI thread after the current frame.
-  std::function<void(std::function<void()>)> later;
-  // Closes the game, as the window's close button does.
-  std::function<void()> quit;
-};
+using Host = fear::panel::Host;
 
 // On the UI thread. Each does nothing while a panel is already open.
 void OpenSettings(const Host& host);

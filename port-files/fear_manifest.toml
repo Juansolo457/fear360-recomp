@@ -176,3 +176,24 @@ registers = ["r3", "f0"]
 name = "FearConsoleVarDefault"
 address = 0x822C4B28
 registers = ["r5", "f1"]
+
+# PC Settings, Switch Game and Quit to Desktop in the main menu (port-nx/src/fear_menu.*), as in
+# F.E.A.R. CScreenMain::Build (sub_823EAAC0) ends at 0x823EAF24, where both its paths meet: add
+# our items after Options.
+[[entrypoint.midasm_hook]]
+name = "FearMenuAddItems"
+address = 0x823EAF24
+registers = ["r30"]
+
+# OnCommand's command 21 (Press Start accepted) has shown the game's items: show ours.
+[[entrypoint.midasm_hook]]
+name = "FearMenuShowItems"
+address = 0x823EB274
+registers = ["r31"]
+
+# CScreenMain::OnCommand (sub_823EAF68): our commands are handled by the host (r3 = 1).
+[[entrypoint.midasm_hook]]
+name = "FearMenuCommand"
+address = 0x823EAF68
+registers = ["r3", "r4"]
+return_on_true = true

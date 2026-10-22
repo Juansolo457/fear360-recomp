@@ -8,6 +8,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 
 #include <imgui.h>
 #include <rex/cvar.h>
@@ -21,7 +22,9 @@
 
 #include "crash_report.h"
 #include "display_vblank.h"
+#include "fear_collection.h"
 #include "fear_menu.h"
+#include "fear_panel.h"
 #include "fear_settings.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
@@ -62,7 +65,17 @@ class FearApp : public rex::ReXApp {
     fear::settings::Load(paths.user_data_root);
   }
 
-  void OnConfigureFonts(ImFontAtlas* atlas) override { fear::settings::AddFonts(atlas); }
+  void OnConfigureFonts(ImFontAtlas* atlas) override { fear::panel::AddFonts(atlas); }
+
+  // The collection menu (fear_collection.h), before any game loads: with the window and ImGui up,
+  // no runtime yet. Picking this program's game resumes here.
+  std::optional<rex::PathConfig> OnFinalizePaths(
+      const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) override {
+    if (fear::collection::StartNow(PanelHost(), [defaults, resume] { resume(defaults); })) {
+      return defaults;
+    }
+    return std::nullopt;
+  }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
     fear::crash_report::InstallCrashReporter();
@@ -112,29 +125,38 @@ class FearApp : public rex::ReXApp {
     if (auto* input = runtime() ? static_cast<rex::input::InputSystem*>(runtime()->input_system())
                                 : nullptr) {
       input->SetActiveCallback([this] {
-        if (!fear::settings::GameGetsInput()) return false;
+        if (!fear::panel::GameGetsInput()) return false;
         return !(imgui_drawer() && imgui_drawer()->GetIO().WantCaptureMouse);
       });
     }
 
-    // PC Settings and Quit to Desktop in the main menu (fear_menu.h).
-    fear::menu::SetActions([this] { OpenPanel(&fear::settings::OpenSettings); },
-                           [this] { OpenPanel(&fear::settings::OpenQuit); });
+    // PC Settings, Switch Game and Quit to Desktop in the main menu (fear_menu.h).
+    fear::menu::Actions actions;
+    actions.settings = [this] { OpenPanel(&fear::settings::OpenSettings); };
+    actions.quit = [this] { OpenPanel(&fear::settings::OpenQuit); };
+    actions.switch_game = [this] {
+      app_context().CallInUIThread([this] {
+        if (fear::collection::SwitchGame() && window()) window()->RequestClose();
+      });
+    };
+    fear::menu::SetActions(std::move(actions));
   }
 
  private:
+  fear::panel::Host PanelHost() {
+    fear::panel::Host host;
+    host.drawer = imgui_drawer();
+    host.later = [this](std::function<void()> function) {
+      app_context().CallInUIThreadDeferred(std::move(function));
+    };
+    host.quit = [this] {
+      if (window()) window()->RequestClose();
+    };
+    return host;
+  }
+
   // From the game thread that handles the menu command.
   void OpenPanel(void (*open)(const fear::settings::Host&)) {
-    app_context().CallInUIThread([this, open] {
-      fear::settings::Host host;
-      host.drawer = imgui_drawer();
-      host.later = [this](std::function<void()> function) {
-        app_context().CallInUIThreadDeferred(std::move(function));
-      };
-      host.quit = [this] {
-        if (window()) window()->RequestClose();
-      };
-      open(host);
-    });
+    app_context().CallInUIThread([this, open] { open(PanelHost()); });
   }
 };

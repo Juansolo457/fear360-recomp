@@ -73,8 +73,21 @@ The aim: open F.E.A.R., and reach *Extraction Point* and *Perseus Mandate* from 
    - *Later, if it's worth it:* each translation as a DLL loaded on demand in one process (what the MCC does), which saves the process start but means tearing the runtime and GPU state down and up again; or running F.E.A.R.'s Instant Action maps inside Files' newer executable (same engine, later build), a quick experiment once the rest works, since F.E.A.R.'s data lives in its own catalogue and may not match the newer build's database.
 6. **One launcher for all of them (the user's idea, for after the Files campaigns):** "one global launcher with all of the games launchable from one menu instead of having to jump different games". A small front end lists F.E.A.R., *Extraction Point* and *Perseus Mandate* (and could list the other recomps), checks each disc once, and starts the right executable with the right campaign; the restart *PC Settings* uses (`port-nx/src/fear_settings.cpp`: relaunch with arguments, the new run waits for the old one to exit) carries over to switching titles from inside a game.
 
+## The collection launcher (2026-10-22)
+The user's pick: "start with the collection launcher (option A), built so it can become the single exe later". The user's test: "test ran great! Very good, switcher works with controller and switch is fine between games".
+
+**How it works.** The menu is in both programs, shown before any game loads (`ReXApp::OnFinalizePaths`, `port-nx/src/fear_collection.*`): the window and ImGui are up (the native renderer makes its presenter at window setup), the runtime isn't. *F.E.A.R. COLLECTION*: **F.E.A.R.**, **F.E.A.R. Files** (Extraction Point and Perseus Mandate), **Quit**. Picking the game this program runs carries on starting it; picking the other starts that program (it waits for this one to exit: `fear_restart_wait_pid`) and closes this one. Each game's main menu gets **Switch Game** (between PC Settings and Quit to Desktop), which starts the program again at the menu. Driven like the other panels (pad, keyboard, mouse; `fear_panel.*`).
+
+**Where it gets the games.** `private/collection.toml`, written by `tools/launch.ps1 -Collection`: one `[[title]]` per game with its id (`fear`, `files`: `port-nx/src/fear_title.h`, `port-files` defines `FEAR_TITLE_FILES`), name, program, folder and arguments. Each game keeps its own data, user (saves, `settings.toml`) and cache folders, so the saves so far stay where they are. `fear_collection` names the file (empty: no menu, the game starts as before); `fear_collection_start` (set when the menu starts the other program) skips the menu.
+
+**F.E.A.R. Files' main menu**, for its PC Settings, Switch Game and Quit to Desktop, is the same code as F.E.A.R.'s at other addresses: `CScreenMain::Build` `sub_823EAAC0` (Press Start 21, Extraction Point 13, Perseus Mandate 14, Instant Action 15, Xbox Live 16, Options 17), ending at `0x823EAF24`; `AddTextItem` (wide) `sub_823E2388`, `AddControl` `sub_823E5948`; `OnCommand` `sub_823EAF68` (its jump table is inline in the code: commands 1 to 31); Press Start shows the items, ours too from `0x823EB274`. The layout arguments sit one register up from F.E.A.R.'s (r28-r24 and r29, against r27-r23 and r28); `fear_menu.cpp` has one table per game.
+
+**Toward one program (option B).** The menu, the titles and the switch don't depend on there being two programs: a single program would keep the menu and, in place of starting the other program, load the other game's translation (as a DLL) after shutting the first one down.
+
+**Later:** straight into Instant Action from the menu (the commands above: F.E.A.R. 13; Files 15), Extraction Point and Perseus Mandate as their own entries (Files 13 and 14), one shared settings file.
+
 ## Next steps
 1. **Play-test Files:** both campaigns and the Instant Action maps, at 4K. Any further missed function shows up as a crash report with its address.
 2. ~~Port the remaining F.E.A.R. fixes (stick tuning), then the PC texture pack for both expansions.~~ Done (2026-10-22).
 3. Go through EchoPatch's high-FPS list on both executables, one fix at a time, against the PC SDK and LithTech source.
-4. Add the menu hooks and the title switch; then the first-run disc check.
+4. ~~Add the menu hooks and the title switch~~ (the collection launcher, above: works); then the first-run disc check.

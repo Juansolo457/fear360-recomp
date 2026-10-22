@@ -99,8 +99,10 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/crash_report.*` | crash reports into `port-nx/logs/` |
 | `port-nx/src/display_vblank.*` | the display's vblank (DXGI) and the pacing plan; used by `native_system.cpp` |
 | `port-nx/src/anim_timing.*` | model animation time without the per-frame millisecond truncation; called from the generated code through `[[entrypoint.midasm_hook]]`s in `fear_manifest.toml` |
-| `port-nx/src/fear_menu.*` | *PC Settings* and *Quit to Desktop* added to the game's own main menu: hooks in `CScreenMain::Build` and `OnCommand` that call the game's `AddTextItem`/`AddControl` (how to call guest functions from a hook: `current_ppc_context()`, save and restore the context, `ResolveIndirectFunction`) |
-| `port-nx/src/fear_settings.*` | the settings panel and quit confirmation (ImGui, pad via XInput), `<user data>/settings.toml`, restart |
+| `port-nx/src/fear_menu.*` | *PC Settings*, *Switch Game* and *Quit to Desktop* added to the game's own main menu, in F.E.A.R. and F.E.A.R. Files (one address table each): hooks in `CScreenMain::Build` and `OnCommand` that call the game's `AddTextItem`/`AddControl` (how to call guest functions from a hook: `current_ppc_context()`, save and restore the context, `ResolveIndirectFunction`) |
+| `port-nx/src/fear_settings.*` | the settings panel and quit confirmation, `<user data>/settings.toml` |
+| `port-nx/src/fear_collection.*` | the collection menu before any game loads (`OnFinalizePaths`), `collection.toml`, Switch Game |
+| `port-nx/src/fear_panel.*`, `fear_process.*`, `fear_title.h` | the panels' look and input (ImGui, pad via XInput); starting the game again or the other one (waits for this run to exit); which game this program is |
 | `port-nx/src/fx_debug.*` | `fear_debug_model_fx`: logs ClientFX effects created (by type) and model effects' lifetime, color and scale |
 | `port-files/` | *F.E.A.R. Files*: port-nx's host code with its own manifest and translation (`docs/FILES.md`) |
 | `tools/find_missed_functions.py`, `tools/find_anim_sites.py`, `tools/xexinfo.py` | function entries the analyser missed (from a dumped image); this engine's animation-time sites in a translation; XEX headers |
@@ -122,7 +124,7 @@ the renderer's two-tile frames; fixed 2026-10-22, see PROGRESS.md), PC texture r
    and add a frame-time counter (the renderer only logs frames over 50 ms) to see whether
    heavy scenes hold 120. A Lost Odyssey-style present-interval hook or interpolation only if
    something breaks or the user wants more than 120.
-**After that, the user's idea (2026-10-22):** "one global launcher with all of the games launchable from one menu instead of having to jump different games". See [FILES.md](FILES.md#the-definitive-edition-one-game).
+**After that, the user's idea (2026-10-22):** "one global launcher with all of the games launchable from one menu instead of having to jump different games". Option A (a menu over the two programs) is done and tested: [FILES.md](FILES.md#the-collection-launcher-2026-10-22). Next for it: straight into Instant Action, then one program (option B).
 
 2. **Quit button in the main menu** (done the in-game way, see `fear_menu.*`; the notes below are the options as first weighed). Options, cheapest first:
    - Host-side: ReXGlue's ImGui overlay. `rex::ReXApp::OnCreateDialogs(ui::ImGuiDrawer*)` is

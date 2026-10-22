@@ -33,6 +33,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": two entries added to the game's own menu (under Options) open a settings panel (resolution, window, frame rate, texture filtering, PC textures, right stick, aim assist, animation timing; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
+| ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu before either game loads, *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays at 4K and 80 fps with its own PC texture pack (7,607 textures) and F.E.A.R.'s right-stick fix: "running really well… ran better out of the box than Fear 1 did"; next, the smoke plumes and an optimisation pass. The plan for one collection: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
 

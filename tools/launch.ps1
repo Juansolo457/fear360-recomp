@@ -8,6 +8,12 @@
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 #   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
 #   ... -Files -Extra '--nx_renderer native'      # F.E.A.R. Files (port-files, port-nx's host code)
+#   ... -Collection -Extra '--nx_renderer native' # the collection menu: F.E.A.R. and F.E.A.R. Files
+#
+# -Collection writes private/collection.toml with both games (each its own data, user and cache
+# folders, log, and texture pack when one is built: private/texture_pack, private/files/
+# texture_pack) and starts F.E.A.R. (or with -Files, F.E.A.R. Files) at the collection menu
+# (port-nx/src/fear_collection.h); picking the other game starts its program.
 #
 # port-nx and port-files keep their settings in <user data>/settings.toml, written by PC Settings
 # in the game's main menu (port-nx/src/fear_settings.h). For them this script passes a setting
@@ -20,6 +26,7 @@ param(
     [switch]$Windowed,
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
     [switch]$Files,       # run F.E.A.R. Files (port-files: the same host code as port-nx)
+    [switch]$Collection,  # the collection menu over F.E.A.R. and F.E.A.R. Files (implies -Nx)
     # The game presents every 2 vblanks: 30 fps at the console's 60 Hz. Above ~90 fps the 360's
     # effect code breaks (bullet tracers twitch and freeze mid-air).
     # port-nx follows the display's own vblank (port-nx/src/display_vblank.h): each frame is
@@ -48,47 +55,51 @@ param(
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
-if ($Files) { $Nx = $true }
-$port = Join-Path $PSScriptRoot $(if ($Files) { '..\port-files' } elseif ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
-$name = if ($Files) { 'fearfiles' } else { 'fear' }
-$running = Get-Process -Name $name -ErrorAction SilentlyContinue
-if ($running) { throw "$name.exe is already running (pid $($running.Id -join ', ')). Quit it first." }
+if ($Files -or $Collection) { $Nx = $true }
+$given = $PSBoundParameters
+$invariant = [System.Globalization.CultureInfo]::InvariantCulture
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+
+# One game's program, folder and arguments: 'port' (the stock-SDK build), 'nx' (F.E.A.R.) or
+# 'files' (F.E.A.R. Files).
+function Get-Run([string]$Title, [string]$Pack) {
+$isNx = $Title -ne 'port'
+$port = Join-Path $PSScriptRoot $(switch ($Title) { 'files' { '..\port-files' } 'nx' { '..\port-nx' } default { '..\port' } }) | Resolve-Path
+$name = if ($Title -eq 'files') { 'fearfiles' } else { 'fear' }
 $executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\$name.exe"
 New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
-$log = Join-Path $port ('logs\run-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
-$given = $PSBoundParameters
+$log = Join-Path $port "logs\run-$stamp.log"
 $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
     '--cache_root', "$port\cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
-if (!$Nx -or $given.ContainsKey('Windowed')) {
+if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
 }
-if ($Nx) {
+if ($isNx) {
     # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
     if ($given.ContainsKey('Scale')) { $arguments += @('--nx_native_resolution_scale', "$Scale") }
     if ($given.ContainsKey('LookRamp')) { $arguments += @('--fear_look_ramp', $LookRamp) }
     if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
 }
-if ($TexturePack) {
-    if (!$Nx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }
-    $pack = Resolve-Path $TexturePack
-    if (!(Test-Path (Join-Path $pack 'index.tsv'))) { throw "No index.tsv in $pack." }
-    $arguments += @('--fear_texture_pack', ($pack.Path -replace '\\', '/'))
+if ($Pack) {
+    if (!$isNx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }
+    $resolved = Resolve-Path $Pack
+    if (!(Test-Path (Join-Path $resolved 'index.tsv'))) { throw "No index.tsv in $resolved." }
+    $arguments += @('--fear_texture_pack', ($resolved.Path -replace '\\', '/'))
 }
-$invariant = [System.Globalization.CultureInfo]::InvariantCulture
-if ($Nx -and !$Timer) {
+if ($isNx -and !$Timer) {
     # The game reports the rate it picked in its log ("vblank from the display").
     if ($FrameRate -ne 'auto') { $arguments += @('--fear_frame_rate_limit', ([double]$FrameRate).ToString($invariant)) }
 } else {
-    if ($Nx) { $arguments += @('--fear_vblank_source', 'timer') }
+    if ($isNx) { $arguments += @('--fear_vblank_source', 'timer') }
     if ($FrameRate -eq 'auto') {
         $refresh = (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
             Where-Object { $_.CurrentRefreshRate } | Measure-Object CurrentRefreshRate -Maximum).Maximum
         if (!$refresh) { $refresh = 60 }
         $divisor = [math]::Ceiling($refresh / 90)
         $fps = $refresh / $divisor
-        "display ${refresh} Hz: $fps fps on a timer (each frame shown for $divisor refreshes, now and then one more or less)"
+        Write-Host "display ${refresh} Hz: $fps fps on a timer (each frame shown for $divisor refreshes, now and then one more or less)"
     } else {
         $fps = [double]$FrameRate
     }
@@ -102,5 +113,42 @@ switch ($Present) {
             '--no-vulkan_allow_present_mode_fifo_relaxed')
     }
 }
-$process = Start-Process -FilePath $executable -WorkingDirectory $port -ArgumentList $arguments -PassThru
-"pid $($process.Id), log $log"
+@{ Name = $name; Executable = $executable; Port = $port; Arguments = $arguments; Log = $log }
+}
+
+foreach ($name in 'fear', 'fearfiles') {
+    if (!$Collection -and $name -ne $(if ($Files) { 'fearfiles' } else { 'fear' })) { continue }
+    $running = Get-Process -Name $name -ErrorAction SilentlyContinue
+    if ($running) { throw "$name.exe is already running (pid $($running.Id -join ', ')). Quit it first." }
+}
+
+if ($Collection) {
+    # Each game's texture pack, when it has been built (docs/TEXTURES.md).
+    $root = Join-Path $PSScriptRoot '..' | Resolve-Path
+    $packs = @{ nx = (Join-Path $root 'private\texture_pack'); files = (Join-Path $root 'private\files\texture_pack') }
+    $titles = @(
+        @{ Id = 'fear'; Title = 'nx'; Name = 'F.E.A.R.'; Subtitle = 'First Encounter Assault Recon' },
+        @{ Id = 'files'; Title = 'files'; Name = 'F.E.A.R. Files'; Subtitle = 'Extraction Point and Perseus Mandate' })
+    $toml = @('# The F.E.A.R. collection menu (port-nx/src/fear_collection.h), written by tools/launch.ps1 -Collection.')
+    $runs = @{}
+    foreach ($t in $titles) {
+        $pack = if (Test-Path (Join-Path $packs[$t.Title] 'index.tsv')) { $packs[$t.Title] } else { '' }
+        $run = Get-Run $t.Title $pack
+        $runs[$t.Id] = $run
+        $toml += '', '[[title]]', "id = '$($t.Id)'", "name = '$($t.Name)'", "subtitle = '$($t.Subtitle)'",
+            "exe = '$($run.Executable)'", "working_dir = '$($run.Port)'",
+            ('args = [' + (($run.Arguments | ForEach-Object { "'$_'" }) -join ', ') + ']')
+    }
+    $file = Join-Path $root 'private\collection.toml'
+    New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+    Set-Content -Path $file -Value $toml -Encoding utf8NoBOM
+    $first = $runs[$(if ($Files) { 'files' } else { 'fear' })]
+    $arguments = $first.Arguments + @('--fear_collection', $file)
+    $process = Start-Process -FilePath $first.Executable -WorkingDirectory $first.Port -ArgumentList $arguments -PassThru
+    "collection $file; pid $($process.Id), log $($first.Log)"
+    return
+}
+
+$run = Get-Run $(if ($Files) { 'files' } elseif ($Nx) { 'nx' } else { 'port' }) $TexturePack
+$process = Start-Process -FilePath $run.Executable -WorkingDirectory $run.Port -ArgumentList $run.Arguments -PassThru
+"pid $($process.Id), log $($run.Log)"

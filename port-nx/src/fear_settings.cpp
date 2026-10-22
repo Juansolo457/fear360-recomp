@@ -17,219 +17,25 @@
 
 #include <rex/cvar.h>
 #include <rex/logging.h>
-#include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
 
 #include "display_vblank.h"
+#include "fear_panel.h"
+#include "fear_process.h"
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <shellapi.h>
-#include <xinput.h>
 #endif
-
-REXCVAR_DEFINE_UINT32(fear_restart_wait_pid, 0, "F.E.A.R.",
-                      "Set by PC Settings' Save and restart: wait for this process (the run "
-                      "that restarted) to exit before starting")
-    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace {
 
 namespace fs = std::filesystem;
+using namespace fear::panel;
 
 fs::path g_path;  // <user data>/settings.toml
-ImFont* g_font = nullptr;
-std::atomic<bool> g_open{false};          // a panel is open
-std::atomic<bool> g_wait_release{false};  // one closed: the game waits for the buttons to be let go
-
-// --- Controller ---
-
-#if defined(_WIN32)
-using XInputGetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
-
-XInputGetStateFn XInputGet() {
-  static const XInputGetStateFn function = [] {
-    HMODULE module = LoadLibraryW(L"xinput1_4.dll");
-    if (!module) module = LoadLibraryW(L"xinput9_1_0.dll");
-    return module ? reinterpret_cast<XInputGetStateFn>(GetProcAddress(module, "XInputGetState"))
-                  : nullptr;
-  }();
-  return function;
-}
-#endif
-
-struct PadState {
-  uint16_t buttons = 0;  // XINPUT_GAMEPAD_*
-  int16_t lx = 0, ly = 0;
-  bool triggers = false;
-};
-
-// Every connected controller merged (all of them drive player 1). Asking XInput about an empty
-// slot is slow, so those are asked again once a second.
-PadState ReadPads() {
-  PadState out;
-#if defined(_WIN32)
-  static std::atomic<uint32_t> connected{0xF};
-  static std::atomic<int64_t> next_scan{0};
-  const auto get = XInputGet();
-  if (!get) return out;
-  const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
-  const bool scan = now >= next_scan.load();
-  if (scan) {
-    next_scan = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                          std::chrono::seconds(1)).count();
-  }
-  for (DWORD i = 0; i < 4; ++i) {
-    if (!(connected.load() & (1u << i)) && !scan) continue;
-    XINPUT_STATE state{};
-    if (get(i, &state) != ERROR_SUCCESS) {
-      connected &= ~(1u << i);
-      continue;
-    }
-    connected |= 1u << i;
-    const XINPUT_GAMEPAD& pad = state.Gamepad;
-    out.buttons |= pad.wButtons;
-    if (std::abs(pad.sThumbLX) > std::abs(out.lx)) out.lx = pad.sThumbLX;
-    if (std::abs(pad.sThumbLY) > std::abs(out.ly)) out.ly = pad.sThumbLY;
-    out.triggers |= pad.bLeftTrigger > 30 || pad.bRightTrigger > 30;
-  }
-#endif
-  return out;
-}
-
-// The keys the panels answer to; the game maps some of them to buttons.
-bool PanelKeysHeld() {
-#if defined(_WIN32)
-  for (int key : {VK_RETURN, VK_SPACE, VK_ESCAPE, VK_BACK, VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT}) {
-    if (GetAsyncKeyState(key) & 0x8000) return true;
-  }
-#endif
-  return false;
-}
-
-enum Input : uint32_t {
-  kUp = 1,
-  kDown = 2,
-  kLeft = 4,
-  kRight = 8,
-  kAccept = 16,
-  kBack = 32,
-};
-constexpr uint32_t kDirections = kUp | kDown | kLeft | kRight;
-
-// What was pressed since the last frame: controller, keyboard. Held directions repeat. What is
-// already held when the panel opens (the press that opened it) counts only once let go.
-class Navigator {
- public:
-  uint32_t Poll() {
-    const double t = ImGui::GetTime();
-    if (opened_ < 0) opened_ = t;
-    const PadState pad = ReadPads();
-    uint32_t now = 0;
-#if defined(_WIN32)
-    if ((pad.buttons & XINPUT_GAMEPAD_DPAD_UP) || pad.ly > 16000) now |= kUp;
-    if ((pad.buttons & XINPUT_GAMEPAD_DPAD_DOWN) || pad.ly < -16000) now |= kDown;
-    if ((pad.buttons & XINPUT_GAMEPAD_DPAD_LEFT) || pad.lx < -16000) now |= kLeft;
-    if ((pad.buttons & XINPUT_GAMEPAD_DPAD_RIGHT) || pad.lx > 16000) now |= kRight;
-    if (pad.buttons & XINPUT_GAMEPAD_A) now |= kAccept;
-    if (pad.buttons & XINPUT_GAMEPAD_B) now |= kBack;
-#endif
-    uint32_t pressed = now & ~held_;
-    const uint32_t directions = now & kDirections;
-    if (pressed & kDirections) {
-      next_repeat_ = t + 0.4;
-    } else if (directions && (held_ & directions) == directions && t >= next_repeat_) {
-      pressed |= directions;
-      next_repeat_ = t + 0.11;
-    }
-    held_ = now;
-
-    // ImGui gets the key that opened the panel too, queued from before it existed.
-    if (t - opened_ > 0.25) {
-      if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) pressed |= kUp;
-      if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) pressed |= kDown;
-      if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) pressed |= kLeft;
-      if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) pressed |= kRight;
-      if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
-          ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
-          ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
-        pressed |= kAccept;
-      }
-      if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
-          ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
-        pressed |= kBack;
-      }
-    }
-    return pressed;
-  }
-
- private:
-  uint32_t held_ = ~0u;
-  double next_repeat_ = 1e30;
-  double opened_ = -1;
-};
-
-// --- Look ---
-
-float PanelFontSize(const ImGuiIO& io) {
-  return std::max(18.0f, 64.0f * io.DisplaySize.y / 2160.0f);
-}
-
-// A centered, untitled panel in the panel font; false if it isn't drawn this frame.
-bool BeginPanel(const char* id, float width_em) {
-  const ImGuiIO& io = ImGui::GetIO();
-  const float size = PanelFontSize(io);
-  ImGui::PushFont(g_font, size);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(size * 1.0f, size * 0.8f));
-  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(size * 0.4f, size * 0.15f));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.05f, 0.94f));
-  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.55f, 0.55f, 0.58f, 0.6f));
-  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.62f, 0.10f, 0.08f, 0.85f));
-  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.62f, 0.10f, 0.08f, 0.85f));
-  ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.75f, 0.14f, 0.10f, 0.95f));
-  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
-                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowSize(ImVec2(std::min(size * width_em, io.DisplaySize.x * 0.95f), 0.0f),
-                           ImGuiCond_Always);
-  ImGui::SetNextWindowFocus();
-  return ImGui::Begin(id, nullptr,
-                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                          ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav);
-}
-
-void EndPanel() {
-  ImGui::End();
-  ImGui::PopStyleColor(5);
-  ImGui::PopStyleVar(4);
-  ImGui::PopFont();
-}
-
-void Dim(const char* text) {
-  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.62f, 0.62f, 0.64f, 1.0f));
-  ImGui::TextWrapped("%s", text);
-  ImGui::PopStyleColor();
-}
-
-// A full-width row; true when clicked. Hovering with a moving mouse selects it.
-bool Row(const char* label, int index, int& selected) {
-  ImGui::PushID(index);
-  const bool clicked = ImGui::Selectable(label, selected == index,
-                                         ImGuiSelectableFlags_SpanAllColumns |
-                                             ImGuiSelectableFlags_AllowOverlap);
-  const ImGuiIO& io = ImGui::GetIO();
-  if (ImGui::IsItemHovered() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
-    selected = index;
-  }
-  if (clicked) selected = index;
-  ImGui::PopID();
-  return clicked;
-}
 
 // --- Settings ---
 
@@ -382,109 +188,27 @@ bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& value
   return bool(out);
 }
 
-#if defined(_WIN32)
-std::wstring QuoteArgument(const std::wstring& argument) {
-  if (!argument.empty() && argument.find_first_of(L" \t\"") == std::wstring::npos) {
-    return argument;
-  }
-  std::wstring out = L"\"";
-  size_t backslashes = 0;
-  for (wchar_t c : argument) {
-    if (c == L'\\') {
-      ++backslashes;
-      continue;
-    }
-    out.append(c == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
-    backslashes = 0;
-    out += c;
-  }
-  out.append(backslashes * 2, L'\\');
-  return out + L"\"";
-}
-#endif
-
 // Starts the game again with this run's arguments, minus the flags for the settings (so the
-// saved ones apply), its log renamed, and told to wait until this run has exited.
+// saved ones apply), its log renamed, after this run has exited.
 bool Relaunch(const std::vector<Setting>& settings) {
-#if defined(_WIN32)
-  std::vector<std::string> managed = {"fear_texture_pack", "fear_restart_wait_pid"};
+  std::vector<std::string> managed = {"fear_texture_pack"};
   for (const Setting& setting : settings) managed.push_back(setting.cvar);
-
-  wchar_t executable[MAX_PATH];
-  if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return false;
-  int count = 0;
-  LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count);
-  if (!arguments) return false;
-  std::wstring command = QuoteArgument(executable);
-  for (int i = 1; i < count; ++i) {
-    const std::wstring argument = arguments[i];
-    if (argument.rfind(L"--", 0) == 0) {
-      std::wstring name = argument.substr(2);
-      const size_t equals = name.find(L'=');
-      const bool inline_value = equals != std::wstring::npos;
-      if (inline_value) name.resize(equals);
-      const bool negated = name.rfind(L"no-", 0) == 0;
-      if (negated) name = name.substr(3);
-      const std::string flag(name.begin(), name.end());  // flag names are ASCII
-      const auto* info = rex::cvar::GetFlagInfo(flag);
-      const bool takes_value = info && info->type != rex::cvar::FlagType::Boolean &&
-                               !inline_value && !negated && i + 1 < count;
-      if (std::find(managed.begin(), managed.end(), flag) != managed.end()) {
-        if (takes_value) ++i;
-        continue;
-      }
-      if (flag == "log_file" && takes_value) {
-        fs::path log(arguments[++i]);
-        std::wstring stem = log.stem().wstring();
-        if (stem.size() < 8 || stem.compare(stem.size() - 8, 8, L"-restart") != 0) {
-          stem += L"-restart";
-        }
-        log.replace_filename(stem + log.extension().wstring());
-        command += L" " + argument + L" " + QuoteArgument(log.wstring());
-        continue;
-      }
-    }
-    command += L" " + QuoteArgument(argument);
-  }
-  LocalFree(arguments);
-  command += L" --fear_restart_wait_pid " + std::to_wstring(GetCurrentProcessId());
-
-  STARTUPINFOW startup{};
-  startup.cb = sizeof(startup);
-  PROCESS_INFORMATION process{};
-  if (!CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr,
-                      &startup, &process)) {
-    REXLOG_ERROR("F.E.A.R. settings: restart failed ({})", GetLastError());
-    return false;
-  }
-  CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
-  return true;
-#else
-  (void)settings;
-  return false;
-#endif
+  return fear::process::StartAfterThis(
+      fear::process::OwnExecutable(),
+      fear::process::WithoutFlags(fear::process::OwnArguments(), managed), fs::current_path());
 }
 
-class Panel : public rex::ui::ImGuiDialog {
+class HostPanel : public fear::panel::Panel {
  protected:
-  explicit Panel(const fear::settings::Host& host) : ImGuiDialog(host.drawer), host_(host) {
-    g_open = true;
-  }
-  ~Panel() override {
-    g_wait_release = true;
-    g_open = false;
-  }
+  explicit HostPanel(const fear::settings::Host& host) : Panel(host.drawer), host_(host) {}
 
   fear::settings::Host host_;
-  Navigator navigator_;
-  int selected_ = 0;
 };
 
-class SettingsPanel final : public Panel {
+class SettingsPanel final : public HostPanel {
  public:
   explicit SettingsPanel(const fear::settings::Host& host)
-      : Panel(host), settings_(BuildSettings()) {
+      : HostPanel(host), settings_(BuildSettings()) {
     for (const Setting& setting : settings_) {
       running_.push_back(CurrentOption(setting));
     }
@@ -617,9 +341,9 @@ class SettingsPanel final : public Panel {
   bool closing_ = false;
 };
 
-class QuitPanel final : public Panel {
+class QuitPanel final : public HostPanel {
  public:
-  explicit QuitPanel(const fear::settings::Host& host) : Panel(host) {}
+  explicit QuitPanel(const fear::settings::Host& host) : HostPanel(host) {}
 
  protected:
   void OnDraw(ImGuiIO& io) override {
@@ -648,17 +372,6 @@ class QuitPanel final : public Panel {
   bool closing_ = false;
 };
 
-void WaitForPreviousRun() {
-#if defined(_WIN32)
-  const uint32_t pid = REXCVAR_GET(fear_restart_wait_pid);
-  if (!pid) return;
-  if (HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid)) {
-    WaitForSingleObject(process, 30000);
-    CloseHandle(process);
-  }
-#endif
-}
-
 // First run: draw at the multiple of 720p that covers the display (3 on 4K, 2 on 1080p and
 // 1440p).
 uint32_t FirstRunScale() {
@@ -677,7 +390,7 @@ uint32_t FirstRunScale() {
 namespace fear::settings {
 
 void Load(const std::filesystem::path& user_data_root) {
-  WaitForPreviousRun();
+  fear::process::WaitForPreviousRun();
   g_path = user_data_root / "settings.toml";
   std::error_code error;
   if (!fs::exists(g_path, error)) {
@@ -686,36 +399,13 @@ void Load(const std::filesystem::path& user_data_root) {
   rex::cvar::LoadConfig(g_path);
 }
 
-void AddFonts(ImFontAtlas* atlas) {
-  static const ImWchar ranges[] = {0x0020, 0x00FF, 0};
-  ImFontConfig config;
-  config.OversampleH = config.OversampleV = 2;
-  for (const char* path : {"C:\\Windows\\Fonts\\bahnschrift.ttf",
-                           "C:\\Windows\\Fonts\\segoeui.ttf"}) {
-    std::error_code error;
-    if (fs::exists(path, error)) {
-      g_font = atlas->AddFontFromFileTTF(path, 64.0f, &config, ranges);
-      if (g_font) return;
-    }
-  }
-}
-
-bool GameGetsInput() {
-  if (g_open) return false;
-  if (!g_wait_release) return true;
-  const PadState pad = ReadPads();
-  if (pad.buttons || pad.triggers || PanelKeysHeld()) return false;
-  g_wait_release = false;
-  return true;
-}
-
 void OpenSettings(const Host& host) {
-  if (g_open || !host.drawer) return;
+  if (fear::panel::AnyOpen() || !host.drawer) return;
   new SettingsPanel(host);  // deletes itself when closed (ImGuiDialog)
 }
 
 void OpenQuit(const Host& host) {
-  if (g_open || !host.drawer) return;
+  if (fear::panel::AnyOpen() || !host.drawer) return;
   new QuitPanel(host);
 }
 
