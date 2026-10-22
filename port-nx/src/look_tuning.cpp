@@ -20,7 +20,7 @@
 #include <rex/logging.h>
 #include <rex/runtime.h>
 
-REXCVAR_DEFINE_STRING(fear_look_ramp, "console", "F.E.A.R.",
+REXCVAR_DEFINE_STRING(fear_look_ramp, "off", "F.E.A.R.",
                       "Right-stick turn boost at the stick's edge: console (as shipped: 0.3 s "
                       "wait, 0.4 s ramp to 360 deg/s), nodelay (ramp starts at once), instant "
                       "(full boost at once), off (no boost; turn rate follows the stick)")

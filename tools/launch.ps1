@@ -26,7 +26,7 @@ param(
     # Right stick at its edge (port-nx): console = as shipped (0.3 s wait, then a 0.4 s ramp up
     # to 360 deg/s, restarting every time the stick stops), nodelay, instant, or off (no boost,
     # turn rate follows the stick). See port-nx/src/look_tuning.h.
-    [ValidateSet('console', 'nodelay', 'instant', 'off')][string]$LookRamp = 'console',
+    [ValidateSet('console', 'nodelay', 'instant', 'off')][string]$LookRamp = 'off',
     [switch]$NoSoftLock,  # no aim-assist slowdown of turning near enemies
     [string]$Extra = '',  # more flags, space separated
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'

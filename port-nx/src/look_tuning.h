@@ -7,17 +7,18 @@
 // TurningSoftLockYawFactor / PitchFactor (0.3 / 0.5) of normal (soft lock aim assist).
 // All of it is data in Game/database/Loki.gamedb (Client/Shared, Client/SoftLock).
 //
-// fear_look_ramp picks the stick response:
+// fear_look_ramp picks the stick response (off by default since play-test 2: "it feels
+// significantly better without that ramp up"):
 //   console  as shipped
 //   nodelay  the boost ramp starts as soon as the stick reaches its edge
 //   instant  full boost speed at the edge, no wait and no ramp
 //   off      no edge boost: turn rate follows the stick, nothing ramps
 // fear_aim_softlock false turns the soft-lock slowdown off.
 //
-// When either differs from the console tuning, a patched copy of the player's own Loki.gamedb
-// is written to <user data>/overrides/ at startup and the game's path to the database is
-// redirected to it (a VFS symbolic link to a second, read-only device). The game files are not
-// changed.
+// When either differs from the console tuning (so by default), a patched copy of the player's
+// own Loki.gamedb is written to <user data>/overrides/ at startup and the game's path to the
+// database is redirected to it (a VFS symbolic link to a second, read-only device). The game
+// files are not changed.
 
 #pragma once
 

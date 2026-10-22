@@ -61,7 +61,9 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 
 **Read** (`tools/gamedb.py`, a reader for the 360's big-endian "BDAG" databases): `Client/Shared` has `GPadAimEdgeThreshold` 0.95, `GPadAimEdgeDelayTime` **0.3 s**, `GPadAimEdgeAccelTime` **0.4 s**, `GPadAimEdgeMaxTurnRate` 360°/s, `GPadAimAspectRatio` 0.5; `Client/SoftLock` has `TurningSoftLockYawFactor` **0.3** and `PitchFactor` 0.5. So: past 95% stick, the game waits 0.3 s, then ramps the turn rate up over 0.4 s to 360°/s, and every stop restarts the wait; near an enemy, turning drops to 30%.
 
-**Option** (`port-nx/src/look_tuning.cpp`, launcher `-LookRamp`, `-NoSoftLock`): at startup a patched copy of the player's own `Loki.gamedb` goes to `<user>/overrides/Game/database/`, and the game's database folder is redirected to it (a VFS symbolic link to a read-only device that falls back to the original `Game` folder for everything else). Modes: `console` (as shipped, default), `nodelay` (ramp starts at once), `instant` (full boost at once), `off` (no boost: turn rate follows the stick). The log confirms the game read it ("the game reached the patched database folder"). Untested by hand: `off` may turn too slowly at full stick (raise Look Sensitivity in the game's options, or try `nodelay`).
+**Option** (`port-nx/src/look_tuning.cpp`, launcher `-LookRamp`, `-NoSoftLock`): at startup a patched copy of the player's own `Loki.gamedb` goes to `<user>/overrides/Game/database/`, and the game's database folder is redirected to it (a VFS symbolic link to a read-only device that falls back to the original `Game` folder for everything else). Modes: `console` (as shipped), `nodelay` (ramp starts at once), `instant` (full boost at once), `off` (no boost: turn rate follows the stick). The log confirms the game read it ("the game reached the patched database folder").
+
+**Verdict (hands-on, `off`):** "That fixed the stick issue for sure… it feels significantly better without that ramp up… The feel is 100% much better." **`off` is now the default** (cvar and launcher). The same session still presented at exactly 60 fps (59.7 average, 60.1 max; present blocking 13–14 ms), so "the frame rate felt better" was the stick, not the cap.
 
 **4. Saving.** The game said it would play without a profile. Same cause as N3: the runtime signs in only player 1 (a local profile, no Live needed), and SDL numbers controllers in connection order: a Logitech XInput device (`046D`) was slot 0, the Xbox Series pad slot 1, so the pad was player 2, not signed in. Proof: the keyboard-driven test runs (always player 1) have `checkpoint.sav` files; the hands-on profile has none. **Fix:** `fear_shared_controllers` (default on) installs the SDK's `SharedAssignment` in the app's input factory: every controller and the keyboard drive player 1. Needs a hands-on check that a checkpoint save appears under `port-nx/user/`.
 
@@ -113,24 +115,28 @@ The question came up after the play-test: would it be easier to take the 360-onl
 
 **Recommendation: stay with the recomp.** The 360 content is the reason for the project, and it's free here; going the other way means rebuilding that content and logic on a closed engine. The PC version's real advantage, its textures, can be brought *into* the recomp by name. Quake 4 was different: openQ4 is an open engine and the 360's extras were small code routines.
 
-## Idea for later: engine overhauls, OpenCE-style (maybe in Rust)
+## Direction for later: decompile and rewrite, OpenCE-style
 Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, possibly in Rust; partly in case the movement feel comes from how the game was squeezed onto the 360 rather than from movement code.
 - **Where speed comes from here:** at 4K/120 the renderer mostly waits for the game, and the recompiled CPU code runs on a 9800X3D, far beyond a 360. There's no measured CPU bottleneck yet, so a rewrite for speed would be aimed at nothing. Profile first (the renderer already reports where frame time goes).
 - **What OpenCE's rewrites actually bought** was *behaviour*: rendering between simulation ticks (Smooth Motion), lower input latency, configurable FOV. Those come from owning the code, not from the language. The recomp already allows the same thing one function at a time: replace a recompiled function with a hand-written one, as WK2D's N3 project does with tested C++ modules.
 - **Language:** the SDK, the renderer and the generated code are C++; Rust would sit behind a C ABI at every boundary, for no speed gain (both compile through LLVM). Worth it only if a whole subsystem gets rewritten for maintainability.
-- **For the movement feel specifically:** if it turns out to be console-era tuning or a 30 Hz assumption (head bob, camera smoothing, input filtering), the fix is a small hook on that function, measured against `-FrameRate 30` and against the PC version's values.
+- **For the movement feel specifically:** if it turns out to be console-era tuning or a 30 Hz assumption (head bob, camera smoothing, input filtering), the fix is a small hook on that function, measured against `-FrameRate 30` and against the PC version's values. (The right-stick "seam" turned out to be exactly that kind of tuning: data, fixed without touching code.)
+
+**Direction set after play-test 2:** "what we're looking at now is a full decomp of the 360 version… like OpenCE, where they basically did rewrites, and we can do that section by section. The game doesn't have a lot of variety, so I think it would be doable." How that maps onto the recomp:
+- **The recomp is the decomp's test harness.** Every 360 function already runs as generated C++ (`sub_<address>`). A section is decompiled by replacing those functions with hand-written code and checking it against the generated original on the same inputs (the approach WK2D uses for N3's tested native modules), so the game stays playable at every step.
+- **Naming the code:** the XEX has no symbols. The F.E.A.R. Public Tools SDK ships the PC game-side source (client/server game code, menus, HUD, AI) and the 360 game code is a port of the same codebase, so its strings and structure can name most game-side functions. That source is under its EULA: use it as a map, don't copy it into this public repository. The LithTech engine itself is closed on both versions and has to be read from the PPC code.
+- **Order by payoff:** the frame loop and presentation first (render between simulation ticks for smooth high frame rates, input latency), then input/camera, then the systems where rewrites buy features (menus: Options/Quit; saves), the rest only as needed.
 
 ## Open items and next steps
 1. **60 fps cap from outside the game:** check the NVIDIA driver/app *Max Frame Rate* and Afterburner/RTSS; then measure again (the 10-second report shows `present` time per frame).
-2. **Right stick:** hands-on verdict on `-LookRamp off` / `nodelay` (and `-NoSoftLock`); make the preferred one the default.
-3. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1.
-4. **Crash:** wait for a `crash-*.txt` from the new reporter.
-5. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
-6. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
-7. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
-8. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
-9. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
-10. **Linux:** the renderer and SDK are Vulkan; port the build script.
+2. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1 (the first session after the fix was too short to reach one).
+3. **Crash:** wait for a `crash-*.txt` from the new reporter.
+4. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
+5. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
+6. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
+7. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
+8. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
+9. **Linux:** the renderer and SDK are Vulkan; port the build script.
 
 The repository is public: <https://github.com/Juansolo457/fear360-recomp>.
 
