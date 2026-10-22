@@ -3,7 +3,7 @@
 Reads every frame, measures brightness and how different each frame is from its neighbours,
 and flags frames that jump away from both the frame before and the frame after (a one- or
 two-frame event, not a cut or a camera move, which only differ from one side). For each event
-it writes a strip of the frames around it, full resolution, into <out>/.
+it writes a strip of the frames around it, 360 px high, into <out>/.
 
   python -I tools/flicker_scan.py <video> <out folder> [--start s] [--end s] [--threshold 18]
 """
@@ -31,7 +31,9 @@ def main():
         t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
         if not ok or t > end:
             break
-        frames.append(frame)
+        # Strips are 360 px high: kept at that size (a 4K capture held whole runs out of memory).
+        frames.append(cv2.resize(frame, (int(frame.shape[1] * 360 / frame.shape[0]), 360),
+                                 interpolation=cv2.INTER_AREA))
         small.append(cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY).astype(np.float32))
         stamps.append(t)
         # Keep memory bounded on long clips: full frames only for a sliding window.

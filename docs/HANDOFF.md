@@ -18,7 +18,7 @@ are fine. At 3× (3840×2160 internal) the image is clean and the RTX 4090 is fa
 | Resolution | `--nx_native_resolution_scale 1..4` (our change; `tools/launch.ps1 -Nx -Scale 3`) |
 | Anti-aliasing | the game's own 2×/4× MSAA, honoured by the renderer (`nx_native_msaa`), on top of the scale |
 | Anisotropic filtering | up to 16× by default (`nx_native_max_anisotropy`) |
-| Frame rate | the game presents every 2 virtual vblanks → 30 fps at the console's 60 Hz vblank. **The launcher now defaults to `-FrameRate 120` (`--video_mode_refresh_rate 240`, the SDK's maximum) → up to 120 fps game frames; the user reports it smooth with game speed correct.** `-FrameRate 60` (120 Hz vblank) was verified the same way; `-FrameRate 30` restores console pacing. Details in "Frame rate" below |
+| Frame rate | locked to the display's refresh, at most 90 fps: 80 on a 240 Hz display, each frame shown for exactly 3 refreshes; `-FrameRate <n>` sets the limit, `-FrameRate 30 -Timer` is the console's pacing. Details in "Frame rate" below |
 | Display | fullscreen at the desktop's 3840×2160; `--resolution 720p` tells the guest it is on a 720p display (fixes ReXGlue's 4:3 squeeze at 200% DPI) |
 | Controls | SDL gamepads. Known trap: a Logitech virtual XInput pad (`046D:0000`) takes slot 0, making the Xbox pad player 2 ("No profile selected", no saves); disable that device |
 | Stock renderer (`--nx_renderer xenos`) | still corrupts menus; kept only for A/B |
@@ -27,37 +27,28 @@ Commits: `a616a08` (port-nx + renderer), `e678aea` (resolution scaling), `4614a8
 `-FrameRate`), then 120 fps as the launcher default.
 
 ## Frame rate: what is known
-- Nothing we changed touches timing. The renderer's log shows it idling ~46 of every 50 ms
-  "waiting for the game": the 30 fps is the game's own cap, as on the console.
-- The native renderer's vblank thread (`native_system.cpp` `VblankLoop`) ticks at
-  `VdQueryVideoMode().refresh_rate` = SDK cvar `video_mode_refresh_rate` (default 60, clamp
-  24–240). The game's D3D `Present(interval 2)` waits for 2 of those interrupts. Raising the
-  cvar is the zero-code way to raise the game's frame rate. The PC version of this engine
-  (LithTech Jupiter EX) runs uncapped with a variable timestep, so the game logic should cope
-  better than N3's fixed 40 Hz tick did, but that is the thing to verify (animation speed,
-  slow-mo duration, physics, scripted timers).
-- **Results (2026-10-21), 3× scale, user play sessions:** 120 Hz vblank (`-FrameRate 60`) and
-  240 Hz vblank (`-FrameRate 120`) both felt smooth with game speed right. 120 is now the
-  launcher default. Not yet checked: slow-mo duration, cutscenes, scripted timers, late
-  levels, and whether heavy scenes actually hold 120 (the renderer doesn't log an fps; its
-  "slow frames" counters only flag frames over 50 ms). The engine's variable timestep seems
-  to carry it, unlike N3; keep an eye out for frame-counted logic as Lost Odyssey found.
-- **240 Hz is the ceiling of this trick:** `ConfiguredVideoModeRefreshRate` clamps
-  `video_mode_refresh_rate` to 24–240. Above 120 fps would need the interval-2 present
-  released at its call site (Lost Odyssey style) or interpolation.
-- Host present is vsynced (`vsync` cvar) to the 240 Hz display. fear-nx's own pacing cvars
-  (`nx_min_frame_vblanks`, `nx_pace_before_present`) only add holds; leave them at defaults.
-- If the vblank trick misbehaves, the Lost Odyssey approach is the model: find the present
-  call site, release its interval there, pace on the host, and fix per-frame logic one case
-  at a time (`../n3-360-recomp/reference/LostOdysseyRecomp/docs/notes/native-90-120fps.md`).
-- A 240 Hz display shows a 30 fps game frame for 8 refreshes, a 60 fps one for 4 and a
-  120 fps one for 2. Frame interpolation (OpenCE "Smooth Motion") would be the route past
-  the game's own limits.
+- The game presents every second vblank interrupt (D3D `Present` interval 2), so its frame
+  rate is the guest vblank rate over two: 30 fps at the console's 60 Hz. Game speed is
+  right at any rate tried (variable timestep), but **above ~90 fps the 360's effect code
+  breaks** (bullet tracers twitch and freeze mid-air: a per-frame step).
+- **Pacing is locked to the display** (`port-nx/src/display_vblank.*`, default
+  `fear_vblank_source=display`): the guest vblank follows the display's real vblank (DXGI
+  `WaitForVBlank`), the guest refresh rate is set to the display's, and `native_system.cpp`
+  `PaceToDisplay` holds each frame to exactly N refreshes (N = ceil(refresh /
+  `fear_frame_rate_limit`), limit 90), presenting right after a vblank through mailbox. 80 fps
+  on 240 Hz, 72 on 144, 60 on 60 (two guest vblanks per refresh). Falls back to the timer if
+  the vblanks stop coming at the display's rate (variable refresh).
+- `fear_vblank_source=timer` (launcher `-Timer`) is fear-nx's software timer at
+  `video_mode_refresh_rate` (24–480 Hz with SDK patch 0003); it drifts against the display.
+- The 10-second report's `pacing` line gives the time between presents and the display
+  refreshes between them (from the real vblank in both modes).
+- Past ~90 fps needs the tracer step fixed in the game code (decompile) or frame
+  interpolation (OpenCE "Smooth Motion").
 
 ## How it is built and run
 ```
 pwsh -NoProfile -File tools/build-nx.ps1            # SDK from source + codegen + game, ~15 min first time
-pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # defaults: -Scale 3 -FrameRate 120
+pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # defaults: -Scale 3 -FrameRate auto
 pwsh -NoProfile -File tools/smoke.ps1 -Nx -Seconds 55 -Captures 3 -Extra '--nx_renderer native --nx_native_resolution_scale 3'
 pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot even when covered
 & tools/autoplay.ps1 -Nx -Seconds 200 -CaptureEvery 2 -Tag x -Extra '--nx_renderer native --nx_native_trace_frame_every 120'
@@ -96,6 +87,7 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/fear_app.h` (`fear_shared_controllers`) | every controller drives player 1, the signed-in local profile that saves |
 | `port-nx/src/look_tuning.*`, `tools/gamedb.py` | right-stick options (`fear_look_ramp`, `fear_aim_softlock`): a patched copy of `Loki.gamedb` served through a VFS redirect; reader for the 360's "BDAG" game databases |
 | `port-nx/src/crash_report.*` | crash reports into `port-nx/logs/` |
+| `port-nx/src/display_vblank.*` | the display's vblank (DXGI) and the pacing plan; used by `native_system.cpp` |
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
 | `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |

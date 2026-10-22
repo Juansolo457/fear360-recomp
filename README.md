@@ -23,10 +23,10 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Boots, menus, intro videos, campaign, Instant Action | `port-nx` with `--nx_renderer native` |
 | ✅ 4K: integer internal resolution scaling (3× = 3840×2160) | our patch to fear-nx's renderer |
 | ✅ The game's own 2×/4× MSAA and 16× anisotropic filtering | on top of the scale |
-| ✅ Even frame pacing out of the box: 80 fps on a 240 Hz display ("feels great… better than 90") | the launcher picks the highest rate up to 90 that divides the display's refresh (72 on 144 Hz, 60 on 60 Hz); above ~90 the 360's tracer code breaks; `-FrameRate <n>` overrides (up to 240) ([PROGRESS](docs/PROGRESS.md#play-test-3-2026-10-22)) |
+| ✅ Frame pacing locked to the display: 80 fps on 240 Hz, every frame shown for exactly 3 refreshes ("Frame rate's feeling really good") | the game's vblank follows the display's real one (DXGI, any GPU vendor), each frame held to the fewest refreshes that keep it at or under 90 fps (72 on 144 Hz, 60 on 60 Hz); above ~90 the 360's tracer code breaks; `-FrameRate <n>` sets that limit ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ No white flash as a new area comes into view | textures still streaming in are waited for instead of drawn as the empty texture (to confirm hands-on) |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
-| ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
+| ⏳ A haze, and brief brightening, in vent steam and dusty doorways (Instant Action) | being checked: the 360's effects tuned at 30 fps, or the renderer ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
 | ✅ Right stick without the 360's turn ramp (default) | "feels significantly better": the 360's stick tuning patched on the fly from your own data; `-LookRamp console` restores it ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
 | ✅ Saving with any controller (to confirm at a checkpoint) | every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
@@ -45,7 +45,7 @@ pwsh -NoProfile -File tools/build-nx.ps1        # first time ~15 min: ReXGlue SD
 pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'
 ```
 
-Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate auto` (an even divisor of your display's refresh, at most 90), 16× AF. Options: `-Scale 1..3`, `-FrameRate auto|<20-240>`, `-Present immediate|mailbox|fifo`, `-TexturePack <folder>`, `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Extra '<more flags>'`.
+Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate auto` (locked to your display's refresh, at most 90 fps), 16× AF. Options: `-Scale 1..3`, `-FrameRate auto|<20-240>` (the limit), `-Timer` (the old software vblank timer instead), `-Present auto|immediate|mailbox|fifo`, `-TexturePack <folder>`, `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Extra '<more flags>'`.
 
 **PC textures (optional, needs the PC version):** build a pack from your own PC install once (about 6 minutes, 1.3 GB, stays in the gitignored `private/`), then add `-TexturePack private/texture_pack`. Steps in [docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack).
 

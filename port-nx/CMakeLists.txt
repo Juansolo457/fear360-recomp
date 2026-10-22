@@ -33,6 +33,7 @@ set(FEAR_SOURCES
     src/main.cpp
     src/texture_pack.cpp
     src/crash_report.cpp
+    src/display_vblank.cpp
     src/look_tuning.cpp
     ${FEAR_NATIVE_SOURCES}
 )
@@ -47,6 +48,7 @@ rexglue_setup_target(fear)
 target_link_libraries(fear PRIVATE rexgpu-xenos xxHash::xxhash)
 if(WIN32)
     target_link_libraries(fear PRIVATE dbghelp)   # crash reports (src/crash_report.cpp)
+    target_link_libraries(fear PRIVATE dxgi)      # the display's vblank (src/display_vblank.cpp)
 endif()
 target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
 set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)

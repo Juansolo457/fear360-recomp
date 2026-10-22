@@ -96,14 +96,14 @@ Asked after play-test 3: what in fear-nx's renderer is a Switch tradeoff that a 
 | **New textures streamed in one at a time** (each draw waits for its texture's job before the next draw asks for one) | creating an image costs ~1.5 ms | a 300-texture load-in waited 112 ms for ~20 ms of work (6 workers, 5 idle); frames over 100 ms and the wait budget blown | **fixed**: every new texture is created on the spot and filled (untiled, or read from the pack) by **6 upload workers** before the frame is submitted (`fear_texture_upload_direct`). Intro at 3×/90 fps: **no frame over 50 ms after the first load at boot** (was 1–2 per load-in, some over 100 ms), upload wait 0.00 ms per frame, 90 fps in every window |
 | Thread priorities, driver-cache save throttling, small per-frame create budgets | SD card, 3 cores | harmless | leave |
 
-**Frame pacing:** the game's frames come from a software vblank timer, not the display. At 90 fps on a 240 Hz display a frame stays up for 2 or 3 refreshes alternately (8.3/12.5 ms): visible judder. **Hands-on, 80 fps: "80 feels great, I notice the feel is better than 90"** (exactly 3 refreshes each). The launcher now defaults to `-FrameRate auto`: the highest rate up to 90 that divides the display's refresh (80 on 240 Hz, 72 on 144, 82.5 on 165, 60 on 60/120). 240 fps was tried (SDK patch 0003 allows a 480 Hz guest vblank; 163–234 fps measured at 4K, render-thread bound in heavy scenes): the tracers break, as at 120. Next: time the virtual vblank from the display's real refresh, so the software timer can't drift against it.
+**Frame pacing:** the game's frames come from a software vblank timer, not the display. At 90 fps on a 240 Hz display a frame stays up for 2 or 3 refreshes alternately (8.3/12.5 ms): visible judder. **Hands-on, 80 fps: "80 feels great, I notice the feel is better than 90"** (exactly 3 refreshes each). The launcher now defaults to `-FrameRate auto`: the highest rate up to 90 that divides the display's refresh (80 on 240 Hz, 72 on 144, 82.5 on 165, 60 on 60/120). 240 fps was tried (SDK patch 0003 allows a 480 Hz guest vblank; 163–234 fps measured at 4K, render-thread bound in heavy scenes): the tracers break, as at 120. **Then locked to the display** (play-test 4): the game's vblank now follows the display's real one, and every frame in play was shown for exactly 3 refreshes.
 
 ## What's left
 **For a definitive port** (roughly where the "80%" sits):
 1. **Saving:** the fix works (the profile is written during play), but play-test 3 was Instant Action, which doesn't checkpoint; one campaign checkpoint to confirm.
 2. **Options and Quit** in the main menu.
 3. **No pop-in on first sight** (the shader/pipeline item above).
-4. **Even pacing** (80 fps, or display-timed vblank) and **120 fps without the tracer glitch** (the per-frame step in the game's effect code).
+4. **Even pacing: done** (display-locked, play-test 4). Left: **120 fps without the tracer glitch** (the per-frame step in the game's effect code), and the steam/dust haze if it turns out to be frame-rate bound.
 5. **A level sweep:** every Interval, the bonus level and the Instant Action maps, played or driven, for crashes and visual faults; the crash reporter catches anything.
 6. **Linux** build; ***F.E.A.R. Files***.
 
@@ -115,11 +115,27 @@ The user's sense: walking feels a little more bouncy than on PC, maybe extra swa
 - **Frame-rate dependence.** The game was tuned at 30 fps; if bob/sway or camera smoothing is integrated per frame, 120 fps can change its amplitude or feel. Compare `-FrameRate 30` against `120` in the same spot. If the 30 fps run feels like PC and 120 doesn't, it's ours to fix (scale the per-frame step).
 - A measured comparison beats feel: record the camera position/orientation per frame (a guest-memory read of the player camera, or screen captures while walking in a straight line) at 30 and 120 fps, and on PC with EchoPatch at 120.
 
+## Play-test 4 (2026-10-22, display-locked pacing)
+4K, 80 fps, PC textures, Instant Action, ~10 minutes. The verdict: "that playtest is really good. Controls are feeling really, really good. Frame rate's feeling really good."
+
+**What changed.** The game paces itself on the vblank interrupt and presents every second one. fear-nx raised that interrupt from a software timer on its own clock, so even at a rate that divides the display's refresh (80 on 240 Hz) the two drift apart and now and then a frame lands a refresh early or late. Now (`port-nx/src/display_vblank.*`, `fear_vblank_source=display`, the default) the interrupt follows the display's real vblank, from DXGI's `WaitForVBlank` on the primary output (any GPU vendor). Each frame is held to exactly N refreshes, the fewest that keep it at or under `fear_frame_rate_limit` (90): 3 on 240 Hz, 2 on 144 Hz, 1 on 60 Hz with two guest vblanks per refresh. It goes out right after the vblank that ends its N, through mailbox presentation (immediate would tear it a little way down the screen), so it is shown at the next refresh. A display whose vblanks stop coming at its rate (variable refresh, switched off) falls back to the timer; G-SYNC is off on the test PC and it never fell back. `-Timer` in the launcher keeps the old timer.
+
+**Measured** (a new `pacing` line in the 10-second report: time between presents, and the display refreshes between them, counted from the real vblank in both modes):
+
+| | frames 3 refreshes apart | spread of the frame time |
+|---|---|---|
+| timer, 80 fps (windowed autoplay, 30 s in game) | 800 of 800 per 10 s | 0.13 ms |
+| display, 80 fps (this play-test, ~9 minutes in game) | **800 of 800 in every 10 s window** | **0.02 ms** |
+
+The timer did well in its 30 s too: its drift shows up rarely, as a frame a refresh early or late when the phase crosses a refresh. The display lock removes that by construction. Four frames of 210–245 ms showed up in one menu stretch: the game itself busy (the ring idle, waiting for it), not the renderer.
+
+**New: a haze and brief brightening in vent steam and dusty doorways.** From a 46 s recording, frame by frame: on the rooftop at the start of the map, walking past the steaming air-conditioning units, the screen brightens over 4–5 frames (mean brightness 75 → 88) and drops back in 2 (to 71). In a lit corridor a bright haze builds over ~20 frames and fades again. Neither is a single-frame flash like the earlier load-in one: they are the steam and dust sprites, close to the camera. The open question is whether they are thicker or brighter than on the console. If the 360's effects are emitted per frame (as the tracers' steps are), 80 fps would give ~2.7× the particles of 30. Next: the same spot at 30 fps (`-FrameRate 30 -Timer`, the console's pacing) against 80.
+
 ## Frame pacing: diagnosis
 - The log shows the swapchain in **presentation mode 0 = IMMEDIATE**: no vsync and no triple buffering. The SDK prefers it for latency (`vulkan_presenter.cpp`).
 - The game's frames are paced by fear-nx's **software vblank thread** (`VblankLoop`, a host timer at `video_mode_refresh_rate`), which is **not locked to the monitor's real refresh**. Presented immediately, frames reach the 240 Hz display at slightly uneven intervals and can tear. That reads as occasional jank even at a high average. Windowed-fullscreen Vulkan on Windows also goes through the compositor, so G-SYNC/VRR is unlikely to be smoothing it.
 - **Test now:** `tools/launch.ps1 … -Present fifo` (true vsync: even, slightly more latency) and `-Present mailbox` (no tearing, low latency, still unsynced).
-- **Real fix (next):** drive the virtual vblank from the display's actual vblank (e.g. DXGI `IDXGIOutput::WaitForVBlank` on Windows) instead of a timer, so the game's "every 2 vblanks" lands exactly on every 2nd refresh at 240 Hz. Or present to an exclusive/independent-flip swapchain so VRR engages.
+- **Done** (see play-test 4). The plan was: drive the virtual vblank from the display's actual vblank (e.g. DXGI `IDXGIOutput::WaitForVBlank` on Windows) instead of a timer, so the game's "every 2 vblanks" lands exactly on every 2nd refresh at 240 Hz. Or present to an exclusive/independent-flip swapchain so VRR engages.
 
 ## Two-tile frames: doubled cards and half frames
 Autoplay runs at 1× and 2× with `--nx_native_trace_output`, screenshots every 2–3 s through the intro:
@@ -174,7 +190,7 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 4. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1 (the first session after the fix was too short to reach one).
 5. **Crash:** wait for a `crash-*.txt` from the new reporter.
 6. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
-7. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
+7. **Frame pacing: done** (display-locked vblank, play-test 4). **Next: the haze in vent steam and dusty doorways** (play-test 4): compare 30 and 80 fps in the same spot, then the renderer's particle path.
 8. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
 9. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
 10. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.

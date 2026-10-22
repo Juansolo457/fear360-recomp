@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -37,6 +38,8 @@
 #include <rex/ui/vulkan/presenter.h>
 #include <rex/ui/vulkan/provider.h>
 #include <rex/ui/windowed_app_context.h>
+
+#include "display_vblank.h"
 
 REXCVAR_DECLARE(int32_t, switch_cp_core);
 REXCVAR_DECLARE(int32_t, query_occlusion_fake_sample_count);
@@ -215,6 +218,10 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     if (running_.exchange(true)) {
       return X_STATUS_SUCCESS;
     }
+    display_pacing_ = fear::display_vblank::GetPlan().active;
+    if (!display_pacing_) {
+      display_watch_ = std::thread([this]() { WatchDisplay(); });
+    }
     vblank_thread_ = rex::system::object_ref<rex::system::XHostThread>(
         new rex::system::XHostThread(kernel_state_, 128 * 1024, 0, [this]() { return VblankLoop(); }));
     vblank_thread_->set_name("GPU VSync native");
@@ -270,6 +277,9 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       if (vblank_thread_) {
         vblank_thread_->Wait(0, 0, 0, nullptr);
         vblank_thread_.reset();
+      }
+      if (display_watch_.joinable()) {
+        display_watch_.join();
       }
     }
     if (renderer_ready_) {
@@ -474,6 +484,14 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   }
 
   int VblankLoop() {
+    const fear::display_vblank::Plan& plan = fear::display_vblank::GetPlan();
+    if (display_pacing_ && DisplayVblankLoop(plan)) {
+      return 0;
+    }
+    // F.E.A.R.: in place of the display's refreshes (fallen back from fear_vblank_source=display),
+    // one every guest_vblanks_per_refresh of the timer's vblanks.
+    const uint32_t per_refresh = display_pacing_ ? plan.guest_vblanks_per_refresh : 0;
+    uint32_t in_refresh = 0;
     rex::system::X_VIDEO_MODE mode;
     rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
     const double hz = std::max(1.0, double(float(mode.refresh_rate)));
@@ -496,13 +514,103 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
         next = now;
       }
       while (now >= next) {
-        vblanks_.fetch_add(1, std::memory_order_release);
-        counter_.fetch_add(1, std::memory_order_relaxed);
-        Interrupt(0, 2);
+        if (per_refresh && in_refresh++ % per_refresh == 0) {
+          DisplayRefresh();
+        }
+        GuestVblank();
         next += interval;
       }
     }
     return 0;
+  }
+
+  void GuestVblank() {
+    vblanks_.fetch_add(1, std::memory_order_release);
+    counter_.fetch_add(1, std::memory_order_relaxed);
+    Interrupt(0, 2);
+  }
+
+  void DisplayRefresh() {
+    {
+      std::lock_guard<std::mutex> lock(display_mutex_);
+      display_vblanks_.fetch_add(1, std::memory_order_release);
+    }
+    display_cv_.notify_all();
+  }
+
+  // F.E.A.R.: the guest's vblanks from the display's (fear_vblank_source=display, see
+  // display_vblank.h). False, to go on with the timer, if there is no display to follow or its
+  // vblanks stop coming at its refresh rate (variable refresh, or switched off).
+  bool DisplayVblankLoop(const fear::display_vblank::Plan& plan) {
+    fear::display_vblank::Waiter waiter;
+    if (!waiter.Open()) {
+      REXLOG_WARN("[native] No display vblank to follow; pacing on a timer instead");
+      return false;
+    }
+    display_watched_ = true;
+    const auto period = std::chrono::duration_cast<Clock::duration>(
+        std::chrono::duration<double>(1.0 / plan.display_hz));
+    const uint32_t per_refresh = plan.guest_vblanks_per_refresh;
+    auto last = Clock::now();
+    auto window_start = last;
+    uint32_t long_waits = 0;
+    while (running_.load(std::memory_order_acquire)) {
+      const auto wait_start = Clock::now();
+      const bool waited = waiter.Wait();
+      auto now = Clock::now();
+      if (!waited || now - last < period / 2) {
+        // A failed or spurious wait: the timer's pace this once.
+        rex::thread::SleepUntil(last + period);
+        now = Clock::now();
+      } else if (now - wait_start > period * 3 / 2) {
+        // The display let refreshes go by that it would make at its rate.
+        if (now - window_start > std::chrono::seconds(2)) {
+          window_start = now;
+          long_waits = 0;
+        }
+        if (++long_waits >= 4) {
+          REXLOG_WARN("[native] The display's vblanks are not coming at {} Hz (variable "
+                      "refresh?); pacing on a timer instead",
+                      plan.display_hz);
+          display_watched_ = false;
+          return false;
+        }
+      }
+      // Refreshes missed while the game's vblank handler ran are made up, as the timer does,
+      // but not after a long pause (loading, a debugger).
+      int64_t refreshes = 1;
+      if (now - last > period * 3 / 2 && now - last < std::chrono::milliseconds(250)) {
+        refreshes = (now - last + period / 2) / period;
+      }
+      last = now;
+      for (int64_t i = 0; i < refreshes; ++i) {
+        DisplayRefresh();
+        GuestVblank();
+      }
+      // With two guest vblanks a refresh, the second half a refresh later.
+      for (uint32_t i = 1; i < per_refresh && running_.load(std::memory_order_acquire); ++i) {
+        rex::thread::SleepUntil(now + period * i / per_refresh);
+        GuestVblank();
+      }
+    }
+    return true;
+  }
+
+  // F.E.A.R.: with the timer driving the game, the display's refreshes are still counted, for the
+  // pacing report (how many each frame was on screen for).
+  void WatchDisplay() {
+    fear::display_vblank::Waiter waiter;
+    if (!waiter.Open()) {
+      return;
+    }
+    display_watched_ = true;
+    while (running_.load(std::memory_order_acquire)) {
+      if (!waiter.Wait()) {
+        display_watched_ = false;
+        return;
+      }
+      display_vblanks_.fetch_add(1, std::memory_order_release);
+    }
   }
 
   int RingLoop() {
@@ -702,6 +810,23 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       REXLOG_INFO("[native] skipped by reason:{}", reasons);
       reported_render_ = s;
     }
+    if (pacing_frames_) {
+      const double mean = pacing_ms_sum_ / double(pacing_frames_);
+      const double deviation =
+          std::sqrt(std::max(0.0, pacing_ms_squares_ / double(pacing_frames_) - mean * mean));
+      std::string refreshes;
+      for (uint32_t i = 0; i < 8; ++i) {
+        refreshes += fmt::format("{}{}", i ? "/" : "", pacing_refreshes_[i]);
+      }
+      REXLOG_INFO(
+          "[native] pacing ({}): {} frames {:.2f} ms apart (deviation {:.2f}, longest {:.1f}); "
+          "{} refreshes between presents 0/1/2/3/4/5/6/7+: {}",
+          display_pacing_ ? "display vblank" : "timer", pacing_frames_, mean, deviation,
+          pacing_ms_max_, display_watched_ ? "display" : "timer's", refreshes);
+      pacing_frames_ = 0;
+      pacing_ms_sum_ = pacing_ms_squares_ = pacing_ms_max_ = 0;
+      std::fill(std::begin(pacing_refreshes_), std::end(pacing_refreshes_), 0);
+    }
   }
   RendererStats reported_render_;
   uint64_t reported_swaps_before_ = 0;
@@ -780,7 +905,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           // frame rate cap already held (PM4_XE_SWAP), or held here if the
           // cap is not applied before presenting.
           swap_interrupt_pending_ = false;
-          if (!REXCVAR_GET(nx_pace_before_present)) PaceFrame();
+          if (!PaceBeforePresent()) PaceFrame();
         }
         for (uint32_t cpu = 0; cpu < 6; ++cpu) {
           if (cpus & (1u << cpu)) {
@@ -798,7 +923,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           swap_width_ = data.Read();
           swap_height_ = data.Read();
         }
-        if (REXCVAR_GET(nx_pace_before_present)) PaceFrame();
+        if (PaceBeforePresent()) PaceFrame();
         Present();
         swap_interrupt_pending_ = true;
         ReportSlowFrame();
@@ -1196,6 +1321,10 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   // one, felt as a hitch even at 30 fps on average. Held before it, presents
   // are evenly spaced, and the interrupt still follows the present.
   void PaceFrame() {
+    if (display_pacing_) {
+      PaceToDisplay();
+      return;
+    }
     const uint32_t min_vblanks = REXCVAR_GET(nx_min_frame_vblanks);
     if (min_vblanks > 1 && last_swap_vblank_) {
       const uint64_t target = last_swap_vblank_ + min_vblanks;
@@ -1217,7 +1346,58 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     last_swap_vblank_ = vblanks_.load(std::memory_order_acquire);
   }
 
+  bool PaceBeforePresent() const {
+    return display_pacing_ || REXCVAR_GET(nx_pace_before_present);
+  }
+
+  // F.E.A.R. (fear_vblank_source=display): a frame is presented right after the display refresh
+  // that completes its refreshes_per_frame since the last, or at once if it took longer, so with
+  // mailbox presentation each is shown at the next refresh and stays up for exactly that many.
+  void PaceToDisplay() {
+    const uint64_t target =
+        last_present_refresh_ + fear::display_vblank::GetPlan().refreshes_per_frame;
+    if (last_present_refresh_ && display_vblanks_.load(std::memory_order_acquire) < target) {
+      if (renderer_ready_) {
+        // The frame's draws go to the GPU now, not after the wait.
+        renderer_.Flush();
+      }
+      const auto hold_start = Clock::now();
+      {
+        std::unique_lock<std::mutex> lock(display_mutex_);
+        display_cv_.wait_until(lock, hold_start + std::chrono::milliseconds(100), [&] {
+          return display_vblanks_.load(std::memory_order_acquire) >= target ||
+                 !running_.load(std::memory_order_acquire);
+        });
+      }
+      hold_ns_ += uint64_t(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - hold_start)
+              .count());
+    }
+    last_present_refresh_ = display_vblanks_.load(std::memory_order_acquire);
+  }
+
+  // F.E.A.R.: for the report, the time between presents and the display refreshes between them
+  // (with mailbox presentation, how many each frame was on screen for).
+  void RecordPacing() {
+    const auto now = Clock::now();
+    const uint64_t refresh = display_vblanks_.load(std::memory_order_acquire);
+    if (pacing_last_present_.time_since_epoch().count() != 0) {
+      const double ms =
+          std::chrono::duration<double, std::milli>(now - pacing_last_present_).count();
+      if (ms < 250.0) {  // not across loading
+        ++pacing_frames_;
+        pacing_ms_sum_ += ms;
+        pacing_ms_squares_ += ms * ms;
+        pacing_ms_max_ = std::max(pacing_ms_max_, ms);
+        ++pacing_refreshes_[std::min<uint64_t>(refresh - pacing_last_refresh_, 7)];
+      }
+    }
+    pacing_last_present_ = now;
+    pacing_last_refresh_ = refresh;
+  }
+
   void Present() {
+    RecordPacing();
     const uint64_t swap = ++swaps_;
     g_swaps_presented.fetch_add(1, std::memory_order_relaxed);
     counter_.fetch_add(1, std::memory_order_relaxed);
@@ -1432,6 +1612,19 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   // Vblanks delivered, and the vblank of the last swap-complete interrupt.
   std::atomic<uint64_t> vblanks_{0};
   uint64_t last_swap_vblank_ = 0;
+  // F.E.A.R.: the display's refreshes, which pace the frames with fear_vblank_source=display (the
+  // timer's stand-ins after a fallback) and are otherwise counted for the report.
+  bool display_pacing_ = false;
+  std::atomic<bool> display_watched_{false};
+  std::atomic<uint64_t> display_vblanks_{0};
+  std::mutex display_mutex_;
+  std::condition_variable display_cv_;
+  std::thread display_watch_;
+  uint64_t last_present_refresh_ = 0;
+  // Ring thread only: pacing since the last report.
+  Clock::time_point pacing_last_present_{};
+  uint64_t pacing_last_refresh_ = 0, pacing_frames_ = 0, pacing_refreshes_[8] = {};
+  double pacing_ms_sum_ = 0, pacing_ms_squares_ = 0, pacing_ms_max_ = 0;
   Clock::time_point frame_start_{};
   uint64_t frame_start_wait_ns_ = 0, frame_start_pipelines_ = 0, frame_start_shaders_ = 0,
            frame_start_textures_ = 0, frame_start_created_ = 0;

@@ -15,6 +15,7 @@
 #include <rex/system/gpu_plugin.h>
 
 #include "crash_report.h"
+#include "display_vblank.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
 
@@ -67,6 +68,7 @@ class FearApp : public rex::ReXApp {
     config.gpu_plugin.clear();
 
     if (fear_nx::native::Enabled()) {
+      fear::display_vblank::Configure();
       config.graphics = fear_nx::native::CreateGraphicsSystem();
       REXLOG_INFO("F.E.A.R.: using fear-nx's native Vulkan Xenos renderer");
       return;

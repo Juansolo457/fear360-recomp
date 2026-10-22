@@ -3,6 +3,7 @@
 # gives on high-DPI desktops), rendering at a multiple of 720p with 16x anisotropic filtering.
 #
 #   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, auto fps
+#   ... -Nx -FrameRate 30 -Timer                                               # the console's pacing
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 #   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
@@ -12,21 +13,23 @@ param(
     [ValidateSet(0,1,2,3,4,5)][int]$Anisotropic = 5,   # SDK enum: 5 = 16x
     [switch]$Windowed,
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
-    # The game presents every 2 virtual vblanks: 30 fps at the console's 60 Hz, so the frame rate
-    # is set by the vblank rate (FrameRate x 2, up to 480 Hz with SDK patch 0003), a cap of the
-    # game's own whatever the display or driver does. Above ~90 fps the 360's effect code breaks
-    # (bullet tracers twitch and freeze mid-air), and a rate that doesn't divide the display's
-    # refresh shows frames for uneven numbers of refreshes (90 on 240 Hz alternates 3 and 2).
-    # auto (default) picks the highest rate up to 90 that divides the display's refresh rate:
-    # 80 on 240 Hz ("80 feels great… better than 90"), 72 on 144 Hz, 82.5 on 165 Hz, 60 on 60
-    # or 120 Hz. A number sets it directly (30 = the console's pacing).
+    # The game presents every 2 vblanks: 30 fps at the console's 60 Hz. Above ~90 fps the 360's
+    # effect code breaks (bullet tracers twitch and freeze mid-air).
+    # port-nx follows the display's own vblank (port-nx/src/display_vblank.h): each frame is
+    # shown for a whole number of refreshes, the fewest that keep it at or under FrameRate
+    # (auto = 90): 80 fps on 240 Hz ("80 feels great… better than 90"), 72 on 144 Hz, 82.5 on
+    # 165 Hz, 60 on 60 or 120 Hz; 30 gives the console's rate on any of those.
     [ValidateScript({ $_ -eq 'auto' -or ([double]::TryParse($_, [ref]$null) -and [double]$_ -ge 20 -and [double]$_ -le 240) })]
     [string]$FrameRate = 'auto',
-    # Swapchain present mode. The SDK picks immediate (no vsync, tearing) when the driver offers
-    # it; the game is paced by a software vblank that is not locked to the display, so frames
-    # land unevenly. fifo = true vsync (even, adds queue latency), mailbox = no tearing, low
-    # latency, still uneven.
-    [ValidateSet('immediate', 'mailbox', 'fifo')][string]$Present = 'immediate',
+    # A software timer for the vblank instead (port, or port-nx with -Timer), at FrameRate x 2
+    # (up to 480 Hz with SDK patch 0003); auto picks the highest rate up to 90 that divides the
+    # display's refresh. It drifts against the display, so a frame now and then is shown a
+    # refresh early or late.
+    [switch]$Timer,
+    # Swapchain present mode. auto: mailbox with port-nx's display pacing (frames go out right
+    # after a vblank, so immediate would tear them), else the SDK's pick, immediate when the
+    # driver offers it. mailbox = no tearing, low latency; fifo = true vsync, more latency.
+    [ValidateSet('auto', 'immediate', 'mailbox', 'fifo')][string]$Present = 'auto',
     # A texture pack folder built by tools/texture_pack.py (port-nx only); see docs/TEXTURES.md.
     [string]$TexturePack = '',
     # Right stick at its edge (port-nx): console = as shipped (0.3 s wait, then a 0.4 s ramp up
@@ -60,18 +63,24 @@ if ($TexturePack) {
     if (!(Test-Path (Join-Path $pack 'index.tsv'))) { throw "No index.tsv in $pack." }
     $arguments += @('--fear_texture_pack', ($pack.Path -replace '\\', '/'))
 }
-if ($FrameRate -eq 'auto') {
-    $refresh = (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
-        Where-Object { $_.CurrentRefreshRate } | Measure-Object CurrentRefreshRate -Maximum).Maximum
-    if (!$refresh) { $refresh = 60 }
-    $divisor = [math]::Ceiling($refresh / 90)
-    $fps = $refresh / $divisor
-    "display ${refresh} Hz: $fps fps (each frame shown for $divisor refreshes)"
+$invariant = [System.Globalization.CultureInfo]::InvariantCulture
+if ($Nx -and !$Timer) {
+    # The game reports the rate it picked in its log ("vblank from the display").
+    if ($FrameRate -ne 'auto') { $arguments += @('--fear_frame_rate_limit', ([double]$FrameRate).ToString($invariant)) }
 } else {
-    $fps = [double]$FrameRate
+    if ($Nx) { $arguments += @('--fear_vblank_source', 'timer') }
+    if ($FrameRate -eq 'auto') {
+        $refresh = (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+            Where-Object { $_.CurrentRefreshRate } | Measure-Object CurrentRefreshRate -Maximum).Maximum
+        if (!$refresh) { $refresh = 60 }
+        $divisor = [math]::Ceiling($refresh / 90)
+        $fps = $refresh / $divisor
+        "display ${refresh} Hz: $fps fps on a timer (each frame shown for $divisor refreshes, now and then one more or less)"
+    } else {
+        $fps = [double]$FrameRate
+    }
+    $arguments += @('--video_mode_refresh_rate', ($fps * 2).ToString($invariant))
 }
-$arguments += @('--video_mode_refresh_rate',
-    ($fps * 2).ToString([System.Globalization.CultureInfo]::InvariantCulture))
 # The presenter takes the first allowed mode of immediate > mailbox > fifo_relaxed > fifo.
 switch ($Present) {
     'mailbox' { $arguments += @('--no-vulkan_allow_present_mode_immediate') }

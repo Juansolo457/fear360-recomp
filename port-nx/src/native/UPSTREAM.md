@@ -31,5 +31,10 @@ Local changes (see `git log -p -- port-nx/src/native`):
   renderer's at startup (it was 0 vs 1, so first-frame upload buffers were freed while the
   GPU read them: device lost), and the constant-buffer descriptors are written one binding
   per write (one write across bindings with different stage flags is invalid).
+- Display-locked pacing in `native_system.cpp` (marked `F.E.A.R.`): with
+  `fear_vblank_source=display` the vblank thread waits on the display's vblank
+  (`DisplayVblankLoop`, `port-nx/src/display_vblank.*`) instead of a timer, `PaceToDisplay`
+  holds each frame to whole refreshes before presenting, and the 10-second report gives a
+  `pacing` line (refreshes between presents, counted from the display in both modes).
 
 The `*_test.cpp` files are kept for reference but are not built here.
