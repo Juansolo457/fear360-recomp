@@ -109,7 +109,7 @@ Reporting is off on the user's PC, so this is the only record.
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
 
 ## Next steps (the user's list)
-**Current order (2026-10-22):** 1. Settings and Quit in the main menu: done ("looks awesome"; PROGRESS.md, "Main menu: PC Settings and Quit to Desktop"); 2. next: the *F.E.A.R. Files* campaigns at 4K with the texture pack ([FILES.md](FILES.md)); later, the pistol's impacts and a side-by-side recording against the PC version with EchoPatch (PROGRESS.md, open items 12 and 13).
+**Current order (2026-10-22):** 1. Settings and Quit in the main menu: done ("looks awesome"; PROGRESS.md, "Main menu: PC Settings and Quit to Desktop"); 2. next: the *F.E.A.R. Files* campaigns at 4K with the texture pack ([FILES.md](FILES.md)); later, a side-by-side recording against the PC version with EchoPatch (PROGRESS.md, open item 13). The pistol's impacts are parked: they match a real 360 (open item 12).
 
 Play-test 1 added: frame-pacing jank (`-Present` test, then lock the virtual vblank to the
 display), chapter cards off-centre/doubled and cutscene-transition flicker (reproduced at 1×:
