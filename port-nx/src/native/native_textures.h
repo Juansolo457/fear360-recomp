@@ -112,9 +112,16 @@ struct TextureCacheStats {
   // Lookups answered with the empty texture: still streaming in, or a format
   // or dimension not handled (logged once each).
   uint64_t pending = 0;
+  // F.E.A.R.: streaming textures waited for instead of drawn without, the time spent, and
+  // those still missing when the frame's wait budget ran out.
+  uint64_t stream_waits = 0;
+  uint64_t stream_wait_ns = 0;
+  uint64_t stream_missing = 0;
   // Textures whose content changed after a draw of this frame had used them.
   uint64_t replaced = 0;
 };
+
+struct StreamJob;
 
 class TextureCache {
  public:
@@ -238,6 +245,8 @@ class TextureCache {
   VkImageView GetViewUncached(const rex::graphics::xenos::xe_gpu_texture_fetch_t& fetch,
                               rex::graphics::xenos::FetchOpDimension dimension, bool is_signed,
                               UploadTarget& upload, VkImageView null_view);
+  // F.E.A.R.: wait (within fear_texture_stream_wait_ms per frame) for a streaming texture.
+  bool WaitForStream(StreamJob& job);
   struct Texture;
   struct Impl;
   std::unique_ptr<Impl> impl_;

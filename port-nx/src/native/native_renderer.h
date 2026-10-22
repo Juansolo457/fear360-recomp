@@ -102,6 +102,10 @@ struct RendererStats {
   // All submissions: waiting for the queue lock, and in vkQueueSubmit.
   uint64_t queue_lock_ns = 0;
   uint64_t queue_submit_ns = 0;
+  // Streaming textures waited for, the time, and those still missing (TextureCacheStats).
+  uint64_t textures_stream_waits = 0;
+  uint64_t textures_stream_wait_ns = 0;
+  uint64_t textures_stream_missing = 0;
   // Draws skipped, by reason (see SkipReason in the .cpp).
   uint64_t skipped_by_reason[16] = {};
 };

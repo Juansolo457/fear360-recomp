@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -489,6 +490,14 @@ struct StreamJob {
   std::atomic<bool> done{false};
   bool ok = false;
 };
+
+// F.E.A.R.: on PC a texture still streaming in is waited for rather than drawn as the empty
+// texture, which flashed: a frame with a light or fog effect drawn without its mask came out as
+// a bright cone over the scene, mostly as a new area came into view. The wait is capped per
+// frame, so a huge burst still can't freeze the game; past the cap textures pop in as before.
+REXCVAR_DEFINE_UINT32(fear_texture_stream_wait_ms, 100, "F.E.A.R.",
+                      "Longest a frame waits in total for textures that are still streaming in "
+                      "(0 = draw without them, fear-nx's Switch behaviour)");
 
 REXCVAR_DEFINE_UINT32(nx_native_max_anisotropy, 16, "F.E.A.R. NX",
                       "Most anisotropic filtering any texture gets (1 turns it off); the "
@@ -1026,11 +1035,18 @@ struct TextureCache::Impl {
   // cutscene loading a thousand textures had both take cores from the game,
   // which stalled; one alone at the lowest priority could leave a new screen
   // drawn with the empty texture for seconds.
+#if defined(__SWITCH__)
   std::thread stream_threads[2];
+#else
+  // F.E.A.R.: more on PC, where draws now wait for them (fear_texture_stream_wait_ms).
+  std::thread stream_threads[6];
+#endif
   std::mutex stream_mutex;
   std::condition_variable stream_cv;
   std::deque<std::shared_ptr<StreamJob>> stream_jobs;
   bool stream_stop = false;
+  // fear_texture_stream_wait_ms: time this frame has waited for streaming textures.
+  uint64_t frame_stream_wait_ns = 0;
 
   void StreamThread() {
 #if defined(__SWITCH__)
@@ -1442,6 +1458,7 @@ void TextureCache::BeginFrame(uint64_t frame, uint64_t completed_frame) {
   im.PollTiledReadbacks();
   im.tiled_resolve_roots.clear();
   im.sync_creates_left = kSyncCreatesPerFrame;
+  im.frame_stream_wait_ns = 0;
   fear::texture_pack::ReportStats();
   // Destroy what the GPU no longer uses.
   auto it = std::remove_if(im.retired.begin(), im.retired.end(), [&](Impl::Retired& r) {
@@ -2493,6 +2510,35 @@ VkImageView TextureCache::GetView(const xenos::xe_gpu_texture_fetch_t& fetch,
   return result_view;
 }
 
+bool TextureCache::WaitForStream(StreamJob& job) {
+  Impl& im = *impl_;
+  if (job.done.load(std::memory_order_acquire)) return true;
+  const uint64_t budget = uint64_t(REXCVAR_GET(fear_texture_stream_wait_ms)) * 1000000;
+  if (im.frame_stream_wait_ns >= budget) {
+    ++stats_.stream_missing;
+    return false;
+  }
+  using Clock = std::chrono::steady_clock;
+  const auto start = Clock::now();
+  auto waited = [&] {
+    return uint64_t(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
+  };
+  bool done = true;
+  while (!job.done.load(std::memory_order_acquire)) {
+    if (im.frame_stream_wait_ns + waited() >= budget) {
+      done = false;
+      break;
+    }
+    std::this_thread::yield();
+  }
+  const uint64_t ns = waited();
+  im.frame_stream_wait_ns += ns;
+  stats_.stream_wait_ns += ns;
+  ++(done ? stats_.stream_waits : stats_.stream_missing);
+  return done;
+}
+
 VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& fetch,
                                           xenos::FetchOpDimension dimension, bool is_signed,
                                           UploadTarget& upload, VkImageView null_view) {
@@ -2875,7 +2921,7 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
   if (existing != im.textures.end() && existing->second->stream) {
     Texture& pending = *existing->second;
     StreamJob& job = *pending.stream;
-    if (!job.done.load(std::memory_order_acquire)) {
+    if (!WaitForStream(job)) {
       // Still streaming in: drawn without it for now.
       ++stats_.pending;
       return null_view;
@@ -3034,6 +3080,9 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
     im.stream_cv.notify_one();
     ++stats_.uploads;
     stats_.upload_bytes += job->staging_size;
+    if (WaitForStream(*job)) {
+      return GetViewUncached(fetch, dimension, is_signed, upload, null_view);
+    }
     return null_view;
   }
   if (!texture || reuse_image) {
@@ -3146,6 +3195,9 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
       stats_.upload_bytes += total;
       im.CountUpload(key_hash, base_page << 12, uint32_t(format), width, height, total,
                      texture_hash);
+      if (WaitForStream(*job)) {
+        return GetViewUncached(fetch, dimension, is_signed, upload, null_view);
+      }
       return null_view;
     }
 

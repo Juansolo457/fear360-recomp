@@ -23,8 +23,8 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Boots, menus, intro videos, campaign, Instant Action | `port-nx` with `--nx_renderer native` |
 | ✅ 4K: integer internal resolution scaling (3× = 3840×2160) | our patch to fear-nx's renderer |
 | ✅ The game's own 2×/4× MSAA and 16× anisotropic filtering | on top of the scale |
-| ✅ 90 fps (default) / 120 fps with correct game speed | the game's own cap via its virtual vblank (`-FrameRate 30/60/90/120`); 120 measured steady, but bullet tracers glitch in heavy fights at 120, so 90 is the default while that's checked ([PROGRESS](docs/PROGRESS.md#play-test-3-2026-10-22)) |
-| ⏳ Occasional white flicker, more when looking around | to capture on video; `tools/flicker_scan.py` finds the frames |
+| ✅ 90 fps (default), "feels really good" | the game's own cap via its virtual vblank (`-FrameRate 30/60/90/120`); at 120 bullet tracers twitched and froze mid-air in heavy fights, at 90 they don't ([PROGRESS](docs/PROGRESS.md#play-test-3-2026-10-22)) |
+| ✅ No white flash as a new area comes into view | textures still streaming in are waited for instead of drawn as the empty texture (to confirm hands-on) |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |

@@ -16,5 +16,9 @@ Local changes (see `git log -p -- port-nx/src/native`):
   `GetFastClearRectangle` also returns the rectangle's depth.
 - `nx_native_trace_frame_every`: a full log (draws with their textures, clears, resolves,
   swaps) of one frame in N.
+- Texture streaming on PC (`native_textures.cpp`, marked `F.E.A.R.`): a draw waits for a
+  texture still streaming in (`fear_texture_stream_wait_ms` per frame) instead of using the
+  empty texture, which flashed; 6 stream workers instead of 2 off Switch.
+- Render-thread timing in the 10-second report (swap, present, queue lock, streaming waits).
 
 The `*_test.cpp` files are kept for reference but are not built here.

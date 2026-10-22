@@ -602,6 +602,12 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           s.textures_streamed - reported_render_.textures_streamed,
           s.textures_replaced - reported_render_.textures_replaced,
           s.textures_pending - reported_render_.textures_pending);
+      REXLOG_INFO("[native] streaming textures: {} waited for ({:.1f} ms), {} drawn without "
+                  "(over the frame's wait budget)",
+                  s.textures_stream_waits - reported_render_.textures_stream_waits,
+                  double(s.textures_stream_wait_ns - reported_render_.textures_stream_wait_ns) /
+                      1e6,
+                  s.textures_stream_missing - reported_render_.textures_stream_missing);
       {
         std::string uploads = renderer_.TakeTextureUploadReport();
         if (!uploads.empty()) {
