@@ -18,8 +18,9 @@ cover, or whose file fails to load, stays the 360's.
 | ⏳ Not covered | cube/volume textures (85), 360 textures with packed mips at the base (263, all tiny), 360-only content (192), same-size pairs (972) |
 
 **Coverage.** Of the 5,105 360 textures that have a larger PC original, the pack replaces 4,710
-(92%); 78 fail the quality gate (genuinely different pictures, e.g. the Dell laptop) and the
-rest are duplicates or have no usable PC file. In the intro, 393 distinct catalogue textures
+(92%); 78 fail the quality gate (a few genuinely different pictures, e.g. the Dell laptop;
+most are near misses at 20–24 dB, left as the 360's to be safe) and the rest are duplicates or
+have no usable PC file. In the intro, 393 distinct catalogue textures
 were used; 181 were replaced by v1 and 157 more were the formats v2 adds. The other ~1,800
 "new textures" the renderer counts in the intro are video frames (the Bink planes, `k_8`), which
 never match the index, as intended.
