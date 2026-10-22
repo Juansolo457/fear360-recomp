@@ -38,6 +38,13 @@ What's left before it feels finished: **textures** (the 360 shipped low-res ones
 | **Subtle flicker at cutscene ↔ gameplay transitions** (when control is taken away, chapter cutscenes) | Compare at `-Scale 1` and `-FrameRate 30` to see whether it's ours or fear-nx's |
 | **"A little bit of jank", input occasionally behind** | Diagnosed below; `-Present` test option added |
 | Menu needs Settings and Quit | Not started; routes in [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) |
+| **Movement feels "bouncier" than PC: more sway/bob?** (user unsure) | See "Movement feel" below: compare the two versions' tuning data, and check frame-rate dependence |
+
+## Movement feel: 360 vs PC
+The user's sense: walking feels a little more bouncy than on PC, maybe extra sway. Two ways it could be real, both checkable:
+- **Different tuning on 360.** Console ports often retuned head bob, weapon sway and look acceleration for a pad. Both versions ship their tuning as a LithTech game database (360: `Game/database`, `database_anim`; PC: `FEAR*.Gamdb00p` inside `FEAR.Arch00`). Diff the player/camera/weapon records (head bob, sway, movement acceleration, look sensitivity) between them. If they differ, the 360's values are what the 360 shipped, and a setting could offer the PC's.
+- **Frame-rate dependence.** The game was tuned at 30 fps; if bob/sway or camera smoothing is integrated per frame, 120 fps can change its amplitude or feel. Compare `-FrameRate 30` against `120` in the same spot. If the 30 fps run feels like PC and 120 doesn't, it's ours to fix (scale the per-frame step).
+- A measured comparison beats feel: record the camera position/orientation per frame (a guest-memory read of the player camera, or screen captures while walking in a straight line) at 30 and 120 fps, and on PC with EchoPatch at 120.
 
 ## Frame pacing: diagnosis
 - The log shows the swapchain in **presentation mode 0 = IMMEDIATE**: no vsync and no triple buffering. The SDK prefers it for latency (`vulkan_presenter.cpp`).
@@ -70,8 +77,11 @@ The question came up after the play-test: would it be easier to take the 360-onl
 2. **Chapter cards / transition flicker:** reproduce at `-Scale 1` and `-FrameRate 30` to see whether they're ours (scaling) or upstream; fix accordingly.
 3. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
 4. **PC texture replacement:** see [TEXTURES.md](TEXTURES.md); Phase 1 is the offline readers, matching, quality gate and pack.
-5. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
-6. **Linux:** the renderer and SDK are Vulkan; port the build script.
+5. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
+6. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
+7. **Linux:** the renderer and SDK are Vulkan; port the build script.
+
+The repository is public: <https://github.com/Juansolo457/fear360-recomp>.
 
 ## Sister projects
 - `../n3-360-recomp`: N3: Ninety-Nine Nights on WK2D's ReXGlue recomp, parked at 4K / 40 fps.

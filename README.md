@@ -28,6 +28,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
 | ⏳ Chapter cards drawn off-centre and doubled | likely our scaling; needs a 1× comparison |
 | ⏳ Brief flicker at cutscene ↔ gameplay transitions | needs a 1× / 30 fps comparison |
+| ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ⏳ Low-res textures (360 memory limits) | **84% have a 4× larger PC original under the same name**; plan in [docs/TEXTURES.md](docs/TEXTURES.md) |
 | ⏳ Settings and Quit entries in the main menu | not started |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | not started |
