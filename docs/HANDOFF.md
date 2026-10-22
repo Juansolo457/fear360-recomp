@@ -16,7 +16,7 @@ are fine. At 3× (3840×2160 internal) the image is clean and the RTX 4090 is fa
 | Resolution | `--nx_native_resolution_scale 1..4` (our change; `tools/launch.ps1 -Nx -Scale 3`) |
 | Anti-aliasing | the game's own 2×/4× MSAA, honoured by the renderer (`nx_native_msaa`), on top of the scale |
 | Anisotropic filtering | up to 16× by default (`nx_native_max_anisotropy`) |
-| Frame rate | the game presents every 2 virtual vblanks → **30 fps at the default 60 Hz vblank**. Experiment in progress: `tools/launch.ps1 -FrameRate 60` sets `--video_mode_refresh_rate 120` so the same "2 vblanks" give 60 fps game frames (`120` → 240 Hz → 120 fps). Result: see "Frame rate" below |
+| Frame rate | the game presents every 2 virtual vblanks → 30 fps at the default 60 Hz vblank. **`tools/launch.ps1 -FrameRate 60` (`--video_mode_refresh_rate 120`) gives 60 fps game frames, and the user reports it smooth with game speed still correct** (first session, campaign start). `-FrameRate 120` (240 Hz vblank) is untested. Details in "Frame rate" below |
 | Display | fullscreen at the desktop's 3840×2160; `--resolution 720p` tells the guest it is on a 720p display (fixes ReXGlue's 4:3 squeeze at 200% DPI) |
 | Controls | SDL gamepads. Known trap: a Logitech virtual XInput pad (`046D:0000`) takes slot 0, making the Xbox pad player 2 ("No profile selected", no saves); disable that device |
 | Stock renderer (`--nx_renderer xenos`) | still corrupts menus; kept only for A/B |
@@ -34,6 +34,10 @@ Commits: `a616a08` (port-nx + renderer), `e678aea` (resolution scaling), then th
   (LithTech Jupiter EX) runs uncapped with a variable timestep, so the game logic should cope
   better than N3's fixed 40 Hz tick did, but that is the thing to verify (animation speed,
   slow-mo duration, physics, scripted timers).
+- **Result (2026-10-21):** at 120 Hz vblank (`-FrameRate 60`) the user found it smooth and the
+  game speed right in a play session. Not yet checked: slow-mo timing, cutscenes, scripted
+  timers, late levels, and 240 Hz (`-FrameRate 120`). The engine's variable timestep seems
+  to carry it, unlike N3; keep an eye out for frame-counted logic as Lost Odyssey found.
 - Host present is vsynced (`vsync` cvar) to the 240 Hz display. fear-nx's own pacing cvars
   (`nx_min_frame_vblanks`, `nx_pace_before_present`) only add holds; leave them at defaults.
 - If the vblank trick misbehaves, the Lost Odyssey approach is the model: find the present
@@ -75,8 +79,9 @@ pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot 
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
 
 ## Next steps (the user's list)
-1. **Frame rate:** settle the 60/120 experiment (see above); then decide between the vblank
-   trick, a Lost Odyssey-style present-interval hook, or interpolation.
+1. **Frame rate:** 60 works via the vblank rate. Make it the launcher default, try 120, and
+   look for frame-counted logic (slow-mo, timers) before calling it done; a Lost
+   Odyssey-style present-interval hook or interpolation only if something breaks.
 2. **Quit button in the main menu.** Options, cheapest first:
    - Host-side: ReXGlue's ImGui overlay. `rex::ReXApp::OnCreateDialogs(ui::ImGuiDrawer*)` is
      the hook; the SDK already has a debug overlay and a cvar settings overlay (WK2D's N3
