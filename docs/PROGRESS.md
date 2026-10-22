@@ -93,6 +93,7 @@ Asked after play-test 3: what in fear-nx's renderer is a Switch tradeoff that a 
 - *The cause:* the texture cache keeps its own frame number and started at 0 while the renderer starts at 1. Upload buffers retired during frame 1 were tagged frame 0, counted as finished at the first swap and freed while the GPU still copied from them (`VUID-vkDestroyBuffer-buffer-00922`, then `VK_ERROR_DEVICE_LOST`). Waiting made textures finish uploading in frame 1; 4K made the GPU still be reading. Fixed: the cache is synced to the renderer's frame at startup.
 - *Also:* the constant-buffer descriptors (system, float, bool/loop, fetch constants) were written in one update across bindings with different stage flags, which Vulkan forbids; validation reported bindings 1–4 as never written. Fixed: one write per binding.
 - Left: `VUID-vkQueueSubmit-pSignalSemaphores-00067` in the SDK's window presenter (a swapchain semaphore reused); harmless so far.
+| **New textures streamed in one at a time** (each draw waits for its texture's job before the next draw asks for one) | creating an image costs ~1.5 ms | a 300-texture load-in waited 112 ms for ~20 ms of work (6 workers, 5 idle); frames over 100 ms and the wait budget blown | **fixed**: every new texture is created on the spot and filled (untiled, or read from the pack) by **6 upload workers** before the frame is submitted (`fear_texture_upload_direct`). Intro at 3×/90 fps: **no frame over 50 ms after the first load at boot** (was 1–2 per load-in, some over 100 ms), upload wait 0.00 ms per frame, 90 fps in every window |
 | Thread priorities, driver-cache save throttling, small per-frame create budgets | SD card, 3 cores | harmless | leave |
 
 **Frame pacing:** the game's frames come from a software vblank timer, not the display. At 90 fps on a 240 Hz display a frame stays up for 2 or 3 refreshes alternately (8.3/12.5 ms): visible judder. `-FrameRate 80` (exactly 3 refreshes) or 120 (2) is even on 240 Hz; with G-SYNC/VRR any rate is even. Next step: try 80 by hand; later, time the virtual vblank from the display.
@@ -168,14 +169,16 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 
 ## Open items and next steps
 1. **Robust presenting:** present off the game's render thread, so a driver cap, an overlay or vsync can't slow the game itself; frame rate and vsync as in-game settings.
-2. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1 (the first session after the fix was too short to reach one).
-3. **Crash:** wait for a `crash-*.txt` from the new reporter.
-4. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
-5. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
-6. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
-7. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
-8. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
-9. **Linux:** the renderer and SDK are Vulkan; port the build script.
+2. **Load-in hitches: fixed** (direct uploads on 6 workers, see the sweep). Left: three frames of 50–100 ms at the first load at boot (66 pipelines, 75 shaders, 230 textures at once, behind the legal screens).
+3. **Recorded glitch sweep (user idea):** 2–3 minutes of raw play from boot into the game, recorded; go through it frame by frame (`tools/flicker_scan.py` and by eye) and fix what shows up.
+4. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1 (the first session after the fix was too short to reach one).
+5. **Crash:** wait for a `crash-*.txt` from the new reporter.
+6. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
+7. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
+8. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
+9. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
+10. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
+11. **Linux:** the renderer and SDK are Vulkan; port the build script.
 
 The repository is public: <https://github.com/Juansolo457/fear360-recomp>.
 

@@ -5542,6 +5542,10 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   stats().textures_stream_waits = textures.stats().stream_waits;
   stats().textures_stream_wait_ns = textures.stats().stream_wait_ns;
   stats().textures_stream_missing = textures.stats().stream_missing;
+  stats().textures_stream_jobs = textures.stats().stream_jobs;
+  stats().textures_stream_image_ns = textures.stats().stream_image_ns;
+  stats().textures_stream_staging_ns = textures.stats().stream_staging_ns;
+  stats().textures_stream_fill_ns = textures.stats().stream_fill_ns;
   stats().frame_upload_wait_ns = frame_upload_wait_ns;
   stats().total_upload_wait_ns += frame_upload_wait_ns;
   stats().total_fence_wait_ns += frame_fence_wait_ns;

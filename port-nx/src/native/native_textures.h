@@ -117,6 +117,12 @@ struct TextureCacheStats {
   uint64_t stream_waits = 0;
   uint64_t stream_wait_ns = 0;
   uint64_t stream_missing = 0;
+  // Stream jobs done on the workers, and the worker time in their steps: creating the image
+  // (with its memory), the staging buffer (with its memory and mapping), filling it.
+  uint64_t stream_jobs = 0;
+  uint64_t stream_image_ns = 0;
+  uint64_t stream_staging_ns = 0;
+  uint64_t stream_fill_ns = 0;
   // Textures whose content changed after a draw of this frame had used them.
   uint64_t replaced = 0;
 };

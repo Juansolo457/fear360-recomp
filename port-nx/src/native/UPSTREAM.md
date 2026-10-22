@@ -23,6 +23,10 @@ Local changes (see `git log -p -- port-nx/src/native`):
 - `fear_shader_wait_ms` (100): draws wait for their shader translation/pipeline within a
   per-frame budget instead of being skipped. `fear_alias_clears`/`_depth`: kill switches for
   MirrorAliasClear. Submit failures log their VkResult.
+- Direct texture uploads (`fear_texture_upload_direct`, PC): every new texture, and every
+  texture-pack replacement, is created on the spot and filled by 6 upload workers before the
+  submission (fear-nx's path for two small textures a frame); stream-job step timing in the
+  10-second report.
 - Fixes found with the validation layer: the texture cache's frame number is synced to the
   renderer's at startup (it was 0 vs 1, so first-frame upload buffers were freed while the
   GPU read them: device lost), and the constant-buffer descriptors are written one binding

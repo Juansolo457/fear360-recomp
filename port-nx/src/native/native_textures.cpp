@@ -491,6 +491,15 @@ struct StreamJob {
   bool ok = false;
 };
 
+// F.E.A.R.: on PC every new texture is created on the spot and filled by the upload workers
+// (untiled from guest memory, or read from the texture pack) before its submission goes to the
+// GPU, as fear-nx does for at most two small ones a frame on Switch, where creating an image
+// costs ~1.5 ms. Streaming them instead, and waiting for each before the next draw, ran the
+// jobs one at a time: a 300-texture load-in cost over 100 ms of waiting for ~20 ms of work.
+REXCVAR_DEFINE_BOOL(fear_texture_upload_direct, true, "F.E.A.R.",
+                    "Create every new texture at once and fill it on the upload workers before "
+                    "the frame is submitted (off = fear-nx's streaming)");
+
 // F.E.A.R.: on PC a texture still streaming in is waited for rather than drawn as the empty
 // texture, which flashed: a frame with a light or fog effect drawn without its mask came out as
 // a bright cone over the scene, mostly as a new area came into view. The wait is capped per
@@ -990,8 +999,13 @@ struct TextureCache::Impl {
 
   std::vector<uint8_t> scratch;
 
-  // Upload worker: untiles into staging while the ring keeps recording.
-  std::thread upload_thread;
+  // Upload workers: untile into staging while the ring keeps recording.
+#if defined(__SWITCH__)
+  std::thread upload_threads[1];
+#else
+  // F.E.A.R.: several on PC, where every new texture goes through them.
+  std::thread upload_threads[6];
+#endif
   std::mutex upload_mutex;
   std::condition_variable upload_cv;
   std::condition_variable upload_done_cv;
@@ -1045,6 +1059,9 @@ struct TextureCache::Impl {
   std::condition_variable stream_cv;
   std::deque<std::shared_ptr<StreamJob>> stream_jobs;
   bool stream_stop = false;
+  // Worker time per step of the stream jobs (copied into the stats each frame).
+  std::atomic<uint64_t> stream_jobs_done{0}, stream_image_ns{0}, stream_staging_ns{0},
+      stream_fill_ns{0};
   // fear_texture_stream_wait_ms: time this frame has waited for streaming textures.
   uint64_t frame_stream_wait_ns = 0;
 
@@ -1061,9 +1078,17 @@ struct TextureCache::Impl {
         job = stream_jobs.front();
         stream_jobs.pop_front();
       }
+      using Clock = std::chrono::steady_clock;
+      auto since = [](Clock::time_point t) {
+        return uint64_t(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t).count());
+      };
+      auto step = Clock::now();
       job->ok = rex::ui::vulkan::util::CreateDedicatedAllocationImage(
           device, job->info, rex::ui::vulkan::util::MemoryPurpose::kDeviceLocal, job->image,
           job->memory);
+      stream_image_ns += since(step);
+      step = Clock::now();
       if (job->ok) {
         job->ok = rex::ui::vulkan::util::CreateDedicatedAllocationBuffer(
             device, job->staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -1075,6 +1100,9 @@ struct TextureCache::Impl {
                                                      VK_WHOLE_SIZE, 0, &mapping) != VK_SUCCESS) {
         job->ok = false;
       }
+      stream_staging_ns += since(step);
+      step = Clock::now();
+      ++stream_jobs_done;
       if (job->ok) {
         job->untile.staging = static_cast<uint8_t*>(mapping);
         if (job->replacement) {
@@ -1085,6 +1113,7 @@ struct TextureCache::Impl {
           RunUntile(job->untile);
         }
       }
+      stream_fill_ns += since(step);
       job->done.store(true, std::memory_order_release);
     }
   }
@@ -1274,7 +1303,9 @@ void TextureCache::WaitForUploads() { impl_->WaitForUploads(); }
 
 bool TextureCache::Initialize(const VulkanDevice* device, rex::memory::Memory* memory) {
   Impl& im = *impl_;
-  im.upload_thread = std::thread([&im]() { im.UploadThread(); });
+  for (std::thread& thread : im.upload_threads) {
+    thread = std::thread([&im]() { im.UploadThread(); });
+  }
   for (std::thread& thread : im.stream_threads) {
     thread = std::thread([&im]() { im.StreamThread(); });
   }
@@ -1359,13 +1390,15 @@ void TextureCache::Shutdown() {
     return;
   }
   Impl& im = *impl_;
-  if (im.upload_thread.joinable()) {
+  if (im.upload_threads[0].joinable()) {
     {
       std::lock_guard<std::mutex> lock(im.upload_mutex);
       im.upload_stop = true;
     }
     im.upload_cv.notify_all();
-    im.upload_thread.join();
+    for (std::thread& thread : im.upload_threads) {
+      if (thread.joinable()) thread.join();
+    }
   }
   {
     {
@@ -1459,6 +1492,10 @@ void TextureCache::BeginFrame(uint64_t frame, uint64_t completed_frame) {
   im.tiled_resolve_roots.clear();
   im.sync_creates_left = kSyncCreatesPerFrame;
   im.frame_stream_wait_ns = 0;
+  stats_.stream_jobs = im.stream_jobs_done.load(std::memory_order_relaxed);
+  stats_.stream_image_ns = im.stream_image_ns.load(std::memory_order_relaxed);
+  stats_.stream_staging_ns = im.stream_staging_ns.load(std::memory_order_relaxed);
+  stats_.stream_fill_ns = im.stream_fill_ns.load(std::memory_order_relaxed);
   fear::texture_pack::ReportStats();
   // Destroy what the GPU no longer uses.
   auto it = std::remove_if(im.retired.begin(), im.retired.end(), [&](Impl::Retired& r) {
@@ -3020,6 +3057,101 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
       ++im.answers_epoch;
     }
   }
+  if (!texture && replacement && REXCVAR_GET(fear_texture_upload_direct)) {
+    // F.E.A.R.: the replacement's image now, its DDS data read on an upload worker into the
+    // ring before this submission goes to the GPU (WaitForUploads), as for 360 textures.
+    const uint32_t level_count = std::min<uint32_t>(replacement->mip_count, xenos::kTextureMaxMips);
+    VkBufferImageCopy regions[xenos::kTextureMaxMips];
+    VkDeviceSize total = 0;
+    for (uint32_t level = 0; level < level_count; ++level) {
+      const uint32_t w = std::max(replacement->width >> level, 1u);
+      const uint32_t h = std::max(replacement->height >> level, 1u);
+      const uint32_t blocks_x = (w + replacement->block_width - 1) / replacement->block_width;
+      const uint32_t blocks_y = (h + replacement->block_height - 1) / replacement->block_height;
+      VkBufferImageCopy& region = regions[level];
+      region = {};
+      region.bufferOffset = total;
+      region.bufferRowLength = blocks_x * replacement->block_width;
+      region.bufferImageHeight = blocks_y * replacement->block_height;
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+      region.imageExtent = {w, h, 1};
+      total += VkDeviceSize(blocks_x) * blocks_y * replacement->block_bytes;
+    }
+    const size_t read_size = size_t(std::max<VkDeviceSize>(total, replacement->data_size));
+    VkDeviceSize staging_offset = 0;
+    uint8_t* staging = upload.allocate(read_size, 16, staging_offset);
+    if (!staging) {
+      return null_view;
+    }
+    const fear::texture_pack::Entry* entry = replacement;
+    const uint64_t entry_key = pack_key;
+    im.EnqueueUpload([entry, entry_key, staging, read_size]() {
+      if (!fear::texture_pack::ReadData(*entry, staging, read_size)) {
+        // Black this once; the 360 texture is used from its next new content on.
+        std::memset(staging, 0, read_size);
+        fear::texture_pack::MarkBad(entry_key);
+      }
+    });
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = replacement->format;
+    info.extent = {replacement->width, replacement->height, 1};
+    info.mipLevels = level_count;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto created = std::make_unique<Texture>();
+    if (!rex::ui::vulkan::util::CreateDedicatedAllocationImage(
+            im.device, info, rex::ui::vulkan::util::MemoryPurpose::kDeviceLocal, created->image,
+            created->memory)) {
+      return null_view;
+    }
+    created->dimension = fetch.dimension;
+    created->format_unorm = replacement->format;
+    created->format_snorm = VK_FORMAT_UNDEFINED;
+    created->host_format_swizzle = replacement->swizzle != fear::texture_pack::kSameSwizzle
+                                       ? replacement->swizzle
+                                       : host_format.swizzle;
+    created->key_hash = key_hash;
+    created->content_hash = texture_hash;
+    created->level_count = level_count;
+    created->layers = 1;
+    created->last_used_frame = im.frame;
+    created->replaced = true;
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = created->image;
+    barrier.subresourceRange = rex::ui::vulkan::util::InitializeSubresourceRange();
+    dfn.vkCmdPipelineBarrier(upload.setup_commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                             &barrier);
+    for (uint32_t level = 0; level < level_count; ++level) {
+      regions[level].bufferOffset += staging_offset;
+    }
+    dfn.vkCmdCopyBufferToImage(upload.setup_commands, upload.buffer, created->image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, level_count, regions);
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    dfn.vkCmdPipelineBarrier(upload.setup_commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    ++stats_.uploads;
+    ++stats_.created;
+    stats_.upload_bytes += total;
+    texture = created.get();
+    im.textures.emplace(key_hash, std::move(created));
+  }
   if (!texture && replacement) {
     // F.E.A.R.: the replacement streams in from its DDS file at its own size and mips.
     auto job = std::make_shared<StreamJob>();
@@ -3130,6 +3262,9 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
     // an area coming into view does not freeze a frame on hundreds of image
     // allocations (each a kernel round trip). They appear a frame or two
     // later.
+    if (!reuse_image && REXCVAR_GET(fear_texture_upload_direct)) {
+      force_upload_now = true;
+    }
     if (!reuse_image && !force_upload_now && im.sync_creates_left && total <= kSyncCreateMaxBytes) {
       --im.sync_creates_left;
       force_upload_now = true;

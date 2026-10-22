@@ -111,6 +111,11 @@ struct RendererStats {
   uint64_t textures_stream_waits = 0;
   uint64_t textures_stream_wait_ns = 0;
   uint64_t textures_stream_missing = 0;
+  // Texture stream jobs and the worker time in their steps (TextureCacheStats).
+  uint64_t textures_stream_jobs = 0;
+  uint64_t textures_stream_image_ns = 0;
+  uint64_t textures_stream_staging_ns = 0;
+  uint64_t textures_stream_fill_ns = 0;
   // Draws skipped, by reason (see SkipReason in the .cpp).
   uint64_t skipped_by_reason[16] = {};
 };

@@ -607,6 +607,17 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
                   s.compile_waits - reported_render_.compile_waits,
                   double(s.compile_wait_ns - reported_render_.compile_wait_ns) / 1e6,
                   s.compile_skips - reported_render_.compile_skips);
+      if (const uint64_t jobs = s.textures_stream_jobs - reported_render_.textures_stream_jobs) {
+        auto per_job = [&](uint64_t now, uint64_t before) {
+          return double(now - before) / 1e6 / double(jobs);
+        };
+        REXLOG_INFO("[native] texture stream jobs: {}, worker ms per job: image {:.3f}, "
+                    "staging {:.3f}, fill {:.3f}",
+                    jobs, per_job(s.textures_stream_image_ns, reported_render_.textures_stream_image_ns),
+                    per_job(s.textures_stream_staging_ns,
+                            reported_render_.textures_stream_staging_ns),
+                    per_job(s.textures_stream_fill_ns, reported_render_.textures_stream_fill_ns));
+      }
       REXLOG_INFO("[native] streaming textures: {} waited for ({:.1f} ms), {} drawn without "
                   "(over the frame's wait budget)",
                   s.textures_stream_waits - reported_render_.textures_stream_waits,
