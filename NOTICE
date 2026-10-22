@@ -1,0 +1,22 @@
+fear360-recomp: licensing notice
+
+The MIT license in LICENSE covers this repository's own files: tools/, docs/,
+port/src/, port/CMakeLists.txt and the top-level files.
+
+port/fear_manifest.toml lists function entry points found and verified by the
+fear-nx project (https://github.com/infriker/fear-nx) for the same executable.
+That list comes from fear-nx's GPL-3.0 manifest, so this file is distributed
+under the GNU GPL v3 or later.
+
+port/generated/rexglue.cmake, port/CMakePresets.json and the initial port/src
+files were produced by `rexglue init` from the ReXGlue SDK
+(https://github.com/rexglue/rexglue-sdk, BSD-3-Clause, derived in part from
+Xenia). The SDK itself is not included; the build uses a local copy.
+
+No game assets, executables, generated translations or data from F.E.A.R.
+(Xbox 360 or PC) are distributed here. Tools operate on the user's own copy,
+and their outputs stay local.
+
+F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions.
+This project is not affiliated with or endorsed by Monolith Productions,
+Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.

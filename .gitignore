@@ -22,3 +22,17 @@ out/
 __pycache__/
 Thumbs.db
 .DS_Store
+
+# Local game copy, generated translations and toolchain for port/
+private/
+.tools/
+port/assets/
+port/generated/default/
+port/logs/
+port/user/
+port/cache/
+*.log
+third_party/
+port/out/
+port/user-smoke/
+port/cache-smoke/
