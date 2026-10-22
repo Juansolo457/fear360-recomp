@@ -77,6 +77,32 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 - **White flicker, "on load-in when I'm looking at a new map… then it kind of disappears."** Captured on video (NVIDIA instant replay, 60 fps). Brightness per frame shows **one frame at 4.530 s** (mean 23.5 → 31.7 → 22.3) holding a bright soft-edged cone over the right of the scene and a dark see-through rectangle near the top centre: light/fog effects drawn without one of their textures. **Cause:** fear-nx's renderer (built for Switch, where creating a texture costs ~1.5 ms) streams new textures in on worker threads and draws with the empty (black) texture until they arrive; their own note says it "shows as a flash of the empty texture". Effects that use a texture as a mask flash white or black for that frame. **Fix:** on PC the draw now waits for a streaming texture (`fear_texture_stream_wait_ms`, 100 ms per frame at most, then they pop in as before), with 6 workers instead of 2. Measured through the intro at 3×/90 fps: every streamed texture waited for, **0 drawn without** (was 15–80 per 10 s), at most 158 ms of waiting per 10 s in the biggest load-in (211 textures), 89–90 fps held, no texture-caused slow frames.
 - **Saving still unconfirmed:** nothing was written to `port-nx/user/` in 8½ minutes, while a keyboard test run with both pads connected (after the controller fix) saved its checkpoint. Which mode was played (campaign or Instant Action, which may not checkpoint) is the next question.
 
+## Renderer sweep for PC (2026-10-22)
+Asked after play-test 3: what in fear-nx's renderer is a Switch tradeoff that a PC doesn't need, and would a rewrite (Rust) make it faster?
+
+**Where the time goes now** (play-test 3, 4K, 90 fps): per frame the renderer uses **0.67 ms of CPU and 1.6 ms of GPU** (6.4 ms at worst), and waits ~10 ms for the game. It is idle ~90% of the time. Making it faster changes nothing on screen; a rewrite, in Rust or otherwise, would buy no frames. What decides smoothness now is *when* frames happen and what goes missing, not how fast they're drawn.
+
+**Switch tradeoffs found:**
+| | On Switch | Effect on PC | Status |
+|---|---|---|---|
+| New textures stream in, drawn with the empty texture until ready | creating a texture costs ~1.5 ms | the white flash at load-ins | **fixed** (wait, 6 workers) |
+| UI-thread painting from an idle dialog | halved frames there too | 14 ms queue-lock stall per frame | **fixed** (SDK patch 0002) |
+| **Draws skipped while their shader is translated or pipeline compiled** (`nx_native_async_pipelines`) | a compile stalls a frame for long | **2,500–2,800 draws skipped per session**, in a few load-in windows: objects and effects missing for a few frames the first time they're seen | **next**: wait within a budget, as for textures; keep translated shaders on disk and pre-build known pipelines at startup so it rarely happens |
+| Thread priorities, driver-cache save throttling, small per-frame create budgets | SD card, 3 cores | harmless | leave |
+
+**Frame pacing:** the game's frames come from a software vblank timer, not the display. At 90 fps on a 240 Hz display a frame stays up for 2 or 3 refreshes alternately (8.3/12.5 ms): visible judder. `-FrameRate 80` (exactly 3 refreshes) or 120 (2) is even on 240 Hz; with G-SYNC/VRR any rate is even. Next step: try 80 by hand; later, time the virtual vblank from the display.
+
+## What's left
+**For a definitive port** (roughly where the "80%" sits):
+1. **Saving:** the fix works (the profile is written during play), but play-test 3 was Instant Action, which doesn't checkpoint; one campaign checkpoint to confirm.
+2. **Options and Quit** in the main menu.
+3. **No pop-in on first sight** (the shader/pipeline item above).
+4. **Even pacing** (80 fps, or display-timed vblank) and **120 fps without the tracer glitch** (the per-frame step in the game's effect code).
+5. **A level sweep:** every Interval, the bonus level and the Instant Action maps, played or driven, for crashes and visual faults; the crash reporter catches anything.
+6. **Linux** build; ***F.E.A.R. Files***.
+
+**For a decompile** (the long project, OpenCE-style): rewriting the game's code as readable source, subsystem by subsystem, each checked against the recompiled original. It's not needed for any item above, and it's where 120+ fps behaviour (simulation/render decoupling, the tracer step) and deeper features come from. The PC version stays the reference for how each system behaves.
+
 ## Movement feel: 360 vs PC
 The user's sense: walking feels a little more bouncy than on PC, maybe extra sway. Two ways it could be real, both checkable:
 - **Different tuning on 360.** Console ports often retuned head bob, weapon sway and look acceleration for a pad. Both versions ship their tuning as a LithTech game database (360: `Game/database`, `database_anim`; PC: `FEAR*.Gamdb00p` inside `FEAR.Arch00`). Diff the player/camera/weapon records (head bob, sway, movement acceleration, look sensitivity) between them. If they differ, the 360's values are what the 360 shipped, and a setting could offer the PC's.
