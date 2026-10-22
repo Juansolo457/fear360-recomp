@@ -19,6 +19,9 @@
 
 namespace fear::texture_pack {
 
+// Entry::swizzle when the replacement keeps the 360 host format's channel layout.
+constexpr uint32_t kSameSwizzle = UINT32_MAX;
+
 struct Entry {
   VkFormat format = VK_FORMAT_UNDEFINED;
   uint32_t width = 0;
@@ -28,6 +31,10 @@ struct Entry {
   uint32_t block_bytes = 0;
   uint32_t block_width = 1;
   uint32_t block_height = 1;
+  // Which host channel holds each guest component (xenos swizzle encoding, as the renderer's
+  // host format swizzle), when the replacement's layout differs from the 360 host format's:
+  // e.g. a PC DXT texture (RGB) in place of a 360 k_8_8_8_8 one (BGR in memory).
+  uint32_t swizzle = kSameSwizzle;
   // DDS file in the pack and where its mip data starts.
   std::string file;
   uint32_t data_offset = 0;

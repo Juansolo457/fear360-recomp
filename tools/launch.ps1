@@ -5,6 +5,7 @@
 #   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, 120 fps
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
+#   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -20,6 +21,8 @@ param(
     # land unevenly. fifo = true vsync (even, adds queue latency), mailbox = no tearing, low
     # latency, still uneven.
     [ValidateSet('immediate', 'mailbox', 'fifo')][string]$Present = 'immediate',
+    # A texture pack folder built by tools/texture_pack.py (port-nx only); see docs/TEXTURES.md.
+    [string]$TexturePack = '',
     [string]$Extra = '',  # more flags, space separated
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
@@ -38,6 +41,12 @@ $arguments = @(
 if ($Nx) {
     # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
     $arguments += @('--nx_native_resolution_scale', "$Scale")
+}
+if ($TexturePack) {
+    if (!$Nx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }
+    $pack = Resolve-Path $TexturePack
+    if (!(Test-Path (Join-Path $pack 'index.tsv'))) { throw "No index.tsv in $pack." }
+    $arguments += @('--fear_texture_pack', ($pack.Path -replace '\\', '/'))
 }
 if ($FrameRate -ne 30) {
     $arguments += @('--video_mode_refresh_rate', "$($FrameRate * 2)")

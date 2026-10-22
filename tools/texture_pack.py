@@ -34,6 +34,12 @@ DXT_PLAN = {
     K_DXT2_3: (b'DXT3', VK_BC2, DXGI_BC2),
     K_DXT4_5: (b'DXT5', VK_BC3, DXGI_BC3),
 }
+# PC block formats a pack can carry as they are.
+PC_BLOCKS = {b'DXT1': (VK_BC1_RGBA, 8), b'DXT3': (VK_BC2, 16), b'DXT5': (VK_BC3, 16)}
+# Host swizzle override (xenos encoding, 3 bits per guest component) for an RGB-ordered
+# replacement of a 360 k_8_8_8_8 texture, whose texels sit B, G, R, A in memory: guest X (blue)
+# reads host B, guest Z (red) host R.
+SWIZZLE_BGRA = 2 | 1 << 3 | 0 << 6 | 3 << 9
 
 
 # --- 360 catalogue -----------------------------------------------------------------------
@@ -110,10 +116,11 @@ def pc_textures(pc_root):
 
 # --- decoding ----------------------------------------------------------------------------
 
-def dds_header(width, height, mips, fourcc=None, dxgi=None, rgba=False, linear_size=0):
+def dds_header(width, height, mips, fourcc=None, dxgi=None, rgba=False, linear_size=0, bgra=False):
     flags = 0x1 | 0x2 | 0x4 | 0x1000 | (0x20000 if mips > 1 else 0) | (0x80000 if not rgba else 0x8)
+    red, blue = (0xFF0000, 0xFF) if bgra else (0xFF, 0xFF0000)
     pf = (struct.pack('<II4s5I', 32, 0x4, b'DX10' if dxgi else fourcc, 0, 0, 0, 0, 0) if not rgba
-          else struct.pack('<II4s5I', 32, 0x41, b'\0\0\0\0', 32, 0xFF, 0xFF00, 0xFF0000, 0xFF000000))
+          else struct.pack('<II4s5I', 32, 0x41, b'\0\0\0\0', 32, red, 0xFF00, blue, 0xFF000000))
     caps = 0x1000 | (0x400008 if mips > 1 else 0)
     head = b'DDS ' + struct.pack('<7I', 124, flags, height, width, linear_size, 0, mips)
     head += b'\0' * 44 + pf + struct.pack('<5I', caps, 0, 0, 0, 0)
@@ -166,6 +173,64 @@ def parse_dds(data):
     return width, height, mips, fourcc if fourcc.strip(b'\0') else b'RGBA', offset
 
 
+def pc_kind(data):
+    """'DXT1'/'DXT3'/'DXT5', 'BGRA' or 'BGRX' (32-bit uncompressed, B G R A in memory, without
+    an alpha mask for BGRX), or what else the DDS holds."""
+    flags, fourcc, bits, r, g, b, a = struct.unpack_from('<I4s5I', data, 80)
+    if flags & 0x4:
+        return fourcc.decode('latin-1').strip('\0')
+    if bits == 32 and (r, g, b) == (0xFF0000, 0xFF00, 0xFF):
+        return 'BGRA' if a == 0xFF000000 else 'BGRX' if a == 0 else 'rgb-other'
+    return f'rgb{bits}'
+
+
+def mip_chain(img, mips):
+    """The levels of an (H, W, C) uint8 array, each box-filtered from the one before."""
+    levels = [img]
+    for level in range(1, mips):
+        h, w = img.shape[:2]
+        img = np.rint(box_down(img, max(w // 2, 1), max(h // 2, 1))).astype(np.uint8)
+        levels.append(img)
+    return levels
+
+
+def bc4_encode(channel):
+    """BC4 (unsigned) blocks of an (H, W) uint8 array: min/max endpoints, 8-value mode."""
+    h, w = channel.shape
+    ph, pw = (h + 3) // 4 * 4, (w + 3) // 4 * 4
+    if (ph, pw) != (h, w):
+        channel = np.pad(channel, ((0, ph - h), (0, pw - w)), mode='edge')
+    blocks = channel.reshape(ph // 4, 4, pw // 4, 4).transpose(0, 2, 1, 3).reshape(-1, 16)
+    blocks = blocks.astype(np.float32)
+    hi, lo = blocks.max(axis=1), blocks.min(axis=1)
+    # Palette of the red0 > red1 mode: red0, red1, then six steps from red0 to red1.
+    weights = np.array([0, 7, 1, 2, 3, 4, 5, 6], np.float32) / 7
+    palette = hi[:, None] * (1 - weights) + lo[:, None] * weights
+    index = np.abs(blocks[:, :, None] - palette[:, None, :]).argmin(axis=2).astype(np.uint64)
+    index[hi == lo] = 0
+    bits = (index << (3 * np.arange(16, dtype=np.uint64))).sum(axis=1)
+    out = np.zeros((len(blocks), 8), np.uint8)
+    out[:, 0], out[:, 1] = hi.astype(np.uint8), lo.astype(np.uint8)
+    for byte in range(6):
+        out[:, 2 + byte] = (bits >> np.uint64(8 * byte)) & np.uint64(0xFF)
+    return out
+
+
+def bc5_encode(rg):
+    """BC5 blocks (a BC4 block for red, then one for green) of an (H, W, 2) uint8 array."""
+    return np.concatenate([bc4_encode(rg[..., 0]), bc4_encode(rg[..., 1])], axis=1).tobytes()
+
+
+def correlation(a, b):
+    """Mean Pearson correlation over the channels that aren't flat in either array."""
+    scores = []
+    for c in range(a.shape[-1]):
+        x, y = a[..., c].ravel().astype(np.float64), b[..., c].ravel().astype(np.float64)
+        if x.std() > 2 and y.std() > 2:
+            scores.append(np.corrcoef(x, y)[0, 1])
+    return float(np.mean(scores)) if scores else None
+
+
 def chain_bytes(width, height, mips, block_bytes, block):
     total = 0
     for level in range(mips):
@@ -176,7 +241,24 @@ def chain_bytes(width, height, mips, block_bytes, block):
 
 # --- build -------------------------------------------------------------------------------
 
-def cmd_build(work, pc_root, pack, formats='dxt', limit=None, min_psnr=24.0):
+def plan_replacement(fmt, kind):
+    """How a PC texture of `kind` replaces a 360 one of format `fmt`: ('copy', vkformat, swizzle)
+    for PC blocks or texels used as they are, ('bc5', ...) for a normal map re-encoded to the
+    360's two channels, or None."""
+    if fmt == K_DXN:
+        return ('bc5', VK_BC5, None) if kind in ('DXT1', 'DXT3', 'DXT5', 'BGRA', 'BGRX') else None
+    block = PC_BLOCKS.get(kind.encode('latin-1'))
+    if fmt in DXT_PLAN and block:
+        return ('copy', block[0], None)
+    if fmt == K_8_8_8_8:
+        if block:
+            return ('copy', block[0], SWIZZLE_BGRA)
+        if kind in ('BGRA', 'BGRX'):
+            return ('rgba8', VK_R8G8B8A8_UNORM, None)
+    return None
+
+
+def cmd_build(work, pc_root, pack, formats='all', limit=None, min_psnr=24.0, min_corr=0.9):
     work, pack = Path(work), Path(pack)
     (pack / 'tex').mkdir(parents=True, exist_ok=True)
     rows = []
@@ -188,7 +270,7 @@ def cmd_build(work, pc_root, pack, formats='dxt', limit=None, min_psnr=24.0):
     blob = open(work / 'x360_base.bin', 'rb')
     stats = {}
     report = []
-    index_lines = ['# key\tvkformat\twidth\theight\tmips\tdata_offset\tfile']
+    index_lines = ['# key\tvkformat\twidth\theight\tmips\tdata_offset\tfile[\tswizzle]']
     seen_keys = set()
     done = 0
     for r in rows:
@@ -201,6 +283,9 @@ def cmd_build(work, pc_root, pack, formats='dxt', limit=None, min_psnr=24.0):
         fmt = int(r['format'])
         if formats == 'dxt' and fmt not in DXT_PLAN:
             note('format-not-in-this-pass')
+            continue
+        if fmt not in DXT_PLAN and fmt not in (K_8_8_8_8, K_DXN):
+            note(f'360-format-{fmt}')
             continue
         stem = r['name'].replace('\\', '/').lower()[:-4]
         match = pc.get(stem)
@@ -219,24 +304,37 @@ def cmd_build(work, pc_root, pack, formats='dxt', limit=None, min_psnr=24.0):
         if pw * height != ph * width:
             note('aspect-differs')
             continue
-        want_fourcc, vkformat, _ = DXT_PLAN[fmt]
-        if pfour != want_fourcc:
-            note(f'pc-format-{pfour.decode("latin-1").strip(chr(0))}')
+        kind = pc_kind(pc_data)
+        plan = plan_replacement(fmt, kind)
+        if formats == 'dxt' and (not plan or kind != DXT_PLAN[fmt][0].decode()):
+            plan = None
+        if not plan:
+            note(f'pc-format-{kind}')
             continue
-        # Quality gate: the PC base level, scaled to the 360 size, against the 360 base level.
+        how, vkformat, swizzle = plan
+        # Quality gate: the PC base level, scaled to the 360 size, against the 360 base level,
+        # in the 360's logical channel order (R, G, B, A; a normal map's X, Y).
         blob.seek(int(r['linear_offset']))
         x360 = decode_blocks(blob.read(int(r['linear_size'])), fmt, width, height)
+        if fmt == K_8_8_8_8:
+            x360 = x360[..., [2, 1, 0, 3]]
         try:
             pc_img = decode_pc(pc_data)
         except Exception:
             note('pc-decode-failed')
             continue
+        if pc_img.shape[:2] != (ph, pw):
+            note('pc-decode-size')
+            continue
         small = box_down(pc_img, width, height)
-        channels = 3 if fmt == K_DXT1 else 4
+        channels = 2 if fmt == K_DXN else 3 if fmt == K_DXT1 and kind == 'DXT1' else 4
         score = psnr(small[..., :channels], x360[..., :channels])
-        if score < min_psnr:
+        corr = correlation(small[..., :channels], x360[..., :channels]) if fmt == K_DXN else None
+        # Normal maps: the 360's were re-derived (their strength differs a little), so a
+        # strongly correlated pair passes with a lower PSNR.
+        if score < min_psnr and not (corr is not None and corr >= min_corr):
             note('quality-gate')
-            report[-1] += f'\tpsnr={score:.1f}'
+            report[-1] += f'\tpsnr={score:.1f}' + (f'\tcorr={corr:.2f}' if corr is not None else '')
             continue
         key = r['key']
         if key in seen_keys:
@@ -244,15 +342,38 @@ def cmd_build(work, pc_root, pack, formats='dxt', limit=None, min_psnr=24.0):
             continue
         seen_keys.add(key)
         mips = pmips
-        need = chain_bytes(pw, ph, mips, 8 if vkformat == VK_BC1_RGBA else 16, 4)
-        if poff + need > len(pc_data):
-            note('pc-truncated')
-            continue
         out_name = f'tex/{key}.dds'
-        (pack / out_name).write_bytes(pc_data)
-        index_lines.append(f'{key}\t{vkformat}\t{pw}\t{ph}\t{mips}\t{poff}\t{out_name}')
+        if how == 'copy':
+            block_bytes, block = (4, 1) if vkformat == VK_R8G8B8A8_UNORM else \
+                (8 if vkformat == VK_BC1_RGBA else 16, 4)
+            if poff + chain_bytes(pw, ph, mips, block_bytes, block) > len(pc_data):
+                note('pc-truncated')
+                continue
+            (pack / out_name).write_bytes(pc_data)
+            data_offset = poff
+        elif how == 'rgba8':
+            need = chain_bytes(pw, ph, mips, 4, 1)
+            if poff + need > len(pc_data):
+                note('pc-truncated')
+                continue
+            texels = pc_data[poff:poff + need]
+            if kind == 'BGRX':
+                texels = np.frombuffer(texels, np.uint8).copy()
+                texels[3::4] = 255
+                texels = texels.tobytes()
+            head = dds_header(pw, ph, mips, rgba=True, bgra=True)
+            (pack / out_name).write_bytes(head + texels)
+            data_offset = len(head)
+        else:  # bc5
+            mips = min(mips, max(pw, ph).bit_length())
+            data = b''.join(bc5_encode(level) for level in mip_chain(pc_img[..., :2], mips))
+            head = dds_header(pw, ph, mips, dxgi=DXGI_BC5)
+            (pack / out_name).write_bytes(head + data)
+            data_offset = len(head)
+        line = f'{key}\t{vkformat}\t{pw}\t{ph}\t{mips}\t{data_offset}\t{out_name}'
+        index_lines.append(line + (f'\t{swizzle:X}' if swizzle is not None else ''))
         note('packed')
-        report[-1] += f'\t{width}x{height}->{pw}x{ph}\tpsnr={score:.1f}\t{pc_path}'
+        report[-1] += f'\t{width}x{height}->{pw}x{ph}\tpsnr={score:.1f}\t{pc_path}\t{how}:{kind}'
         done += 1
         if limit and done >= limit:
             break
@@ -324,7 +445,7 @@ def main():
     if cmd == 'bundle':
         cmd_bundle(*args[:2])
     elif cmd == 'build':
-        cmd_build(args[0], args[1], args[2], formats=opts.get('--formats', 'dxt'),
+        cmd_build(args[0], args[1], args[2], formats=opts.get('--formats', 'all'),
                   limit=int(opts['--limit']) if '--limit' in opts else None)
     elif cmd == 'compare':
         cmd_compare(args[0], args[1], pack=opts.get('--pack'))

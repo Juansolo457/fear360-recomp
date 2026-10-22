@@ -26,10 +26,9 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ 60 and 120 fps with correct game speed | virtual vblank rate (`-FrameRate`), hands-on verified |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
-| ⏳ Chapter cards drawn off-centre and doubled | likely our scaling; needs a 1× comparison |
-| ⏳ Brief flicker at cutscene ↔ gameplay transitions | needs a 1× / 30 fps comparison |
+| ⏳ Chapter cards and credits drawn twice, half-frame flicker at some cuts | reproduced at 1× too, so not our scaling: the renderer's handling of the game's two-tile frames ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
-| ⏳ Low-res textures (360 memory limits) | **84% have a 4× larger PC original under the same name**; plan in [docs/TEXTURES.md](docs/TEXTURES.md) |
+| ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ⏳ Settings and Quit entries in the main menu | not started |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | not started |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
@@ -43,7 +42,9 @@ pwsh -NoProfile -File tools/build-nx.ps1        # first time ~15 min: ReXGlue SD
 pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'
 ```
 
-Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 120`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|120`, `-Present immediate|mailbox|fifo`, `-Windowed`, `-Extra '<more flags>'`.
+Launcher defaults: fullscreen, `-Scale 3` (4K internal), `-FrameRate 120`, 16× AF. Options: `-Scale 1..3`, `-FrameRate 30|60|120`, `-Present immediate|mailbox|fifo`, `-TexturePack <folder>`, `-Windowed`, `-Extra '<more flags>'`.
+
+**PC textures (optional, needs the PC version):** build a pack from your own PC install once (about 6 minutes, 1.3 GB, stays in the gitignored `private/`), then add `-TexturePack private/texture_pack`. Steps in [docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack).
 
 Put your own `default.xex` (title `565507D9`, SHA-256 `e7fccdf6…2792`) and `Game/` folder in `port/assets/` ([docs/RIPPING.md](docs/RIPPING.md); `python -I tools/xdvdfs.py <disc.iso> extract port/assets` unpacks an ISO). The SDK source recipe is in [docs/HANDOFF.md](docs/HANDOFF.md#how-it-is-built-and-run).
 
@@ -53,7 +54,7 @@ Put your own `default.xex` (title `565507D9`, SHA-256 `e7fccdf6…2792`) and `Ga
 port-nx/          the working build: app glue (src/), fear-nx renderer + our changes (src/native/), manifest
 port/             stock-SDK build, kept for A/B (menus corrupt)
 patches/          our ReXGlue SDK patch (static GPU plugin)
-tools/            build, launch, smoke test, window capture, ISO extractor, texture surveys
+tools/            build, launch, smoke/autoplay tests, window capture, ISO extractor, texture pack builder
 docs/             progress, handoff, findings, plan, ripping
 ```
 

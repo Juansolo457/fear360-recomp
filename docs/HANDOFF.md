@@ -82,14 +82,17 @@ pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot 
 | `port-nx/src/native/native_system.cpp` | fear-nx's graphics system: vblank thread, MMIO/ring, pacing, present (`Swap`) |
 | `port-nx/src/native/native_renderer.cpp` | the Vulkan Xenos renderer (12.8k lines with textures): render targets, draws, resolves, swap. Our scaling: `Impl::scale`, `host_width/height`, `hx0/hy0/hwidth/hheight` in `Resolve()` |
 | `port-nx/src/native/native_textures.cpp` | texture cache; resolve destination images (scaled by `resolution_scale_`), `last_resolved()` |
+| `port-nx/src/texture_pack.*`, `port-nx/tools/texindex.cpp`, `tools/texture_pack.py` | PC texture pack: runtime lookup/streaming, offline key indexer, pack builder ([TEXTURES.md](TEXTURES.md)) |
+| `tools/autoplay.ps1`, `tools/ab_pairs.py` | unattended runs (taps A, screenshots) and A/B frame pairing |
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
 | `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
 
 ## Next steps (the user's list)
 Play-test 1 added: frame-pacing jank (`-Present` test, then lock the virtual vblank to the
-display), chapter cards off-centre/doubled and cutscene-transition flicker (compare at 1×),
-PC texture replacement (97% of names match). Details in [PROGRESS.md](PROGRESS.md).
+display), chapter cards off-centre/doubled and cutscene-transition flicker (reproduced at 1×:
+the renderer's two-tile frames, see PROGRESS.md), PC texture replacement (done: a local pack,
+`-TexturePack`, see [TEXTURES.md](TEXTURES.md)). Details in [PROGRESS.md](PROGRESS.md).
 
 1. **Frame rate:** 120 fps via the vblank rate is the default and plays right. Before
    calling it done, check slow-mo duration, cutscenes and scripted timers against 30 fps,

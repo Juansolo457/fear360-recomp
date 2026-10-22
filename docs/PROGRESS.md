@@ -1,11 +1,11 @@
 # Progress Debrief
 
-_Last updated 2026-10-21._
+_Last updated 2026-10-22._
 
 ## Where we are
 F.E.A.R. for Xbox 360 is **playable natively on Windows at 4K and 120 fps**. Menus, the intro and menu videos, the campaign and Instant Action all work; game logic, gunplay and physics are the console's own and behave correctly. Hands-on after ~10 minutes: "guns responded very well… game logic is in there, the physics are in there". The resolution, AA and anisotropic filtering made "a huge difference. Very clean image".
 
-What's left before it feels finished: **textures** (the 360 shipped low-res ones; PC replacements look feasible), a little **frame-pacing jank**, two **presentation glitches** (chapter cards, cutscene transitions), and **Settings / Quit** in the main menu.
+Since play-test 1 the **textures** are fixed: an optional pack built from the player's own PC copy replaces 4,710 of the 360's halved textures with the PC originals. What's left before it feels finished: a little **frame-pacing jank**, the **doubled chapter cards / half-frame flicker** (now traced to how the renderer handles the game's two-tile frames, not to our 4K scaling), and **Settings / Quit** in the main menu.
 
 ## What was done
 
@@ -28,14 +28,20 @@ What's left before it feels finished: **textures** (the 360 shipped low-res ones
 ### 5. Frame rate
 - The game presents every 2 virtual vblanks: 30 fps at 60 Hz, as on the console. Raising the virtual vblank rate (`video_mode_refresh_rate`) to 120/240 Hz gives **60/120 fps; both hands-on verified with correct game speed**. 120 is the launcher default and the ceiling of this trick (the SDK clamps at 240 Hz).
 
+### 6. PC textures (2026-10-22)
+- An offline tool reads the 360 catalogue and the PC archives, matches textures by path, checks each pair with a quality gate (the PC texture scaled down must look like the 360 one), and writes a local pack. The renderer recognises each 360 texture by a hash of its data when it loads and streams the PC version in instead. Details: [TEXTURES.md](TEXTURES.md).
+- **4,710 replacements** (92% of the textures with a larger PC original), including the normal maps (re-encoded to the 360's two-channel format) and the uncompressed textures. In the intro, **81% of the game textures drawn come from the pack** (393 of 485).
+- Checked in game at 2×: the guard's "ATC" patch and fabric weave go from blurred to sharp; Fettel's cell floor gains its stone relief; colours (blood, vending machines) unchanged; no load failures.
+- Launch with `tools/launch.ps1 -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'`.
+
 ## Play-test 1 (2026-10-21, ~10 minutes, 3× scale, 120 fps)
 | Finding | Notes / next step |
 |---|---|
 | Logic, gunplay, physics | All good |
 | Image | Very clean with 4K + MSAA + 16× AF |
-| **Textures are very low-res** | The 360's memory budget. See "PC textures" below |
-| **Chapter cards (loading screens) off-centre and shown twice**, a couple of times | Probably a path our scaling misses (a resolve copied or sampled at guest size). Compare at `-Scale 1`. Screenshots were mentioned but not received |
-| **Subtle flicker at cutscene ↔ gameplay transitions** (when control is taken away, chapter cutscenes) | Compare at `-Scale 1` and `-FrameRate 30` to see whether it's ours or fear-nx's |
+| **Textures are very low-res** | The 360's memory budget. **Fixed with the PC texture pack** (section 6) |
+| **Chapter cards (loading screens) off-centre and shown twice**, a couple of times | Same at 1× (the intro credits double too): the renderer's two-tile handling, below |
+| **Subtle flicker at cutscene ↔ gameplay transitions** (when control is taken away, chapter cutscenes) | A half-drawn frame at cuts, caught at 1× and 2×: same cause, below |
 | **"A little bit of jank", input occasionally behind** | Diagnosed below; `-Present` test option added |
 | Menu needs Settings and Quit | Not started; routes in [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) |
 | **Movement feels "bouncier" than PC: more sway/bob?** (user unsure) | See "Movement feel" below: compare the two versions' tuning data, and check frame-rate dependence |
@@ -51,6 +57,14 @@ The user's sense: walking feels a little more bouncy than on PC, maybe extra swa
 - The game's frames are paced by fear-nx's **software vblank thread** (`VblankLoop`, a host timer at `video_mode_refresh_rate`), which is **not locked to the monitor's real refresh**. Presented immediately, frames reach the 240 Hz display at slightly uneven intervals and can tear. That reads as occasional jank even at a high average. Windowed-fullscreen Vulkan on Windows also goes through the compositor, so G-SYNC/VRR is unlikely to be smoothing it.
 - **Test now:** `tools/launch.ps1 … -Present fifo` (true vsync: even, slightly more latency) and `-Present mailbox` (no tearing, low latency, still unsynced).
 - **Real fix (next):** drive the virtual vblank from the display's actual vblank (e.g. DXGI `IDXGIOutput::WaitForVBlank` on Windows) instead of a timer, so the game's "every 2 vblanks" lands exactly on every 2nd refresh at 240 Hz. Or present to an exclusive/independent-flip swapchain so VRR engages.
+
+## Two-tile frames: doubled cards and half frames
+Autoplay runs at 1× and 2× with `--nx_native_trace_output`, screenshots every 2–3 s through the intro:
+- **The game draws each 3D frame in two tiles**, as the 360 must for 720p with 2× MSAA (the frame doesn't fit in the 10 MB of EDRAM): left tile 0–768 px, right tile 640–1280 px with a −640 window offset, each copied out to the same frame texture. The renderer joins the colour tiles correctly (a "shared" destination).
+- **Doubled credits/cards:** the intro credits show every name twice, the copy exactly 640 px (one tile) to the left and cut off at the screen edge, **at 1× and at 2×**. The first tile's copy-out also clears the render target, the second's doesn't, so the second tile's pixels (shifted by −640) are still there when the next frame starts. A frame that doesn't redraw every pixel (text on black) shows them. On the console the game clears EDRAM in a way the renderer doesn't reproduce (to find: a clear the renderer skips or scopes to one tile).
+- **Half frames at cuts:** at a cut from a cutscene to the credits, a frame shows the left tile drawn and the right half black (2×), or the right half grey (an earlier 2× run). Same family: one tile of the new frame next to stale contents.
+- **Depth tiles aren't joined:** the 2× MSAA depth copies of the two tiles take the renderer's "independent fallback" (it joins depth only without MSAA), so an effect that samples scene depth sees the left tile only. Same at 1×.
+- **None of it is our scaling** (identical traces at 1× and 2×). The fix belongs in the renderer's tile handling; next step is a per-draw trace of one credits frame to find the clear that should wipe the second tile.
 
 ## PC textures: feasibility
 Measured, not assumed ([TEXTURES.md](TEXTURES.md) has the full plan):
@@ -80,10 +94,10 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 - **For the movement feel specifically:** if it turns out to be console-era tuning or a 30 Hz assumption (head bob, camera smoothing, input filtering), the fix is a small hook on that function, measured against `-FrameRate 30` and against the PC version's values.
 
 ## Open items and next steps
-1. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
-2. **Chapter cards / transition flicker:** reproduce at `-Scale 1` and `-FrameRate 30` to see whether they're ours (scaling) or upstream; fix accordingly.
-3. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
-4. **PC texture replacement:** see [TEXTURES.md](TEXTURES.md); Phase 1 is the offline readers, matching, quality gate and pack.
+1. **Play-test 2 with the texture pack** (normal maps change the lighting most; watch for anything that looks wrong-coloured or too bumpy).
+2. **Two-tile frames** (doubled cards, half frames, depth): find the missing clear, join MSAA depth tiles. See above.
+3. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
+4. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
 5. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
 6. ***F.E.A.R. Files*:** dump the disc, find its executable(s), generate a second translation against the same runtime and renderer.
 7. **Linux:** the renderer and SDK are Vulkan; port the build script.

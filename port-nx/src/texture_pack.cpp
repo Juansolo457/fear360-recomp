@@ -78,7 +78,8 @@ uint64_t MipChainBytes(const Entry& e) {
   return total;
 }
 
-// index.tsv: key (16 hex digits), VkFormat number, width, height, mips, data offset, file.
+// index.tsv: key (16 hex digits), VkFormat number, width, height, mips, data offset, file,
+// and optionally (after a tab) a host swizzle override in hex.
 void Load() {
   const std::string configured = REXCVAR_GET(fear_texture_pack);
   if (configured.empty()) return;
@@ -109,6 +110,15 @@ void Load() {
         !e.width || !e.height) {
       ++bad;
       continue;
+    }
+    if (auto tab = file.find('\t'); tab != std::string::npos) {
+      const std::string swizzle = file.substr(tab + 1);
+      file.resize(tab);
+      auto sw = std::from_chars(swizzle.data(), swizzle.data() + swizzle.size(), e.swizzle, 16);
+      if (sw.ec != std::errc() || e.swizzle > 0xFFF) {
+        ++bad;
+        continue;
+      }
     }
     e.file = file;
     e.data_size = MipChainBytes(e);

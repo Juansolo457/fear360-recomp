@@ -3015,8 +3015,10 @@ VkImageView TextureCache::GetViewUncached(const xenos::xe_gpu_texture_fetch_t& f
     created->dimension = fetch.dimension;
     created->format_unorm = replacement->format;
     created->format_snorm = VK_FORMAT_UNDEFINED;
-    // The pack keeps the 360 host format's channel layout, so the view swizzle is the same.
-    created->host_format_swizzle = host_format.swizzle;
+    // The pack keeps the 360 host format's channel layout unless the entry says otherwise.
+    created->host_format_swizzle = replacement->swizzle != fear::texture_pack::kSameSwizzle
+                                       ? replacement->swizzle
+                                       : host_format.swizzle;
     created->key_hash = key_hash;
     created->content_hash = texture_hash;
     created->level_count = u.level_count;

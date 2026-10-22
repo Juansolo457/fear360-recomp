@@ -1,113 +1,88 @@
-# Texture overhaul plan: PC textures in the 360 game
+# Texture overhaul: PC textures in the 360 game
 
-_Drafted 2026-10-21, after play-test 1 ("textures are very, very low res")._
+_Started 2026-10-21 after play-test 1 ("textures are very, very low res"). Working since 2026-10-22._
 
-Goal: when the 360 game uses one of its textures, the renderer draws the PC version's higher
-resolution copy instead. Built locally from the player's own PC install, never distributed.
-Toggleable, with automatic fallback to the 360 texture.
+When the 360 game creates one of its textures, the renderer draws the PC version's copy instead,
+at the PC's resolution (almost always 2× per side). The pack is built locally from the player's
+own PC install and never distributed. Off unless a pack is given; any texture the pack doesn't
+cover, or whose file fails to load, stays the 360's.
 
-## What the survey found
-`tools/texture_names.py` and `tools/texture_compare.py` (read-only, CSV in `private/`):
-
+## Status
 | | |
 |---|---|
-| 360 textures (`Game/uberCatalog.cat`, `.tex`) | 6,251, about 793 MB uncompressed |
-| PC textures (Ultimate Shooter Edition `FEAR*.Arch00`, `.dds`) | 6,288 |
-| Same file name on both | **6,069 (97%)**; the 360 even keeps the PC folder paths (`Prefabs\Industrial\Interactive\AC01_D`) |
-| **PC copy is larger** | **5,105**: 5,081 at 4× the pixels (2× each side), a few at 8–1024× |
-| Same size | 963 (no gain; leave them) |
-| PC smaller | 1 |
-| 360-only (keep 360 texture) | ~180: controller prompts, autoshot UI, laser sight, Dell product placement, Instant Action and bonus content |
-| 360 formats | 8_8_8_8 1,624 · DXT1 1,622 · DXT2/3 1,136 · DXT4/5 948 · **DXN 921** (two-channel normal maps) |
-| Typical sizes | 360 256² / 128² / 512²; PC 512² / 256² / 1024² |
+| ✅ Offline pack builder (`tools/texture_pack.py` + `fear_texindex`) | reads both archives, matches by path, quality gate, writes the pack |
+| ✅ Runtime replacement (`port-nx/src/texture_pack.*`, hooks in `native_textures.cpp`) | streamed from the pack on the texture worker; per-key fallback |
+| ✅ Keys agree offline and at runtime | checked with `fear_texture_log_keys` on the intro: 393 catalogue textures found in the offline index; the only misses besides video frames were two 4×4 textures |
+| ✅ Visible in game | A/B at 2×: the ATC guard's shoulder patch and fabric weave go from blurred to sharp |
+| ✅ Pack v2: normal maps, RGBA and mixed formats | 4,710 replacements (v1: 2,666 DXT-only); in-game check of v2 below |
+| ⏳ Not covered | cube/volume textures (85), 360 textures with packed mips at the base (263, all tiny), 360-only content (192), same-size pairs (972) |
 
-So the 360 halved nearly every texture, and the PC has the originals under the same names.
+**Coverage.** Of the 5,105 360 textures that have a larger PC original, the pack replaces 4,710
+(92%); 78 fail the quality gate (genuinely different pictures, e.g. the Dell laptop) and the
+rest are duplicates or have no usable PC file. In the intro, 393 distinct catalogue textures
+were used; 181 were replaced by v1 and 157 more were the formats v2 adds. The other ~1,800
+"new textures" the renderer counts in the intro are video frames (the Bink planes, `k_8`), which
+never match the index, as intended.
 
-## The two formats
-- **360 catalogue** (`uberCatalog.cat`, big-endian): 32-byte header (version 3, header size,
-  9,888 entries, name-table offset/size, data offset), then 16-byte entries (name offset, data
-  offset, size, compressed size); every payload is a **zlib** stream. A `.tex` payload is a
-  0x34-byte header followed by the texture data. The header holds the **Xenos texture fetch
-  constant** at 0x1C (format, size, dimension, endianness; base/mip addresses zero until
-  loaded), so the data is in the exact tiled layout the GPU reads.
-- **PC archive** (`FEAR*.Arch00`, LithTech `LTAR` v3, little-endian): 48-byte header (magic,
-  version, name-table size, 247 folders, file count…), the name table, then 32-byte file
-  entries (name offset, offset u64, stored size u64, size u64, flags), stored uncompressed.
-  Textures are plain DDS (DXT1/3/5 or uncompressed RGBA, with mips).
+## Build a pack
+```powershell
+python -I tools/texture_pack.py bundle  <Game>/uberCatalog.cat private/texwork
+port-nx/out/build/win-amd64-relwithdebinfo/fear_texindex.exe private/texwork/x360.bundle private/texwork/x360.tsv private/texwork/x360_base.bin
+python -I tools/texture_pack.py build   private/texwork "<PC F.E.A.R. install>" private/texture_pack
+pwsh -NoProfile -File tools/launch.ps1 -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'
+```
+About 6 minutes and 1.3 GB. `report.tsv` in the pack says what happened to every 360 texture;
+`compare <work> <run.log> --pack <pack>` breaks down a run logged with
+`--fear_texture_log_keys true`.
 
-## How replacement works
-The renderer can recognise a texture by content, without knowing its name:
-1. **Offline**, for every matched pair: hash the 360 texture's base-level bytes exactly as they
-   sit in guest memory (straight from the `.tex` payload), and record `hash → PC file`.
-2. **At runtime**, fear-nx's texture cache already hashes each texture's guest data when it
-   creates or refreshes the image (`texture_hash` / `content_hash` in
-   `port-nx/src/native/native_textures.cpp`). Add a replacement key (the same base-level hash,
-   computed once per new content) and, if it is in the index, build the Vulkan image from the
-   PC DDS instead of untiling guest memory. Everything downstream (views, swizzles, samplers,
-   the resolution-scaled sampling) stays as it is: shaders sample normalised coordinates, so a
-   larger image just means more detail.
+## How it works
+- **Key.** XXH3 of the 360 texture's base level exactly as it sits in guest memory (tiled,
+  big-endian), seeded with format, size, tiling and pitch. The runtime computes it when the
+  texture cache sees new content; `fear_texindex` computes it offline with the SDK's own
+  `GetGuestTextureLayout`, from the `.tex` payload's fetch constant. One function
+  (`fear::texture_pack::ReplacementKey`) serves both.
+- **Index.** `index.tsv`: key, VkFormat, width, height, mips, data offset, file, and an optional
+  host swizzle. The DDS files hold full mip chains.
+- **Runtime.** On a hit the texture cache creates the image at the replacement's size and
+  format, streams the DDS in on its worker thread (the draw sees "not ready" for a frame or
+  two, as for any streamed texture), and never refills it in place. A failed read marks the key
+  bad and the 360 texture is used.
+- **Quality gate.** The PC base level, box-filtered per channel to the 360 size, against the
+  decoded 360 base level, in the 360's logical channel order: PSNR ≥ 24 dB, or for normal maps
+  a channel correlation ≥ 0.9 (the 360's normal maps were re-derived and differ in strength).
 
-No reverse engineering of the game's loader is needed, and textures the game rewrites at
-runtime (videos, render-to-texture) never match the index, so they are never replaced.
+## Format plan
+All 360 textures are fetched unsigned (no signed or gamma formats in the headers), and every
+`k_8_8_8_8` one is swizzled `ZYXW`: its texels are B, G, R, A in memory, like the PC's
+uncompressed DDS.
 
-## Phases
-### Phase 1: readers and an offline index (Python, `tools/texture_pack.py`)
-- Read both archives (the probes in `texture_compare.py` are the starting point).
-- Decode 360 textures: Xenos untiling (port `texture_util::GetTiledOffset2D` from the SDK) and
-  endian swap (fetch constant endianness: k8in16 etc.), then BC/RGBA decode for comparison.
-- **Match by full path first, then by name**; flag duplicates (same name, different folder).
-- **Quality gate:** downscale each PC texture to the 360 size and compare it to the decoded 360
-  texture (PSNR / SSIM per channel). That catches pairs that aren't the same picture, and
-  channel-layout differences (normal maps, packed specular). Only passing pairs go in the
-  pack; the report lists the rest.
-- **Format plan per 360 format**, so the replacement means what the shader expects:
-  - DXT1/DXT2_3/DXT4_5 → keep the PC's BC1/2/3 (same channel meaning).
-  - **DXN (normal maps)** → the PC's are uncompressed RGBA: convert to BC5 with the 360's channel
-    order (verified by the quality gate), or ship RGBA with a matching view swizzle.
-  - 8_8_8_8 → RGBA8 (or BC7 later to save VRAM).
-  - Gamma (`_GAMMA`/sRGB) formats and signed formats follow the 360 fetch constant.
-- Output to a local pack (`<user_data_root>/texture_pack/` or `private/texture_pack/`): one DDS
-  per replacement with full mips, plus `index.json` (hash → file, size, format, swizzle,
-  source names). Rebuilt by the user; gitignored.
+| 360 format | PC file | Pack | Count |
+|---|---|---|---|
+| DXT1 / DXT2_3 / DXT4_5 | DXT1/3/5 (same or different) | PC blocks as they are | 2,762 |
+| `k_8_8_8_8` | uncompressed BGRA | PC texels as they are (RGBA8 image, same swizzle as the 360's) | 428 |
+| `k_8_8_8_8` | DXT1/3/5 | PC blocks, with a host swizzle override (`60A`: guest X/blue reads host B, Z/red host R) | 626 |
+| DXN (two-channel normal maps) | uncompressed or DXT | PC X and Y re-encoded to BC5 (min/max endpoints; 43–49 dB round trip), mips box-filtered | 894 |
 
-### Phase 2: runtime replacement (`port-nx/src/native/native_textures.cpp`)
-- cvars: `fear_texture_pack` (path; empty = off) and `fear_texture_pack_report`.
-- Load `index.json` at startup; DDS files load lazily on the existing streaming worker.
-- On image creation/refresh: compute the replacement key for 2D textures whose format is in
-  the index, look it up, and create the image at the PC size with the PC mips. Cache
-  "no match" per content hash so the lookup costs nothing in steady state.
-- Skip resolve destinations, cube/3D textures (first pass), and anything whose content changes
-  per frame.
-- Stats in the log: replaced / looked up / no match / failed loads; optional dump of unmatched
-  hashes with their size and format, to find gaps.
+The channel mapping was measured, not assumed: on samples, PC R/G matched the 360's DXN R/G,
+and PC RGBA matched the 360 `k_8_8_8_8` after the B/R swap.
 
-### Phase 3: validation
-- `tools/smoke.ps1` screenshots with the pack on and off at the same spots (title, the first
-  rooms, Instant Action); then a hands-on pass through several levels.
-- Checklist: diffuse, normal and specular maps; alpha-tested foliage and fences; decals; skies
-  and cube maps; UI and fonts (should be untouched); the 360-only content (untouched).
-- VRAM and hitching: watch for stutter on level loads; the 4090's 24 GB is plenty for ~4× the
-  360's texture data, but loading should stay on the worker thread.
+## Formats
+- **360 catalogue** (`uberCatalog.cat`, big-endian): 32-byte header, 16-byte entries (name
+  offset, data offset, size, compressed size), zlib payloads (stored when the compressed size
+  is 0 or not smaller). A `.tex` payload is a 0x34-byte header with the Xenos fetch constant at
+  0x1C, then the data in the GPU's tiled layout.
+- **PC archive** (`FEAR*.Arch00`, LithTech `LTAR` v3, little-endian): 48-byte header, the name
+  table, 32-byte file entries (name offset, offset, stored size, size, flags), 16-byte folder
+  entries (full path, first subfolder, next sibling, file count); files are grouped in folder
+  order and stored uncompressed. Textures are plain DDS.
 
-### Phase 4: later
-- BC7 for the uncompressed formats (smaller, same quality).
-- Optional upscale of the ~180 360-only textures and the 963 same-size ones (an AI upscaler, run
-  locally); clearly separated from the PC-sourced pack.
-- *F.E.A.R. Files*: the PC Extraction Point / Perseus Mandate archives (`FEARXP`, `FEARXP2`)
-  feed the same tool for the expansion discs.
+## Next
+- Hands-on play with v2 (normal maps change the lighting most).
+- BC7 for the 428 RGBA8 replacements (a quarter of the memory, same look).
+- Cube maps and the tiny packed-mip textures, if they turn out to matter.
+- Optional: a local AI upscale of the 360-only and same-size textures, kept separate from the
+  PC-sourced pack.
+- *F.E.A.R. Files*: the PC expansions' archives (`FEARXP`, `FEARXP2`) feed the same tool.
 
-## Risks and unknowns
-- **Hash agreement:** the offline hash must cover exactly the bytes the renderer hashes. Phase 1
-  verifies it on a handful of textures with a runtime dump of hashes before building the index.
-- **Identical 360 textures** (several names, same data) that map to different PC files: pick by
-  path, else leave them alone; the report lists them.
-- **Different packing between versions** (channels swapped or combined, atlases): the quality
-  gate catches these; such pairs stay 360.
-- **Mip streaming:** if the 360 game loads mips separately, the base-level key still works; check
-  in Phase 1.
-- **Licensing:** the pack is derived from the player's own PC copy, on their machine. Nothing
-  from either version goes in the repository.
-
-## Effort
-Phase 1 (archive readers, Xenos untile/decode, matching, quality gate, pack writer) is the bulk
-of the work. Phase 2 is a contained change in the texture cache. Phase 3 needs play-testing.
+Nothing from either version goes in the repository: the pack, the bundle and the reports live
+in the gitignored `private/`.

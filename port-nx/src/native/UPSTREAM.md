@@ -7,6 +7,8 @@ Local changes (see `git log -p -- port-nx/src/native`):
   targets, resolve images and the swap are scaled; guest-space math is untouched.
 - Texture pack hooks in `native_textures.cpp` (marked `F.E.A.R.`): a replacement key per new
   texture content, a streamed upload from the pack's DDS instead of untiling guest memory,
-  and no in-place refill of replaced images. The pack itself is `port-nx/src/texture_pack.*`.
+  no in-place refill of replaced images, and a per-entry host swizzle for replacements whose
+  channel layout differs from the 360 host format's. The pack itself is
+  `port-nx/src/texture_pack.*`.
 
 The `*_test.cpp` files are kept for reference but are not built here.
