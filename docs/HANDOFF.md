@@ -60,7 +60,12 @@ pwsh -NoProfile -File tools/build-nx.ps1            # SDK from source + codegen 
 pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # defaults: -Scale 3 -FrameRate 120
 pwsh -NoProfile -File tools/smoke.ps1 -Nx -Seconds 55 -Captures 3 -Extra '--nx_renderer native --nx_native_resolution_scale 3'
 pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot even when covered
+& tools/autoplay.ps1 -Nx -Seconds 200 -CaptureEvery 2 -Tag x -Extra '--nx_renderer native --nx_native_trace_frame_every 120'
 ```
+Renderer diagnostics: `--nx_native_trace_output` logs unique resolve/swap states;
+`--nx_native_trace_frame_every N` logs everything one frame in N does (draws with targets,
+masks, scissor, window offset and sampled textures; clear rectangles and colours; mirrored
+clears; resolves). That trace found the tile-clear bug in one run.
 - `third_party/rexglue-sdk-nx` (gitignored) = ReXGlue `c94f5eb` + fear-nx's
   `patches/native-vulkan/rexglue-sdk.patch` (tree `c7fb3c0f…`, verified) + our
   `patches/rexglue-sdk-nx/0001` (`REXGLUE_GPU_XENOS_STATIC`). Rebuild it with
@@ -91,7 +96,7 @@ pwsh -NoProfile -File tools/capture_window.ps1 -ProcessName fear   # screenshot 
 ## Next steps (the user's list)
 Play-test 1 added: frame-pacing jank (`-Present` test, then lock the virtual vblank to the
 display), chapter cards off-centre/doubled and cutscene-transition flicker (reproduced at 1×:
-the renderer's two-tile frames, see PROGRESS.md), PC texture replacement (done: a local pack,
+the renderer's two-tile frames; fixed 2026-10-22, see PROGRESS.md), PC texture replacement (done: a local pack,
 `-TexturePack`, see [TEXTURES.md](TEXTURES.md)). Details in [PROGRESS.md](PROGRESS.md).
 
 1. **Frame rate:** 120 fps via the vblank rate is the default and plays right. Before

@@ -10,5 +10,11 @@ Local changes (see `git log -p -- port-nx/src/native`):
   no in-place refill of replaced images, and a per-entry host swizzle for replacements whose
   channel layout differs from the 360 host format's. The pack itself is
   `port-nx/src/texture_pack.*`.
+- `MirrorAliasClear` in `native_renderer.cpp`: colour/depth/stencil clears drawn through an
+  aliased layout of the same EDRAM (Direct3D's 4x-MSAA fast clear of a 2x surface) are
+  applied to every host image of that EDRAM. Fixes doubled text/cards and half frames.
+  `GetFastClearRectangle` also returns the rectangle's depth.
+- `nx_native_trace_frame_every`: a full log (draws with their textures, clears, resolves,
+  swaps) of one frame in N.
 
 The `*_test.cpp` files are kept for reference but are not built here.

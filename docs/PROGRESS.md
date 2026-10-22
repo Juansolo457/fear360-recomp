@@ -5,7 +5,7 @@ _Last updated 2026-10-22._
 ## Where we are
 F.E.A.R. for Xbox 360 is **playable natively on Windows at 4K and 120 fps**. Menus, the intro and menu videos, the campaign and Instant Action all work; game logic, gunplay and physics are the console's own and behave correctly. Hands-on after ~10 minutes: "guns responded very well… game logic is in there, the physics are in there". The resolution, AA and anisotropic filtering made "a huge difference. Very clean image".
 
-Since play-test 1 the **textures** are fixed: an optional pack built from the player's own PC copy replaces 4,710 of the 360's halved textures with the PC originals. What's left before it feels finished: a little **frame-pacing jank**, the **doubled chapter cards / half-frame flicker** (now traced to how the renderer handles the game's two-tile frames, not to our 4K scaling), and **Settings / Quit** in the main menu.
+Since play-test 1 the **textures** are fixed (an optional pack built from the player's own PC copy replaces 4,710 of the 360's halved textures with the PC originals), and so are the **doubled chapter cards and half frames at cuts** (a renderer bug in how the game's tile clears were applied). What's left before it feels finished: a little **frame-pacing jank** and **Settings / Quit** in the main menu.
 
 ## What was done
 
@@ -40,8 +40,8 @@ Since play-test 1 the **textures** are fixed: an optional pack built from the pl
 | Logic, gunplay, physics | All good |
 | Image | Very clean with 4K + MSAA + 16× AF |
 | **Textures are very low-res** | The 360's memory budget. **Fixed with the PC texture pack** (section 6) |
-| **Chapter cards (loading screens) off-centre and shown twice**, a couple of times | Same at 1× (the intro credits double too): the renderer's two-tile handling, below |
-| **Subtle flicker at cutscene ↔ gameplay transitions** (when control is taken away, chapter cutscenes) | A half-drawn frame at cuts, caught at 1× and 2×: same cause, below |
+| **Chapter cards (loading screens) off-centre and shown twice**, a couple of times | **Fixed** (2026-10-22): a ghost copy one tile to the left; the cards are centred. See "Two-tile frames" |
+| **Subtle flicker at cutscene ↔ gameplay transitions** (when control is taken away, chapter cutscenes) | A frame at cuts showing the previous frame's right half: **fixed**, same cause |
 | **"A little bit of jank", input occasionally behind** | Diagnosed below; `-Present` test option added |
 | Menu needs Settings and Quit | Not started; routes in [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) |
 | **Movement feels "bouncier" than PC: more sway/bob?** (user unsure) | See "Movement feel" below: compare the two versions' tuning data, and check frame-rate dependence |
@@ -64,7 +64,13 @@ Autoplay runs at 1× and 2× with `--nx_native_trace_output`, screenshots every 
 - **Doubled credits/cards:** the intro credits show every name twice, the copy exactly 640 px (one tile) to the left and cut off at the screen edge, **at 1× and at 2×**. The first tile's copy-out also clears the render target, the second's doesn't, so the second tile's pixels (shifted by −640) are still there when the next frame starts. A frame that doesn't redraw every pixel (text on black) shows them. On the console the game clears EDRAM in a way the renderer doesn't reproduce (to find: a clear the renderer skips or scopes to one tile).
 - **Half frames at cuts:** at a cut from a cutscene to the credits, a frame shows the left tile drawn and the right half black (2×), or the right half grey (an earlier 2× run). Same family: one tile of the new frame next to stale contents.
 - **Depth tiles aren't joined:** the 2× MSAA depth copies of the two tiles take the renderer's "independent fallback" (it joins depth only without MSAA), so an effect that samples scene depth sees the left tile only. Same at 1×.
-- **None of it is our scaling** (identical traces at 1× and 2×). The fix belongs in the renderer's tile handling; next step is a per-draw trace of one credits frame to find the clear that should wipe the second tile.
+- **None of it is our scaling** (identical traces at 1× and 2×).
+
+**Cause, from a per-draw trace of a credits frame** (`--nx_native_trace_frame_every N`): Direct3D clears each tile mostly through a **4× MSAA alias of the surface**: the 800-pixel-wide 2× MSAA surface is cleared as a 400-pixel 4× one (same EDRAM, same samples per row, half the pixels to draw), plus a 48-pixel strip through the surface itself. fear-nx's renderer keeps one host image per surface layout, so the alias's colour and depth clear only reached the alias's image; the image the game draws in kept the previous frame's second tile. fear-nx already mirrored two cases of this trick (stencil-only clears, zero-depth-as-colour clears), not this one.
+
+**Fix** (`MirrorAliasClear` in `native_renderer.cpp`): after a clear-shaped draw (a rectangle, depth/stencil "always/replace", no blending, full colour mask), apply the same clear to every host image that aliases that EDRAM, with the rectangle mapped between sample layouts (fear-nx's `MapStencilClearRectangle`). The clear colour is computed by running the clear's vertex and pixel shaders in the SDK's shader interpreter (Direct3D passes it through an interpolator); depth from the rectangle's z. Checked at 1×, 2× and 3×: the intro text, credits and the "Interval 01 / Inception" card appear once and centred, no half frames, 3D scenes unchanged.
+
+**Still open (no visible effect found):** 2× MSAA *depth* copy-outs are skipped by the renderer ("Depth resolve not done: 768x720, 2x MSAA"), so the scene-depth texture those frames write is never filled. Nothing in the intro samples it (traced every draw's textures); if an effect later in the game looks wrong, this is the place. Vulkan's depth resolve (`VK_RESOLVE_MODE_SAMPLE_ZERO_BIT`) into a single-sample image, then the existing depth copy, would fill it.
 
 ## PC textures: feasibility
 Measured, not assumed ([TEXTURES.md](TEXTURES.md) has the full plan):
@@ -95,7 +101,7 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 
 ## Open items and next steps
 1. **Play-test 2 with the texture pack** (normal maps change the lighting most; watch for anything that looks wrong-coloured or too bumpy).
-2. **Two-tile frames** (doubled cards, half frames, depth): find the missing clear, join MSAA depth tiles. See above.
+2. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
 3. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
 4. **Main menu Settings and Quit:** see [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
 5. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.

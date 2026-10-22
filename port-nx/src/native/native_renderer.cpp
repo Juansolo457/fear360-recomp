@@ -29,6 +29,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <thread>
 
 #include <fmt/format.h>
@@ -94,6 +95,9 @@ REXCVAR_DEFINE_BOOL(nx_native_async_pipelines, true, "F.E.A.R. NX",
                     "draws that need them until they are ready, instead of stalling the frame");
 REXCVAR_DEFINE_BOOL(nx_native_trace_output, false, "F.E.A.R. NX",
                     "Log bounded unique native renderer swap, viewport, and Xenos resolve state for display diagnostics");
+// F.E.A.R.: a full log of sampled frames, to see what a frame does to EDRAM.
+REXCVAR_DEFINE_UINT32(nx_native_trace_frame_every, 0, "F.E.A.R. NX",
+                      "Log every draw and resolve of one frame in this many (0 = off)");
 
 namespace fear_nx::native {
 namespace shaders {
@@ -402,6 +406,12 @@ struct Renderer::Impl {
   std::set<std::array<uint32_t, 14>> trace_shared_fallback_states;
   std::set<std::array<uint32_t, 50>> trace_attachment_transitions;
   std::unordered_map<uint32_t, TraceResolveRect> trace_resolve_rects;
+  // nx_native_trace_frame_every: whether this frame is logged, and its draw number.
+  bool TraceFrame() const {
+    const uint32_t every = REXCVAR_GET(nx_native_trace_frame_every);
+    return every && frame % every == 0;
+  }
+  uint32_t trace_frame_draw = 0;
   // Whether render targets get the game's sample count (nx_native_msaa).
   // The targets are sized in guest pixels whatever the sample count, so one
   // sample changes only the images, the pipelines and the resolves.
@@ -1405,9 +1415,12 @@ struct Renderer::Impl {
   // --- Draws ---------------------------------------------------------------------
 
   void Draw(const uint32_t* immediate_indices, uint32_t immediate_index_words);
-  bool GetFastClearRectangle(StencilClearRect& rect, bool require_zero_depth);
+  bool GetFastClearRectangle(StencilClearRect& rect, bool require_zero_depth,
+                             float* depth = nullptr);
   void MirrorStencilClear();
   void MirrorZeroDepthColorClear();
+  bool InterpretClearColor(float color[4]);
+  void MirrorAliasClear();
   void UpdateSystemConstants(bool primitive_polygonal, const draw_util::ViewportInfo& viewport,
                              uint32_t used_texture_mask, uint32_t scaled_texture_mask,
                              const VulkanShader* vs, const VulkanShader* ps);
@@ -3316,6 +3329,51 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     }
   }
   DrawSetup& st = setup;
+  if (TraceFrame()) {
+    auto target_text = [](const RenderTarget* rt) {
+      return rt ? fmt::format("{}:{}:{}:{}", rt->key.base_tiles, rt->key.format, rt->key.pitch,
+                              rt->key.guest_msaa)
+                : std::string("-");
+    };
+    const auto& dc = st.depth_control;
+    const auto window_offset = r.Get<reg::PA_SC_WINDOW_OFFSET>();
+    // The textures the draw samples: address, format and size from their fetch constants.
+    std::string textures_text;
+    for (VulkanShader* shader : {st.vs, st.ps}) {
+      if (!shader || !shader->is_ucode_analyzed()) continue;
+      for (const auto& binding : shader->texture_bindings()) {
+        const auto tf = r.GetTextureFetch(binding.fetch_constant);
+        uint32_t tw = 0, th = 0;
+        if (tf.dimension == xenos::DataDimension::k2DOrStacked) {
+          tw = tf.size_2d.width + 1;
+          th = tf.size_2d.height + 1;
+        }
+        textures_text += fmt::format("{}{:08X}:{}:{}x{}", textures_text.empty() ? "" : " ",
+                                     uint32_t(tf.base_address) << 12, uint32_t(tf.format), tw,
+                                     th);
+      }
+    }
+    REXLOG_INFO(
+        "[native][frame] f={} d={} skip={} prim={} n={} src={} ps={} c=[{} {} {} {}] z={} "
+        "cmask={:04X} zctl={}{}{} f{} s{} f{} p{} sc=({},{} {}x{}) vp=({},{} {}x{}) "
+        "woff=({},{}) vwo={} wod={} pitch={} msaa={} mode={} tex=[{}]",
+        frame, trace_frame_draw++, int32_t(st.skip_reason), uint32_t(initiator.prim_type),
+        guest_count, uint32_t(initiator.source_select), st.ps != nullptr,
+        target_text(st.targets.color[0]), target_text(st.targets.color[1]),
+        target_text(st.targets.color[2]), target_text(st.targets.color[3]),
+        target_text(st.targets.depth), r[rex::graphics::XE_GPU_REG_RB_COLOR_MASK] & 0xFFFF,
+        uint32_t(dc.z_enable), uint32_t(dc.z_write_enable), uint32_t(dc.stencil_enable),
+        uint32_t(dc.zfunc), uint32_t(dc.stencilfunc), uint32_t(dc.stencilfail),
+        uint32_t(dc.stencilzpass), st.scissor.offset[0], st.scissor.offset[1],
+        st.scissor.extent[0], st.scissor.extent[1], int32_t(st.vp.x), int32_t(st.vp.y),
+        int32_t(st.vp.width), int32_t(st.vp.height), int32_t(window_offset.window_x_offset),
+        int32_t(window_offset.window_y_offset),
+        uint32_t(r.Get<reg::PA_SU_SC_MODE_CNTL>().vtx_window_offset_enable),
+        uint32_t(r.Get<reg::PA_SC_WINDOW_SCISSOR_TL>().window_offset_disable),
+        uint32_t(r.Get<reg::RB_SURFACE_INFO>().surface_pitch),
+        uint32_t(r.Get<reg::RB_SURFACE_INFO>().msaa_samples),
+        uint32_t(r.Get<reg::RB_MODECONTROL>().edram_mode), textures_text);
+  }
   if (st.skip_reason != UINT32_MAX) {
     return skip(st.skip_reason);
   }
@@ -3950,8 +4008,287 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       rt->last_draw_guest_msaa = uint32_t(r.Get<reg::RB_SURFACE_INFO>().msaa_samples);
     }
   }
+  if (TraceFrame() && initiator.prim_type == xenos::PrimitiveType::kRectangleList &&
+      guest_count == 3 && st.vs && rex::graphics::ShaderInterpreter::CanInterpretShader(*st.vs)) {
+    StencilClearRect rect{};
+    float color[4] = {}, depth = 0.0f;
+    const bool has_rect = GetFastClearRectangle(rect, false, &depth);
+    const bool has_color = InterpretClearColor(color);
+    REXLOG_INFO("[native][frame] f={} clear rect={} ({},{})-({},{}) color={} ({},{},{},{}) "
+                "depth={} blend={:08X} colorcontrol={:08X} stencilmask={:08X}",
+                frame, has_rect, rect.x0, rect.y0, rect.x1, rect.y1, has_color, color[0],
+                color[1], color[2], color[3], depth,
+                r[reg::RB_BLENDCONTROL::rt_register_indices[0]],
+                r[rex::graphics::XE_GPU_REG_RB_COLORCONTROL],
+                r[rex::graphics::XE_GPU_REG_RB_STENCILREFMASK]);
+  }
   MirrorStencilClear();
   MirrorZeroDepthColorClear();
+  MirrorAliasClear();
+}
+
+// The color a clear-like rectangle writes to color 0. Direct3D's clear passes it from the
+// vertex shader through an interpolator: the vertex shader runs for the three vertices (they
+// must agree), and the pixel shader runs on those interpolators. False if either shader can't
+// run on its own (texture fetches), the vertices disagree, or the result depends on anything
+// else the pixel shader reads.
+bool Renderer::Impl::InterpretClearColor(float color[4]) {
+  const DrawSetup& st = setup;
+  const RegisterFile& r = *regs;
+  if (!st.vs || !st.ps || !rex::graphics::ShaderInterpreter::CanInterpretShader(*st.vs) ||
+      !rex::graphics::ShaderInterpreter::CanInterpretShader(*st.ps)) {
+    return false;
+  }
+  class InterpolatorSink final : public rex::graphics::ShaderInterpreter::ExportSink {
+   public:
+    void Export(rex::graphics::ucode::ExportRegister output, const float* value,
+                uint32_t mask) override {
+      const uint32_t index = uint32_t(output);
+      if (index >= 16) return;
+      for (uint32_t i = 0; i < 4; ++i) {
+        if (mask & (1u << i)) values[index][i] = value[i];
+      }
+      written |= 1u << index;
+    }
+    float values[16][4] = {};
+    uint32_t written = 0;
+  };
+  InterpolatorSink vertices[3];
+  rex::graphics::ShaderInterpreter vertex_interpreter(r, *memory);
+  vertex_interpreter.SetShader(*st.vs);
+  const uint32_t index_offset = r.Get<reg::VGT_INDX_OFFSET>().indx_offset;
+  const uint32_t index_min = r.Get<reg::VGT_MIN_VTX_INDX>().min_indx;
+  const uint32_t index_max = r.Get<reg::VGT_MAX_VTX_INDX>().max_indx;
+  for (uint32_t i = 0; i < 3; ++i) {
+    vertex_interpreter.SetExportSink(&vertices[i]);
+    std::fill_n(vertex_interpreter.temp_registers(), xenos::kMaxShaderTempRegisters * 4, 0.0f);
+    vertex_interpreter.temp_registers()[0] =
+        float(std::min(index_max, std::max(index_min, (i + index_offset) & 0xFFFFFF)));
+    vertex_interpreter.Execute();
+    if (i && (vertices[i].written != vertices[0].written ||
+              std::memcmp(vertices[i].values, vertices[0].values, sizeof(vertices[0].values)))) {
+      return false;
+    }
+  }
+  class ColorSink final : public rex::graphics::ShaderInterpreter::ExportSink {
+   public:
+    void Export(rex::graphics::ucode::ExportRegister output, const float* value,
+                uint32_t mask) override {
+      if (output != rex::graphics::ucode::ExportRegister::kPSColor0) return;
+      for (uint32_t i = 0; i < 4; ++i) {
+        if (mask & (1u << i)) color[i] = value[i];
+      }
+      written |= mask;
+    }
+    float color[4] = {};
+    uint32_t written = 0;
+  };
+  // The pixel shader finds interpolator i in register i. Run it twice with different values
+  // in every other register: a constant result reads nothing else.
+  float results[2][4];
+  for (uint32_t run = 0; run < 2; ++run) {
+    ColorSink sink;
+    rex::graphics::ShaderInterpreter pixel_interpreter(r, *memory);
+    pixel_interpreter.SetShader(*st.ps);
+    pixel_interpreter.SetExportSink(&sink);
+    float* temps = pixel_interpreter.temp_registers();
+    std::fill_n(temps, xenos::kMaxShaderTempRegisters * 4, run ? 0.75f : 0.0f);
+    for (uint32_t i = 0; i < 16; ++i) {
+      if (vertices[0].written & (1u << i)) std::copy_n(vertices[0].values[i], 4, temps + i * 4);
+    }
+    pixel_interpreter.Execute();
+    if (sink.written != 0b1111) return false;
+    std::copy_n(sink.color, 4, results[run]);
+  }
+  if (std::memcmp(results[0], results[1], sizeof(results[0]))) return false;
+  std::copy_n(results[0], 4, color);
+  return true;
+}
+
+// F.E.A.R.: Direct3D clears a tile mostly through a 4x-MSAA alias of the surface (an
+// 800-pixel 2x surface cleared as a 400-pixel 4x one: the same EDRAM, half the draws) and the
+// remaining columns through the surface itself. With one host image per layout, the alias's
+// color and depth clear never reached the image the game then draws in, so each frame began
+// with the previous frame's second tile in it: the intro text and chapter cards drawn twice
+// (the copy 640 pixels left), and at cuts a frame showing the previous frame's right half on
+// its left. Depth and stencil clears go the same way, with or without a pixel shader. Apply
+// such clears to every image that aliases the same EDRAM, as MirrorStencilClear does for
+// stencil-only clears. Only clears with one constant color and a flat depth, written whole
+// (no blending, full masks), are mirrored.
+void Renderer::Impl::MirrorAliasClear() {
+  const DrawSetup& st = setup;
+  const RegisterFile& r = *regs;
+  const auto initiator = r.Get<reg::VGT_DRAW_INITIATOR>();
+  if (st.primitive_polygonal ||
+      initiator.prim_type != xenos::PrimitiveType::kRectangleList ||
+      initiator.source_select != xenos::SourceSelect::kAutoIndex ||
+      initiator.num_indices != 3 || !r.Get<reg::PA_CL_CLIP_CNTL>().clip_disable ||
+      !st.vs || (st.vs->writes_point_size_edge_flag_kill_vertex() & 0b100) ||
+      !rex::graphics::ShaderInterpreter::CanInterpretShader(*st.vs) ||
+      (r[rex::graphics::XE_GPU_REG_PA_SC_AA_MASK] & 0xFFFFu) != 0xFFFFu) {
+    return;
+  }
+  const uint32_t guest_msaa = uint32_t(r.Get<reg::RB_SURFACE_INFO>().msaa_samples);
+  auto layout_of = [](const RenderTarget& target, uint32_t target_guest_msaa) {
+    return StencilClearLayout{target.key.base_tiles, target.key.pitch, target_guest_msaa,
+                              target.key.format, target.width, target.height};
+  };
+  auto guest_msaa_of = [](const RenderTarget& target) {
+    return target.key.is_depth ? target.key.guest_msaa : target.last_draw_guest_msaa;
+  };
+  auto has_alias = [&](const RenderTarget* source) {
+    if (!source) return false;
+    const auto source_layout = layout_of(*source, guest_msaa);
+    for (const auto& entry : render_targets) {
+      const RenderTarget& target = *entry.second;
+      StencilClearRect mapped;
+      if (&target != source && target.key.is_depth == source->key.is_depth &&
+          MapStencilClearRectangle(source_layout, layout_of(target, guest_msaa_of(target)),
+                                   {0, 0, int32_t(source->width), int32_t(source->height)},
+                                   mapped)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Color: render target 0 alone, written whole with a constant.
+  RenderTarget* color = st.ps ? st.targets.color[0] : nullptr;
+  for (uint32_t i = 1; i < 4; ++i) {
+    if (st.targets.color[i]) color = nullptr;
+  }
+  VkClearColorValue color_value = {};
+  if (color && (!has_alias(color) ||
+                (r[rex::graphics::XE_GPU_REG_RB_COLOR_MASK] & 0xF) != 0xF ||
+                (r[reg::RB_BLENDCONTROL::rt_register_indices[0]] & 0x1FFF1FFF) != 0x00010001 ||
+                r.Get<reg::RB_COLORCONTROL>().alpha_test_enable ||
+                r.Get<reg::RB_COLORCONTROL>().alpha_to_mask_enable)) {
+    color = nullptr;
+  }
+  float value[4];
+  if (color && !InterpretClearColor(value)) color = nullptr;
+  if (color) {
+    using F = xenos::ColorRenderTargetFormat;
+    const F format = F(color->key.format);
+    bool ok = true;
+    for (uint32_t i = 0; i < 4; ++i) {
+      float v = value[i];
+      switch (format) {
+        case F::k_8_8_8_8:
+        case F::k_2_10_10_10:
+        case F::k_2_10_10_10_AS_10_10_10_10:
+          v = std::clamp(v, 0.0f, 1.0f);
+          break;
+        case F::k_8_8_8_8_GAMMA:
+          // Gamma leaves 0 and 1 as they are; other values would need the conversion.
+          v = std::clamp(v, 0.0f, 1.0f);
+          ok &= v == 0.0f || v == 1.0f;
+          break;
+        case F::k_2_10_10_10_FLOAT:
+        case F::k_2_10_10_10_FLOAT_AS_16_16_16_16:
+        case F::k_16_16_FLOAT:
+        case F::k_16_16_16_16_FLOAT:
+        case F::k_32_FLOAT:
+        case F::k_32_32_FLOAT:
+          ok &= std::isfinite(v);
+          break;
+        default:
+          ok = false;
+          break;
+      }
+      color_value.float32[i] = v;
+    }
+    if (!ok) color = nullptr;
+  }
+
+  // Depth (unorm 24-bit only: the host image holds it as it is) and stencil.
+  RenderTarget* depth_target = st.targets.depth;
+  const auto& dc = st.depth_control;
+  const auto ref = r.Get<reg::RB_STENCILREFMASK>();
+  const bool depth_passes = !dc.z_enable || dc.zfunc == xenos::CompareFunction::kAlways;
+  const bool write_depth = depth_target && dc.z_enable && dc.z_write_enable &&
+                           dc.zfunc == xenos::CompareFunction::kAlways &&
+                           !(st.ps && st.ps->writes_depth()) &&
+                           depth_target->key.format ==
+                               uint32_t(xenos::DepthRenderTargetFormat::kD24S8) &&
+                           device->properties().depthClamp;
+  const bool write_stencil = depth_target && HasStencil(depth_target->format) && depth_passes &&
+                             dc.stencil_enable &&
+                             dc.stencilfunc == xenos::CompareFunction::kAlways &&
+                             dc.stencilzpass == xenos::StencilOp::kReplace &&
+                             ref.stencilwritemask == 0xFF;
+  // A depth target that is only tested, or written some other way, is left alone; so is a
+  // stencil-only clear without a pixel shader (MirrorStencilClear's).
+  if (depth_target && (!(write_depth || write_stencil) || !depth_passes ||
+                       (!st.ps && !write_depth) ||
+                       (dc.z_enable && dc.z_write_enable && !write_depth) ||
+                       (dc.stencil_enable && !write_stencil) || !has_alias(depth_target))) {
+    depth_target = nullptr;
+  }
+  if (!color && !depth_target) return;
+
+  StencilClearRect rect{};
+  float depth_value = 0.0f;
+  if (!GetFastClearRectangle(rect, false, &depth_value)) return;
+  if (depth_target && write_depth && !std::isfinite(depth_value)) depth_target = nullptr;
+  if (!color && !depth_target) return;
+
+  bool started = false;
+  auto mirror = [&](RenderTarget* source, bool is_depth) {
+    const auto source_layout = layout_of(*source, guest_msaa);
+    for (const auto& entry : render_targets) {
+      RenderTarget& target = *entry.second;
+      StencilClearRect mapped{};
+      if (&target == source || target.key.is_depth != is_depth ||
+          !MapStencilClearRectangle(source_layout, layout_of(target, guest_msaa_of(target)),
+                                    rect, mapped)) {
+        continue;
+      }
+      if (!started) {
+        DrainRecorder();
+        EndPass();
+        started = true;
+      }
+      PassTargets clear_targets;
+      if (is_depth) {
+        clear_targets.depth = &target;
+      } else {
+        clear_targets.color[0] = &target;
+      }
+      if (!BeginPass(clear_targets)) continue;
+      VkClearAttachment attachment{};
+      if (is_depth) {
+        attachment.aspectMask = (write_depth ? VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT) : 0u) |
+                                (write_stencil ? VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT) : 0u);
+        attachment.clearValue.depthStencil.depth = depth_value;
+        attachment.clearValue.depthStencil.stencil = ref.stencilref;
+      } else {
+        attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        attachment.colorAttachment = 0;
+        attachment.clearValue.color = color_value;
+      }
+      VkClearRect clear{};
+      clear.rect.offset = {mapped.x0 * int32_t(scale), mapped.y0 * int32_t(scale)};
+      clear.rect.extent = {uint32_t(mapped.x1 - mapped.x0) * scale,
+                           uint32_t(mapped.y1 - mapped.y0) * scale};
+      clear.layerCount = 1;
+      dfn().vkCmdClearAttachments(cmd(), 1, &attachment, 1, &clear);
+      EndPass();
+      target.last_used_frame = frame;
+      if (TraceFrame()) {
+        REXLOG_INFO("[native][frame] f={} mirrored {} clear base={} pitch={} samples={} "
+                    "rect=({},{})-({},{}) -> pitch={} samples={} rect=({},{})-({},{}) "
+                    "depth={} stencil={}",
+                    frame, is_depth ? "depth" : "color", source->key.base_tiles,
+                    source->key.pitch, 1u << guest_msaa, rect.x0, rect.y0, rect.x1, rect.y1,
+                    target.key.pitch, 1u << guest_msaa_of(target), mapped.x0, mapped.y0,
+                    mapped.x1, mapped.y1, write_depth ? depth_value : -1.0f,
+                    write_stencil ? int32_t(ref.stencilref) : -1);
+      }
+    }
+  };
+  if (color) mirror(color, false);
+  if (depth_target) mirror(depth_target, true);
 }
 
 
@@ -3961,7 +4298,8 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
 // image. Preserve that operation while keeping native host images and MSAA off.
 // This handles only unconditional, whole-pixel stencil replacement; ordinary
 // stencil tests, shadow volumes, depth and color writes are left untouched.
-bool Renderer::Impl::GetFastClearRectangle(StencilClearRect& rect, bool require_zero_depth) {
+bool Renderer::Impl::GetFastClearRectangle(StencilClearRect& rect, bool require_zero_depth,
+                                           float* depth) {
   const DrawSetup& st = setup;
   const RegisterFile& r = *regs;
   // Derive the actual three corners, never assume the whole scissor is cleared.
@@ -4010,8 +4348,12 @@ bool Renderer::Impl::GetFastClearRectangle(StencilClearRect& rect, bool require_
   const uint32_t index_offset = r.Get<reg::VGT_INDX_OFFSET>().indx_offset;
   const uint32_t index_min = r.Get<reg::VGT_MIN_VTX_INDX>().min_indx;
   const uint32_t index_max = r.Get<reg::VGT_MAX_VTX_INDX>().max_indx;
-  float xs[3], ys[3];
+  float xs[3], ys[3], zs[3];
   float first_w = 0.0f;
+  const float scale_z = vte.vport_z_scale_ena
+                            ? r.Get<float>(rex::graphics::XE_GPU_REG_PA_CL_VPORT_ZSCALE) : 1.0f;
+  const float offset_z = vte.vport_z_offset_ena
+                             ? r.Get<float>(rex::graphics::XE_GPU_REG_PA_CL_VPORT_ZOFFSET) : 0.0f;
   for (uint32_t i = 0; i < 3; ++i) {
     sink = PositionSink();
     std::fill_n(interpreter.temp_registers(), xenos::kMaxShaderTempRegisters * 4, 0.0f);
@@ -4026,14 +4368,16 @@ bool Renderer::Impl::GetFastClearRectangle(StencilClearRect& rect, bool require_
     if (require_zero_depth && sink.position[2] > 0.0f) return false;
     if (!i) first_w = sink.position[3];
     else if (sink.position[3] != first_w) return false;
-    float x = sink.position[0], y = sink.position[1];
+    float x = sink.position[0], y = sink.position[1], z = sink.position[2];
+    const float w = vte.vtx_w0_fmt ? sink.position[3] : 1.0f / sink.position[3];
     if (!vte.vtx_xy_fmt) {
-      const float w = vte.vtx_w0_fmt ? sink.position[3] : 1.0f / sink.position[3];
       x /= w;
       y /= w;
     }
+    if (!vte.vtx_z_fmt) z /= w;
     xs[i] = x * scale_x + offset_x;
     ys[i] = y * scale_y + offset_y;
+    zs[i] = z * scale_z + offset_z;
     // Partial pixel/sample coverage requires a shader transfer, not a clear.
     if (!std::isfinite(xs[i]) || !std::isfinite(ys[i]) ||
         std::abs(xs[i]) > 16384.0f || std::abs(ys[i]) > 16384.0f ||
@@ -4055,6 +4399,12 @@ bool Renderer::Impl::GetFastClearRectangle(StencilClearRect& rect, bool require_
     corners |= 1u << (uint32_t(xs[i] == x1) | (uint32_t(ys[i] == y1) << 1));
   }
   if (rex::bit_count(corners) != 3) return false;
+  if (depth) {
+    // A flat rectangle's depth, clamped as the host pipeline clamps it; NaN if it isn't flat.
+    *depth = zs[0] == zs[1] && zs[1] == zs[2] && std::isfinite(zs[0])
+                 ? std::clamp(zs[0], 0.0f, 1.0f)
+                 : std::numeric_limits<float>::quiet_NaN();
+  }
   const int32_t si = int32_t(scale);
   rect = {
       std::max(int32_t(x0), bound_scissor.offset.x / si),
@@ -4296,6 +4646,24 @@ void Renderer::Impl::Resolve() {
   uint32_t msaa = HostMsaa(surface_info.msaa_samples);
   bool is_depth = copy_control.copy_src_select >= 4;
   ++stats().resolves;
+  if (TraceFrame()) {
+    const auto color_info = r.Get<reg::RB_COLOR_INFO>(
+        reg::RB_COLOR_INFO::rt_register_indices[copy_control.copy_src_select & 3]);
+    const auto window_offset = r.Get<reg::PA_SC_WINDOW_OFFSET>();
+    REXLOG_INFO(
+        "[native][frame] f={} d={} resolve depth={} src={}:{} depth_base={}:{} pitch={} "
+        "msaa={} rect=({},{})-({},{}) copy={} dest={:08X} clear_color={} clear_depth={} "
+        "color_clear={:08X}{:08X} depth_clear={:08X} woff=({},{})",
+        frame, trace_frame_draw++, is_depth, uint32_t(color_info.color_base),
+        uint32_t(color_info.color_format), uint32_t(r.Get<reg::RB_DEPTH_INFO>().depth_base),
+        uint32_t(r.Get<reg::RB_DEPTH_INFO>().depth_format), uint32_t(surface_info.surface_pitch),
+        uint32_t(surface_info.msaa_samples), x0, y0, x1, y1,
+        uint32_t(copy_control.copy_command), r[rex::graphics::XE_GPU_REG_RB_COPY_DEST_BASE],
+        uint32_t(copy_control.color_clear_enable), uint32_t(copy_control.depth_clear_enable),
+        r[rex::graphics::XE_GPU_REG_RB_COLOR_CLEAR_LO], r[rex::graphics::XE_GPU_REG_RB_COLOR_CLEAR],
+        r[rex::graphics::XE_GPU_REG_RB_DEPTH_CLEAR], int32_t(window_offset.window_x_offset),
+        int32_t(window_offset.window_y_offset));
+  }
 
   BeginRecording();
   EndPass();
@@ -5102,6 +5470,10 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   frame_stream_wait_ns = 0;
   frame_upload_wait_ns = frame_fence_wait_ns = frame_drain_wait_ns = frame_texture_ns = 0;
   frame_draw_count = 0;
+  if (TraceFrame()) {
+    REXLOG_INFO("[native][frame] f={} swap frontbuffer={:08X}", frame, frontbuffer);
+  }
+  trace_frame_draw = 0;
   ++frame;
   profile_frame = profile_pool && frame % 16 == 0;
   PollCompleted();

@@ -26,7 +26,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ 60 and 120 fps with correct game speed | virtual vblank rate (`-FrameRate`), hands-on verified |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
-| ⏳ Chapter cards and credits drawn twice, half-frame flicker at some cuts | reproduced at 1× too, so not our scaling: the renderer's handling of the game's two-tile frames ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
+| ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ⏳ Settings and Quit entries in the main menu | not started |
