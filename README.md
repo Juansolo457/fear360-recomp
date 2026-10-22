@@ -2,7 +2,7 @@
 
 An unofficial static recompilation of the Xbox 360 releases of **F.E.A.R.** and **F.E.A.R. Files** for Windows and Linux, with native performance, an unlocked frame rate, and controller-first play.
 
-**Status:** first Windows build with ReXGlue (2026-10-21): fullscreen 4K, widescreen and 16x anisotropic filtering. See [docs/PLAN.md](docs/PLAN.md).
+**Status (2026-10-21):** the first Windows build runs: gameplay renders correctly at 4K with widescreen and 16x anisotropic filtering, but menus and videos are still corrupted. See [docs/HANDOFF.md](docs/HANDOFF.md). See [docs/PLAN.md](docs/PLAN.md).
 
 The goal is a full PC version in the spirit of [OpenCE](https://github.com/OpenCommunityEdition/OpenCE): point it at your own game files, launch, and get real options. Windows first, then Linux.
 
