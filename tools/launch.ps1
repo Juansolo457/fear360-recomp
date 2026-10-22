@@ -2,7 +2,7 @@
 # guest told it is on a 1280x720 display (as on a real 360; also avoids the 4:3 squeeze ReXGlue
 # gives on high-DPI desktops), rendering at a multiple of 720p with 16x anisotropic filtering.
 #
-#   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, 90 fps
+#   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, auto fps
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 #   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
@@ -14,12 +14,14 @@ param(
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
     # The game presents every 2 virtual vblanks: 30 fps at the console's 60 Hz, so the frame rate
     # is set by the vblank rate (FrameRate x 2, up to 480 Hz with SDK patch 0003), a cap of the
-    # game's own whatever the display or driver does. 120 was measured steady (2026-10-22) but
-    # bullet tracers glitched in heavy firefights ("twitching in midair"), so 90 is the default
-    # while that is checked; 30 is the original console pacing. On a fixed-refresh display pick
-    # a divisor of its rate for even frame times: 80, 120 or 240 on 240 Hz (90 alternates 2 and
-    # 3 refreshes per frame), 72 or 144 on 144 Hz, 60 on 60 Hz.
-    [ValidateSet(30, 60, 72, 80, 90, 120, 144, 240)][int]$FrameRate = 90,
+    # game's own whatever the display or driver does. Above ~90 fps the 360's effect code breaks
+    # (bullet tracers twitch and freeze mid-air), and a rate that doesn't divide the display's
+    # refresh shows frames for uneven numbers of refreshes (90 on 240 Hz alternates 3 and 2).
+    # auto (default) picks the highest rate up to 90 that divides the display's refresh rate:
+    # 80 on 240 Hz ("80 feels great… better than 90"), 72 on 144 Hz, 82.5 on 165 Hz, 60 on 60
+    # or 120 Hz. A number sets it directly (30 = the console's pacing).
+    [ValidateScript({ $_ -eq 'auto' -or ([double]::TryParse($_, [ref]$null) -and [double]$_ -ge 20 -and [double]$_ -le 240) })]
+    [string]$FrameRate = 'auto',
     # Swapchain present mode. The SDK picks immediate (no vsync, tearing) when the driver offers
     # it; the game is paced by a software vblank that is not locked to the display, so frames
     # land unevenly. fifo = true vsync (even, adds queue latency), mailbox = no tearing, low
@@ -58,9 +60,18 @@ if ($TexturePack) {
     if (!(Test-Path (Join-Path $pack 'index.tsv'))) { throw "No index.tsv in $pack." }
     $arguments += @('--fear_texture_pack', ($pack.Path -replace '\\', '/'))
 }
-if ($FrameRate -ne 30) {
-    $arguments += @('--video_mode_refresh_rate', "$($FrameRate * 2)")
+if ($FrameRate -eq 'auto') {
+    $refresh = (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+        Where-Object { $_.CurrentRefreshRate } | Measure-Object CurrentRefreshRate -Maximum).Maximum
+    if (!$refresh) { $refresh = 60 }
+    $divisor = [math]::Ceiling($refresh / 90)
+    $fps = $refresh / $divisor
+    "display ${refresh} Hz: $fps fps (each frame shown for $divisor refreshes)"
+} else {
+    $fps = [double]$FrameRate
 }
+$arguments += @('--video_mode_refresh_rate',
+    ($fps * 2).ToString([System.Globalization.CultureInfo]::InvariantCulture))
 # The presenter takes the first allowed mode of immediate > mailbox > fifo_relaxed > fifo.
 switch ($Present) {
     'mailbox' { $arguments += @('--no-vulkan_allow_present_mode_immediate') }
