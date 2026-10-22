@@ -8,6 +8,11 @@
 #   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 #   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
 #   ... -Files -Extra '--nx_renderer native'      # F.E.A.R. Files (port-files, port-nx's host code)
+#
+# port-nx and port-files keep their settings in <user data>/settings.toml, written by PC Settings
+# in the game's main menu (port-nx/src/fear_settings.h). For them this script passes a setting
+# (-Scale, -Windowed, -FrameRate, -TexturePack, -LookRamp, -NoSoftLock) only when it is given:
+# a flag wins over the saved value for that run.
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -51,14 +56,18 @@ if ($running) { throw "$name.exe is already running (pid $($running.Id -join ', 
 $executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\$name.exe"
 New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
 $log = Join-Path $port ('logs\run-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+$given = $PSBoundParameters
 $arguments = @(
-    $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' }),
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
     '--cache_root', "$port\cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
+if (!$Nx -or $given.ContainsKey('Windowed')) {
+    $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
+}
 if ($Nx) {
     # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
-    $arguments += @('--nx_native_resolution_scale', "$Scale", '--fear_look_ramp', $LookRamp)
+    if ($given.ContainsKey('Scale')) { $arguments += @('--nx_native_resolution_scale', "$Scale") }
+    if ($given.ContainsKey('LookRamp')) { $arguments += @('--fear_look_ramp', $LookRamp) }
     if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
 }
 if ($TexturePack) {

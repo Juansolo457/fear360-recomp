@@ -7,15 +7,22 @@
 
 #pragma once
 
+#include <functional>
+
+#include <imgui.h>
 #include <rex/cvar.h>
 #include <rex/input/device_assignment.h>
 #include <rex/input/input_system.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 #include <rex/system/gpu_plugin.h>
+#include <rex/ui/imgui_drawer.h>
+#include <rex/ui/window.h>
 
 #include "crash_report.h"
 #include "display_vblank.h"
+#include "fear_menu.h"
+#include "fear_settings.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
 
@@ -50,6 +57,13 @@ class FearApp : public rex::ReXApp {
   }
 
  protected:
+  // PC Settings (fear_settings.h): saved in the user data folder, loaded below the command line.
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    fear::settings::Load(paths.user_data_root);
+  }
+
+  void OnConfigureFonts(ImFontAtlas* atlas) override { fear::settings::AddFonts(atlas); }
+
   void OnPreSetup(rex::RuntimeConfig& config) override {
     fear::crash_report::InstallCrashReporter();
 
@@ -93,5 +107,34 @@ class FearApp : public rex::ReXApp {
 
   void OnPostSetup() override {
     if (runtime()) fear::look_tuning::Apply(*runtime());
+
+    // The game gets no input while a panel (or an SDK overlay under the mouse) has it.
+    if (auto* input = runtime() ? static_cast<rex::input::InputSystem*>(runtime()->input_system())
+                                : nullptr) {
+      input->SetActiveCallback([this] {
+        if (!fear::settings::GameGetsInput()) return false;
+        return !(imgui_drawer() && imgui_drawer()->GetIO().WantCaptureMouse);
+      });
+    }
+
+    // PC Settings and Quit to Desktop in the main menu (fear_menu.h).
+    fear::menu::SetActions([this] { OpenPanel(&fear::settings::OpenSettings); },
+                           [this] { OpenPanel(&fear::settings::OpenQuit); });
+  }
+
+ private:
+  // From the game thread that handles the menu command.
+  void OpenPanel(void (*open)(const fear::settings::Host&)) {
+    app_context().CallInUIThread([this, open] {
+      fear::settings::Host host;
+      host.drawer = imgui_drawer();
+      host.later = [this](std::function<void()> function) {
+        app_context().CallInUIThreadDeferred(std::move(function));
+      };
+      host.quit = [this] {
+        if (window()) window()->RequestClose();
+      };
+      open(host);
+    });
   }
 };

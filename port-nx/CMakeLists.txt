@@ -35,6 +35,8 @@ set(FEAR_SOURCES
     src/texture_pack.cpp
     src/crash_report.cpp
     src/display_vblank.cpp
+    src/fear_menu.cpp
+    src/fear_settings.cpp
     src/fx_debug.cpp
     src/look_tuning.cpp
     ${FEAR_NATIVE_SOURCES}

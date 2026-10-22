@@ -43,7 +43,7 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 | **Chapter cards (loading screens) off-centre and shown twice**, a couple of times | **Fixed** (2026-10-22): a ghost copy one tile to the left; the cards are centred. See "Two-tile frames" |
 | **Subtle flicker at cutscene ↔ gameplay transitions** (when control is taken away, chapter cutscenes) | A frame at cuts showing the previous frame's right half: **fixed**, same cause |
 | **"A little bit of jank", input occasionally behind** | Diagnosed below; `-Present` test option added |
-| Menu needs Settings and Quit | Not started; routes in [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) |
+| Menu needs Settings and Quit | **Done:** see "Main menu: PC Settings and Quit to Desktop" |
 | **Movement feels "bouncier" than PC: more sway/bob?** (user unsure) | See "Movement feel" below: compare the two versions' tuning data, and check frame-rate dependence |
 
 ## Play-test 2 (2026-10-22)
@@ -197,6 +197,22 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 - **Naming the code:** the XEX has no symbols. The F.E.A.R. Public Tools SDK ships the PC game-side source (client/server game code, menus, HUD, AI) and the 360 game code is a port of the same codebase, so its strings and structure can name most game-side functions. That source is under its EULA: use it as a map, don't copy it into this public repository. The LithTech engine itself is closed on both versions and has to be read from the PPC code.
 - **Order by payoff:** the frame loop and presentation first (render between simulation ticks for smooth high frame rates, input latency), then input/camera, then the systems where rewrites buy features (menus: Options/Quit; saves), the rest only as needed.
 
+## Main menu: PC Settings and Quit to Desktop
+(2026-10-22.) The user's test: "great work looks awesome". The log of that run: the first-run settings file at 3x (4K), the texture pack loaded, both entries added when the menu was built.
+
+**In the game's own menu.** The 360's main screen builds its list in code, like the PC SDK's `CScreenMain::Build`: `sub_823FF3C0` (method 4 of the table at `0x8201FDE4`) adds Campaign, Instant Action, Xbox Live and Options as text controls, each through `CBaseScreen::AddTextItem` by string ID (`sub_824A86E0`, which looks the text up and calls the wide-string version, `sub_824A7288`), `AddControl` (`sub_824AA8B0`) and `Show(false)` (method at +160): they stay hidden until Press Start is accepted, command 19 in `OnCommand` (`sub_823FF7E8`, commands 11 to 19 through a jump table). Three `[[entrypoint.midasm_hook]]`s (`port-nx/src/fear_menu.*`):
+- at the end of `Build` (`0x823FF7A8`, where its two paths meet; skipped when the screen is built without the list, byte +432): two more items, *PC Settings* and *Quit to Desktop*, by calling the game's own `AddTextItem` (wide string), `AddControl` and `Show(false)` with Options' layout arguments, so they look and move like the game's;
+- where command 19 shows the game's items (`0x823FF910`): shows ours too;
+- at `OnCommand`'s entry: our commands (9001, 9002) go to the host and return "handled".
+
+**The panels** (`port-nx/src/fear_settings.*`) are ImGui dialogs over the game, in a large font (Bahnschrift from Windows), driven with the pad (D-pad or left stick, A, B), the keyboard (arrows, Enter, Escape) or the mouse. While one is open the game gets no input, and after it closes not until every button is let go, so the press that closed it doesn't reach the menu behind.
+- *PC Settings:* resolution (720p to 5K; 4K = 3x), fullscreen or window, frame-rate limit (30, 60, 90, each with the rate it gives on this display: "Up to 90: 80 fps at 240 Hz"), texture filtering (off to 16x), PC textures on/off (when a pack is built), the right stick at its edge (no boost, as on the 360, two faster ramps), aim assist (the 360's soft lock), animation timing (exact or as shipped). *Save*, *Save and restart*, *Cancel*. Window mode and animation timing apply at once, the rest at the next start (marked "(on restart)").
+- *Quit to Desktop:* "Quit" or "Cancel"; Quit closes the game as the window's close button does.
+
+**Where settings live.** `<user data>/settings.toml`, loaded at startup before the cvars are finalised and below the command line (a flag still wins for its run). The first run writes the resolution that covers the display (3x on 4K). `tools/launch.ps1 -Nx/-Files` now passes a setting only when it is given, so what was saved applies. *Save and restart* starts the game again with the same arguments minus those flags, its log renamed `-restart`, and waits for the old run to exit (`fear_restart_wait_pid`).
+
+To check in the test: the two entries appear after Press Start, under Options, in the game's style; the help line under them is empty; the panels' font size at 4K; the pad and keyboard; that closing a panel doesn't press anything in the menu behind; *Save and restart*; fullscreen/window live.
+
 ## Open items and next steps
 1. **Robust presenting:** present off the game's render thread, so a driver cap, an overlay or vsync can't slow the game itself; frame rate and vsync as in-game settings.
 2. **Load-in hitches: fixed** (direct uploads on 6 workers, see the sweep). Left: three frames of 50–100 ms at the first load at boot (66 pipelines, 75 shaders, 230 textures at once, behind the legal screens).
@@ -205,9 +221,9 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 5. **Crash:** wait for a `crash-*.txt` from the new reporter.
 6. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
 7. **Frame pacing: done** (display-locked vblank, play-test 4). The rocks at bullet impacts are the game's own bullet-hole decals (same sizes at 30 fps); the haze hasn't come back since play-test 4 (watching, with `fear_debug_model_fx`).
-8. **Main menu Settings and Quit: next** (the user's order: this, then the *F.E.A.R. Files* campaigns). See [HANDOFF.md](HANDOFF.md#next-steps-the-users-list) for the two routes (host overlay vs in-game menu entry).
+8. **Main menu Settings and Quit: done** ("looks awesome"; "Main menu: PC Settings and Quit to Desktop" above). Later: the same entries in *F.E.A.R. Files*' menu (its own addresses).
 9. **Movement feel:** diff the 360 and PC game databases (bob, sway, acceleration); compare 30 vs 120 fps.
-10. ***F.E.A.R. Files*: runs** (Instant Action played; [FILES.md](FILES.md)). **Next after the menu:** both campaigns, Extraction Point and Perseus Mandate, at 4K with the texture pack.
+10. ***F.E.A.R. Files*: runs** (Instant Action played; [FILES.md](FILES.md)). **Next:** both campaigns, Extraction Point and Perseus Mandate, at 4K with the texture pack.
 11. **Linux:** the renderer and SDK are Vulkan; port the build script.
 12. **Pistol impacts:** "the pistol sometimes looked like it would miss some of the traces… wouldn't produce the right kind of smoke effects and debris effects" (every other gun matches the PC). Check its tracer and impact effects (`fear_debug_model_fx` logs every effect created) against an SMG burst on the same wall.
 13. **Side-by-side with the PC version** (the user's plan, for later): the same spot, the same actions, the same frame rate, PC with EchoPatch; the user records both, we list the differences in feel and effects.

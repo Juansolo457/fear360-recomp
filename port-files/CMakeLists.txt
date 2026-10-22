@@ -25,6 +25,8 @@ set(FEAR_SOURCES
     ${HOST}/texture_pack.cpp
     ${HOST}/crash_report.cpp
     ${HOST}/display_vblank.cpp
+    ${HOST}/fear_menu.cpp
+    ${HOST}/fear_settings.cpp
     ${HOST}/fx_debug.cpp
     ${HOST}/look_tuning.cpp
     ${HOST}/native/native_system.cpp

@@ -99,6 +99,8 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/crash_report.*` | crash reports into `port-nx/logs/` |
 | `port-nx/src/display_vblank.*` | the display's vblank (DXGI) and the pacing plan; used by `native_system.cpp` |
 | `port-nx/src/anim_timing.*` | model animation time without the per-frame millisecond truncation; called from the generated code through `[[entrypoint.midasm_hook]]`s in `fear_manifest.toml` |
+| `port-nx/src/fear_menu.*` | *PC Settings* and *Quit to Desktop* added to the game's own main menu: hooks in `CScreenMain::Build` and `OnCommand` that call the game's `AddTextItem`/`AddControl` (how to call guest functions from a hook: `current_ppc_context()`, save and restore the context, `ResolveIndirectFunction`) |
+| `port-nx/src/fear_settings.*` | the settings panel and quit confirmation (ImGui, pad via XInput), `<user data>/settings.toml`, restart |
 | `port-nx/src/fx_debug.*` | `fear_debug_model_fx`: logs ClientFX effects created (by type) and model effects' lifetime, color and scale |
 | `port-files/` | *F.E.A.R. Files*: port-nx's host code with its own manifest and translation (`docs/FILES.md`) |
 | `tools/find_missed_functions.py`, `tools/find_anim_sites.py`, `tools/xexinfo.py` | function entries the analyser missed (from a dumped image); this engine's animation-time sites in a translation; XEX headers |
@@ -107,7 +109,7 @@ Reporting is off on the user's PC, so this is the only record.
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
 
 ## Next steps (the user's list)
-**Current order (2026-10-22):** 1. Settings and Quit in the main menu (item 2 and 3 below); 2. the *F.E.A.R. Files* campaigns at 4K with the texture pack ([FILES.md](FILES.md)); later, the pistol's impacts and a side-by-side recording against the PC version with EchoPatch (PROGRESS.md, open items 12 and 13).
+**Current order (2026-10-22):** 1. Settings and Quit in the main menu: done ("looks awesome"; PROGRESS.md, "Main menu: PC Settings and Quit to Desktop"); 2. next: the *F.E.A.R. Files* campaigns at 4K with the texture pack ([FILES.md](FILES.md)); later, the pistol's impacts and a side-by-side recording against the PC version with EchoPatch (PROGRESS.md, open items 12 and 13).
 
 Play-test 1 added: frame-pacing jank (`-Present` test, then lock the virtual vblank to the
 display), chapter cards off-centre/doubled and cutscene-transition flicker (reproduced at 1×:
@@ -119,7 +121,9 @@ the renderer's two-tile frames; fixed 2026-10-22, see PROGRESS.md), PC texture r
    and add a frame-time counter (the renderer only logs frames over 50 ms) to see whether
    heavy scenes hold 120. A Lost Odyssey-style present-interval hook or interpolation only if
    something breaks or the user wants more than 120.
-2. **Quit button in the main menu.** Options, cheapest first:
+**After that, the user's idea (2026-10-22):** "one global launcher with all of the games launchable from one menu instead of having to jump different games". See [FILES.md](FILES.md#the-definitive-edition-one-game).
+
+2. **Quit button in the main menu** (done the in-game way, see `fear_menu.*`; the notes below are the options as first weighed). Options, cheapest first:
    - Host-side: ReXGlue's ImGui overlay. `rex::ReXApp::OnCreateDialogs(ui::ImGuiDrawer*)` is
      the hook; the SDK already has a debug overlay and a cvar settings overlay (WK2D's N3
      project mentions changing cvars "through the SDK overlay"). A keyboard/controller

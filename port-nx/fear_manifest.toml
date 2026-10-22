@@ -222,3 +222,23 @@ registers = []
 name = "FearDebugDecalSize"
 address = 0x82B98A40
 registers = ["r31", "f0", "f13", "f1", "f12"]
+
+# PC Settings and Quit to Desktop in the main menu (src/fear_menu.*). CScreenMain::Build
+# (sub_823FF3C0) ends at 0x823FF7A8, where both its paths meet: add our two items after Options.
+[[entrypoint.midasm_hook]]
+name = "FearMenuAddItems"
+address = 0x823FF7A8
+registers = ["r30"]
+
+# OnCommand's command 19 (Press Start accepted) has shown the game's items: show ours.
+[[entrypoint.midasm_hook]]
+name = "FearMenuShowItems"
+address = 0x823FF910
+registers = ["r31"]
+
+# CScreenMain::OnCommand (sub_823FF7E8): our commands are handled by the host (r3 = 1).
+[[entrypoint.midasm_hook]]
+name = "FearMenuCommand"
+address = 0x823FF7E8
+registers = ["r3", "r4"]
+return_on_true = true

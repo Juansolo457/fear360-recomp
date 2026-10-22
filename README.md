@@ -32,7 +32,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Saving with any controller (to confirm at a checkpoint) | every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
-| ⏳ Settings and Quit entries in the main menu | not started |
+| ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": two entries added to the game's own menu (under Options) open a settings panel (resolution, window, frame rate, texture filtering, PC textures, right stick, aim assist, animation timing; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | boots and plays (Extraction Point's Instant Action, 3 minutes, no crash) on the same host code; the plan for one game with both expansions: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
 

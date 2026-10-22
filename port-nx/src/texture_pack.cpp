@@ -23,6 +23,10 @@ REXCVAR_DEFINE_STRING(fear_texture_pack, "", "F.E.A.R.",
                       "Folder of a replacement texture pack built by tools/texture_pack.py "
                       "(index.tsv + DDS files); empty = the 360's own textures")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+// PC Settings' on/off: the folder stays saved while the pack is off.
+REXCVAR_DEFINE_BOOL(fear_texture_pack_enabled, true, "F.E.A.R.",
+                    "Use the texture pack in fear_texture_pack (off = the 360's own textures)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_BOOL(fear_texture_log_keys, false, "F.E.A.R.",
                     "Log the pack key, format and size of every texture created from guest "
                     "memory (to check them against the offline index)")
@@ -82,7 +86,7 @@ uint64_t MipChainBytes(const Entry& e) {
 // and optionally (after a tab) a host swizzle override in hex.
 void Load() {
   const std::string configured = REXCVAR_GET(fear_texture_pack);
-  if (configured.empty()) return;
+  if (configured.empty() || !REXCVAR_GET(fear_texture_pack_enabled)) return;
   root = std::filesystem::path(configured);
   std::ifstream index(root / "index.tsv");
   if (!index) {
