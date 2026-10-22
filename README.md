@@ -1,6 +1,6 @@
 # F.E.A.R. 360 Recompiled
 
-The Xbox 360 F.E.A.R., running natively on PC. 4K, high frame rates, a controller in your hands.
+The Xbox 360 F.E.A.R., running natively on PC. 4K, 120 fps, a controller in your hands.
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
@@ -23,7 +23,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Boots, menus, intro videos, campaign, Instant Action | `port-nx` with `--nx_renderer native` |
 | ✅ 4K: integer internal resolution scaling (3× = 3840×2160) | our patch to fear-nx's renderer |
 | ✅ The game's own 2×/4× MSAA and 16× anisotropic filtering | on top of the scale |
-| ⏳ 60 fps today; paced for 120 | the game runs at the right speed at a 120/240 Hz virtual vblank, but presenting is held to a steady 60 by a limiter outside the game (2026-10-22 measurement, [PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
+| ✅ 120 fps with correct game speed | a 240 Hz virtual vblank (`-FrameRate`), measured: a steady 1,200 frames per 10 s ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
 | ✅ Logic, gunplay, physics intact | 10-minute play-test |
 | ⏳ Slight frame-pacing jank, input occasionally behind | diagnosed: unsynced software vblank + immediate present; `-Present` test option |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |

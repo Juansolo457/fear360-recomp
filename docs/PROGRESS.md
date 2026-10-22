@@ -3,7 +3,7 @@
 _Last updated 2026-10-22 (play-test 2)._
 
 ## Where we are
-F.E.A.R. for Xbox 360 is **playable natively on Windows at 4K**, presenting at 60 fps for now (see play-test 2). Menus, the intro and menu videos, the campaign and Instant Action all work; game logic, gunplay and physics are the console's own and behave correctly. Hands-on after ~10 minutes: "guns responded very well… game logic is in there, the physics are in there". The resolution, AA and anisotropic filtering made "a huge difference. Very clean image".
+F.E.A.R. for Xbox 360 is **playable natively on Windows at 4K and a measured, steady 120 fps**. Menus, the intro and menu videos, the campaign and Instant Action all work; game logic, gunplay and physics are the console's own and behave correctly. Hands-on after ~10 minutes: "guns responded very well… game logic is in there, the physics are in there". The resolution, AA and anisotropic filtering made "a huge difference. Very clean image".
 
 Since play-test 1 the **textures** are fixed (an optional pack built from the player's own PC copy replaces 4,710 of the 360's halved textures with the PC originals), and so are the **doubled chapter cards and half frames at cuts** (a renderer bug in how the game's tile clears were applied). What's left before it feels finished: a little **frame-pacing jank** and **Settings / Quit** in the main menu.
 
@@ -56,6 +56,7 @@ Since play-test 1 the **textures** are fixed (an optional pack built from the pl
 - First layer: the SDK created an (idle) achievement-notification dialog at launch on Windows. Any registered UI dialog makes the presenter paint from the UI thread, whose present held the Vulkan queue lock, so our submits waited on that lock 13–15 ms. Fixed in `patches/rexglue-sdk-nx/0002` (create it on the first achievement, as fear-nx already does on Switch): queue lock wait now 0.00 ms.
 - Second layer: with that gone, **`vkQueuePresentKHR` itself blocks 12–15 ms**, in immediate (no-vsync) mode on a 240 Hz display, with NVIDIA's Vulkan-over-DXGI layer on or off. Several 10-second windows show exactly 601 presents: a 60.1 fps limiter applied inside present, outside the game. RTSS/Afterburner is hooked (its OSD is in every capture) but its frame limit is off (`Limit=0`). Remaining suspects: an NVIDIA driver *Max Frame Rate* (global or per-app, or in the NVIDIA app), or an Afterburner/RTSS setting applied at runtime. To check on the user's side.
 - Why it feels uneven rather than just "60": the game is paced by a 240 Hz virtual vblank and wants a frame every 2 vblanks (8.3 ms), but each present then stalls ~15 ms. Frames reach the screen at a steady 60 while the game's timing and input sampling run on a different rhythm.
+- **Resolved:** a global *Max Frame Rate = 60* in the NVIDIA Control Panel on the test PC. With it off: **1,200 presents per 10 s (120 fps), present 0.13 ms per frame**. Lesson kept for the code: the game shouldn't depend on such settings. Two changes planned so no machine setting can do this again: present off the game's render thread (a held present then can't slow the simulation or input), and the frame rate / vsync as in-game settings.
 
 **3. Right stick "seam":** "once you first start moving it… then you stop for a little bit… and move it again, you can feel almost like a slight delay." The 360 tuning has exactly the parts for that: in `Game/database/Loki.gamedb` **`GPadAimEdgeAccelTime` / `GPadAimEdgeMaxTurnRate`** (turn speed ramps up over time once the stick reaches its edge), **`TurningSoftLockYawFactor/PitchFactor`** and **`AimAssist.*`** (turning slows near targets); in the profile defaults `Game/ProfileDatabase/Defaults.gamedb` **`YawAccel` / `PitchAccel`**, **`Sensitivity`** and per-binding **`DeadZoneMin/Max`**. A ramp that restarts from zero each time the stick starts moving is the likeliest cause. It is 360 tuning, not a recomp bug; the PC version (mouse) has no such ramp.
 
@@ -128,7 +129,7 @@ Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, po
 - **Order by payoff:** the frame loop and presentation first (render between simulation ticks for smooth high frame rates, input latency), then input/camera, then the systems where rewrites buy features (menus: Options/Quit; saves), the rest only as needed.
 
 ## Open items and next steps
-1. **60 fps cap from outside the game:** check the NVIDIA driver/app *Max Frame Rate* and Afterburner/RTSS; then measure again (the 10-second report shows `present` time per frame).
+1. **Robust presenting:** present off the game's render thread, so a driver cap, an overlay or vsync can't slow the game itself; frame rate and vsync as in-game settings.
 2. **Saving:** confirm a checkpoint save appears in `port-nx/user/` with the pad now on player 1 (the first session after the fix was too short to reach one).
 3. **Crash:** wait for a `crash-*.txt` from the new reporter.
 4. **MSAA depth copy-outs** are skipped (see "Two-tile frames"); implement if an effect turns out to need them.
