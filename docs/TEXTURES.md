@@ -15,6 +15,7 @@ cover, or whose file fails to load, stays the 360's.
 | ✅ Keys agree offline and at runtime | checked with `fear_texture_log_keys` on the intro: 393 catalogue textures found in the offline index; the only misses besides video frames were two 4×4 textures |
 | ✅ Visible in game | A/B at 2×: the ATC guard's shoulder patch and fabric weave go from blurred to sharp |
 | ✅ Pack v2: normal maps, RGBA and mixed formats | 4,710 replacements (v1: 2,666 DXT-only); in-game check of v2 below |
+| ✅ *F.E.A.R. Files* pack (2026-10-22) | **7,607 replacements** of Files' 9,944 catalogue textures, from the PC expansions' archives first (`--expansions FEARXP2,FEARXP`), then the base game's; 2.0 GB. Matches include the expansions' own sets (`Prefabs/HospitalXP` 317, `Prefabs/DataCenterXP2` 212). Not packed: 1,270 where the PC copy isn't larger, 469 with packed mips at the base, 223 with no PC file (89 of them the 360's own menu art), 119 that fail the quality gate, 114 cube/volume |
 | ⏳ Not covered | cube/volume textures (85), 360 textures with packed mips at the base (263, all tiny), 360-only content (192), same-size pairs (972) |
 
 **Coverage.** Of the 5,105 360 textures that have a larger PC original, the pack replaces 4,710
@@ -32,6 +33,16 @@ port-nx/out/build/win-amd64-relwithdebinfo/fear_texindex.exe private/texwork/x36
 python -I tools/texture_pack.py build   private/texwork "<PC F.E.A.R. install>" private/texture_pack
 pwsh -NoProfile -File tools/launch.ps1 -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'
 ```
+For *F.E.A.R. Files*, the same three steps over its own catalogue, with the PC expansions'
+archives first (`FEARXP2`, then `FEARXP`, then the base game's; Files is the Perseus Mandate
+build, carrying Extraction Point):
+```powershell
+python -I tools/texture_pack.py bundle  private/files/assets/Game/uberCatalog.cat private/files/texwork
+port-nx/out/build/win-amd64-relwithdebinfo/fear_texindex.exe private/files/texwork/x360.bundle private/files/texwork/x360.tsv private/files/texwork/x360_base.bin
+python -I tools/texture_pack.py build   private/files/texwork "<PC F.E.A.R. install>" private/files/texture_pack --expansions FEARXP2,FEARXP
+pwsh -NoProfile -File tools/launch.ps1 -Files -TexturePack private/files/texture_pack -Extra '--nx_renderer native'
+```
+
 About 6 minutes and 1.3 GB. `report.tsv` in the pack says what happened to every 360 texture;
 `compare <work> <run.log> --pack <pack>` breaks down a run logged with
 `--fear_texture_log_keys true`.

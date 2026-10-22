@@ -6,6 +6,7 @@ folder (gitignored private/ by default).
   python -I tools/texture_pack.py bundle  <uberCatalog.cat> <work>          # 360 .tex -> bundle
   <port-nx>/fear_texindex <work>/x360.bundle <work>/x360.tsv <work>/x360_base.bin
   python -I tools/texture_pack.py build   <work> <PC install> <pack> [--formats dxt] [--limit N]
+                                          [--expansions FEARXP2,FEARXP]   # F.E.A.R. Files
   python -I tools/texture_pack.py compare <work> <runtime.log> [--pack <pack>]  # keys seen in a run
 
 `build` matches 360 textures to PC files by path, decodes both base levels, and keeps a pair
@@ -103,11 +104,17 @@ def read_ltar(path):
             yield (folder + '/' + name(name_off)).strip('/'), off, size
 
 
-def pc_textures(pc_root):
+def pc_textures(pc_root, expansions=()):
     found = {}
-    # The base game's archives (FEAR.Arch00, FEAR_n.Arch00) win over the others.
+    # The base game's archives (FEAR.Arch00, FEAR_n.Arch00) win over the others. With
+    # expansions (folders of the install, e.g. FEARXP2, FEARXP: the first listed wins), their
+    # archives come first: F.E.A.R. Files is the Perseus Mandate build, carrying Extraction Point.
     base_first = lambda p: (not p.name.upper().startswith(('FEAR.', 'FEAR_')), p.name.upper())
-    for arch in sorted(Path(pc_root).glob('*.Arch00'), key=base_first):
+    archives = []
+    for folder in expansions:
+        archives += sorted((Path(pc_root) / folder).glob('*.Arch00'), key=base_first)
+    archives += sorted(Path(pc_root).glob('*.Arch00'), key=base_first)
+    for arch in archives:
         for path, off, size in read_ltar(arch):
             if path.lower().endswith('.dds'):
                 found.setdefault(path.lower()[:-4], (arch, off, size, path))
@@ -258,7 +265,8 @@ def plan_replacement(fmt, kind):
     return None
 
 
-def cmd_build(work, pc_root, pack, formats='all', limit=None, min_psnr=24.0, min_corr=0.9):
+def cmd_build(work, pc_root, pack, formats='all', limit=None, min_psnr=24.0, min_corr=0.9,
+              expansions=()):
     work, pack = Path(work), Path(pack)
     (pack / 'tex').mkdir(parents=True, exist_ok=True)
     rows = []
@@ -266,7 +274,7 @@ def cmd_build(work, pc_root, pack, formats='all', limit=None, min_psnr=24.0, min
         header = f.readline().rstrip('\n').split('\t')
         for line in f:
             rows.append(dict(zip(header, line.rstrip('\n').split('\t'))))
-    pc = pc_textures(pc_root)
+    pc = pc_textures(pc_root, expansions)
     blob = open(work / 'x360_base.bin', 'rb')
     stats = {}
     report = []
@@ -446,7 +454,8 @@ def main():
         cmd_bundle(*args[:2])
     elif cmd == 'build':
         cmd_build(args[0], args[1], args[2], formats=opts.get('--formats', 'all'),
-                  limit=int(opts['--limit']) if '--limit' in opts else None)
+                  limit=int(opts['--limit']) if '--limit' in opts else None,
+                  expansions=[e for e in opts.get('--expansions', '').split(',') if e])
     elif cmd == 'compare':
         cmd_compare(args[0], args[1], pack=opts.get('--pack'))
     else:

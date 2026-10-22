@@ -28,6 +28,12 @@ ReXGlue 0.10 (our patched SDK), `rexglue init` + `codegen`, in a scratch project
 - With those: the *F.E.A.R. Files* title screen, the menus, and Extraction Point's Instant Action map *Subway*, played (and lost, and restarted) for 3 minutes by the test script with no crash, at an even 80 fps. The user took the controls during that run: "fear files got in clean, was able to play with the character in instant action… felt pretty good."
 - Not tried yet: the campaigns (Extraction Point, Perseus Mandate), 4K, the texture pack.
 
+## Getting ready for the campaigns (2026-10-22)
+- `fearfiles.exe` rebuilt on the current host code: display-locked pacing, the settings file (`port-files/user/settings.toml`; the *PC Settings* entry itself isn't in Files' menu yet), the animation-time hooks.
+- A texture pack of its own: 7,607 PC textures (above, and docs/TEXTURES.md).
+- Missed functions: data words pointing into code that no known function covers. Files has 49 such targets; nearly all are zero words in padding (not code), the same picture as F.E.A.R. (42), which plays through. Nothing to add up front; a campaign that calls a missed function ends with a crash report naming it.
+- To play: `tools/launch.ps1 -Files -TexturePack private/files/texture_pack -Extra '--nx_renderer native'` (4K from the first-run settings).
+
 ## What carries over from the F.E.A.R. port
 | | F.E.A.R. | Files |
 |---|---|---|
@@ -36,7 +42,7 @@ ReXGlue 0.10 (our patched SDK), `rexglue init` + `codegen`, in a scratch project
 | Every controller on player 1, crash reports | done | host side, unchanged |
 | Animation time without the millisecond truncation (impact puffs) | `0x82191E7C`, `0x82241604`, `0x821E4DDC` | **found:** `trk_Update` `sub_821C6A00` (`0x821C6A3C`), model update `sub_8221F1B8` (`0x8221F1EC`) and `sub_8227EEA0` (`0x8227EED4`), by `tools/find_anim_sites.py`, which also finds exactly F.E.A.R.'s three |
 | Right-stick tuning (patched `Loki.gamedb` through a VFS redirect) | done | the database is not a loose file: needs a redirect into the catalog, or the patch applied in memory |
-| PC texture pack | 4,710 textures | the same builder over the PC expansions' archives (`FEARXP`: 1.7 GB, `FEARXP2`: 2.2 + 1.4 + 4.0 GB) |
+| PC texture pack | 4,710 textures | **built: 7,607 textures**, the same builder with the PC expansions' archives first (`--expansions FEARXP2,FEARXP`; docs/TEXTURES.md) |
 | Tracers break above ~90 fps | open | expected the same |
 
 ## EchoPatch and the PC version
