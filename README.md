@@ -2,7 +2,7 @@
 
 An unofficial static recompilation of the Xbox 360 releases of **F.E.A.R.** and **F.E.A.R. Files** for Windows and Linux, with native performance, an unlocked frame rate, and controller-first play.
 
-**Status (2026-10-21):** two Windows builds run. `port/` (stock ReXGlue) renders gameplay correctly but corrupts menus and videos; `port-nx/` (fear-nx's patched SDK and Vulkan renderer, GPL-3.0) renders menus, videos and gameplay correctly, with integer resolution scaling (3× = 3840×2160), the game's MSAA, 16× anisotropic filtering, and 60 fps via the virtual vblank rate (game speed verified in play). See [docs/HANDOFF.md](docs/HANDOFF.md). See [docs/PLAN.md](docs/PLAN.md).
+**Status (2026-10-21):** two Windows builds run. `port/` (stock ReXGlue) renders gameplay correctly but corrupts menus and videos; `port-nx/` (fear-nx's patched SDK and Vulkan renderer, GPL-3.0) renders menus, videos and gameplay correctly, with integer resolution scaling (3× = 3840×2160), the game's MSAA, 16× anisotropic filtering, and 120 fps via the virtual vblank rate (game speed verified in play). See [docs/HANDOFF.md](docs/HANDOFF.md). See [docs/PLAN.md](docs/PLAN.md).
 
 The goal is a full PC version in the spirit of [OpenCE](https://github.com/OpenCommunityEdition/OpenCE): point it at your own game files, launch, and get real options. Windows first, then Linux.
 
@@ -14,7 +14,7 @@ pwsh -NoProfile -File tools/build.ps1
 pwsh -NoProfile -File tools/launch.ps1                 # fullscreen, 4K internal, 16x AF
 pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed
 pwsh -NoProfile -File tools/build-nx.ps1                               # port-nx: builds the patched SDK too
-pwsh -NoProfile -File tools/launch.ps1 -Nx -Scale 3 -FrameRate 60 -Extra '--nx_renderer native'   # 4K internal, 60 fps
+pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # 4K internal, 120 fps (defaults)
 ```
 Put your own `default.xex` (title `565507D9`) and `Game/` folder in `port/assets/`.
 
