@@ -8,7 +8,8 @@ review in another context: each finding has the evidence, the files, and what to
 **Method.** Static reading of the code, plus the renderer's own 10-second reports from the
 play-test logs (F.E.A.R. Files at 4K/80 fps, `port-files/logs/run-20261022-123605.log`). The
 game was not run for this pass (the user's rule: no test runs without asking). One change was
-made (below, marked **Changed**); it is not compiled yet.
+made in this pass and one right after (marked **Changed**); both are type-checked with the
+build's flags, not yet built and played.
 
 ## Headline: throughput is fine, hitches are the problem
 At 4K and 80 fps (a 12.5 ms frame) the renderer reports, per frame: **renderer CPU 0.4 to
@@ -48,6 +49,20 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
      bursts; keeps first-sight cost.
 - *Note:* the pipeline cache is already persisted and saved off-thread once pipelines settle
   (`SaveDriverCache`); with pre-warmed shaders, the pipeline step would also move earlier.
+- **Changed (option a, same day):** `fear_shader_prewarm` (default on). `EnsureTranslated`
+  records each translation a run asks for (the shader's microcode hash, type, microcode and the
+  modification) in `prewarm`; the list is saved next to the driver cache
+  (`cache/shaders/driver/prewarm-<title>-<vendor>-<device>.bin`, magic + size + XXH3, written to a
+  temp file and renamed) once new ones stop appearing for 5 s, and at shutdown.
+  `InitializeDriverCache` (before the guest runs, like the driver cache) loads it, creates the
+  shader objects `LoadShader` will find by hash, analyses them, and queues their translations on
+  the existing single worker in `prewarm_jobs`; the worker takes `translation_jobs` (draws
+  waiting) first, and a draw that needs a still-queued pre-warm translation moves it to the
+  front. The first run only records. Type-checked with the build's flags, not run yet.
+  *To verify:* run twice through the same area; the second run logs "Shader pre-warm: N
+  translations of M shaders queued" and "Shader pre-warm done: N translations in X s", and its
+  "shader translations and pipelines: N waited for" and "skipped by reason: 6:" counts drop.
+  Pipelines (skip reason 13) are not pre-warmed; the driver cache keeps them fast to create.
 
 ### P1. Texture eviction counted frames, not time — **Changed**
 - *Where:* `port-nx/src/native/native_textures.cpp`, `TextureCache::BeginFrame` (eviction at
@@ -156,4 +171,5 @@ tracers break above that), so most apply less. Status:
   `[[entrypoint.midasm_hook]]` entries, `tools/launch.ps1`.
 - Evidence: the renderer's 10-second report ("slow frame", "shader translations and
   pipelines", "skipped by reason", "per frame") in any `logs/run-*.log`.
-- Biggest open win: the shader pre-warm (P1). Then confirm the eviction change on a real run.
+- Confirm on real runs: the shader pre-warm (P1) and the eviction change. Then pipelines:
+  record pipeline keys the same way if skip reason 13 still shows.

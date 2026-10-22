@@ -102,6 +102,15 @@ REXCVAR_DEFINE_BOOL(nx_native_trace_output, false, "F.E.A.R. NX",
 REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 100, "F.E.A.R.",
                       "Longest a frame waits in total for shader translations and pipelines its "
                       "draws need (0 = skip those draws until ready, fear-nx's Switch behaviour)");
+// F.E.A.R.: shaders are translated from the game's microcode the first time a draw needs them, in
+// every run, one at a time: a new effect or area brought 10-20 at once and frames waited up to
+// fear_shader_wait_ms, then skipped draws (docs/REVIEW.md). Every translation a run asks for is
+// now remembered with its shader's microcode, per title in the cache folder, and at the next start
+// queued for the translation worker behind any the game asks for. See "Shader pre-warm" below.
+REXCVAR_DEFINE_BOOL(fear_shader_prewarm, true, "F.E.A.R.",
+                    "Translate the shaders seen in earlier runs in the background at startup "
+                    "(kept per title in the cache folder), so new effects don't stall a frame")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_BOOL(fear_alias_clears, true, "F.E.A.R.",
                     "Apply clears drawn through an aliased layout of EDRAM to every image of "
                     "that EDRAM (MirrorAliasClear); off = only the image drawn to");
@@ -1415,6 +1424,28 @@ struct Renderer::Impl {
   std::vector<VulkanShader::VulkanTranslation*> translations_done;
   std::atomic<uint32_t> translations_done_count{0};
   bool translation_stop = false;
+  // F.E.A.R.: shader pre-warm (fear_shader_prewarm). Each translation a run asks for, with its
+  // shader's microcode, by microcode hash; saved next to the driver cache once new ones stop
+  // appearing and at shutdown, loaded and queued by InitializeDriverCache before the guest runs.
+  // The ring thread owns these, like the shader table; prewarm_jobs is under translation_mutex
+  // and the worker takes translation_jobs (what draws are waiting for) first.
+  struct PrewarmShader {
+    uint32_t type = 0;
+    std::vector<uint32_t> ucode;  // host order
+    std::vector<uint64_t> modifications;
+  };
+  std::unordered_map<uint64_t, PrewarmShader> prewarm;
+  std::filesystem::path prewarm_path;
+  bool prewarm_dirty = false;
+  std::chrono::steady_clock::time_point prewarm_changed;
+  std::thread prewarm_writer;
+  std::atomic<bool> prewarm_writing{false};
+  std::deque<VulkanShader::VulkanTranslation*> prewarm_jobs;
+  std::chrono::steady_clock::time_point prewarm_started;
+  size_t prewarm_queued = 0;
+  void NotePrewarm(VulkanShader::VulkanTranslation* translation);
+  void LoadPrewarm();
+  void SavePrewarm(bool wait);
   struct PipelineJob {
     uint64_t hash = 0;
     PipelineKey key = {};
@@ -2120,6 +2151,7 @@ void Renderer::Impl::Shutdown() {
   if (driver_cache_writer.joinable()) {
     driver_cache_writer.join();
   }
+  SavePrewarm(true);
   if (translation_thread.joinable()) {
     {
       std::lock_guard<std::mutex> lock(translation_mutex);
@@ -2299,6 +2331,7 @@ bool Renderer::Impl::EnsureTranslated(VulkanShader::VulkanTranslation* translati
     if (!translation->shader().is_ucode_analyzed()) {
       translation->shader().AnalyzeUcode(disasm);
     }
+    NotePrewarm(translation);
     if (!REXCVAR_GET(nx_native_async_pipelines) || !translation_thread.joinable()) {
       bool ok = translator->TranslateAnalyzedShader(*translation);
       if (ok) translation->GetOrCreateShaderModule();
@@ -2321,9 +2354,20 @@ bool Renderer::Impl::EnsureTranslated(VulkanShader::VulkanTranslation* translati
         return false;
       }
     }
-  } else if (state->second == 1 && !WaitForTranslation(translation)) {
-    *pending_out = true;
-    return false;
+  } else if (state->second == 1) {
+    // F.E.A.R.: queued by the pre-warm behind others: the game needs it now.
+    {
+      std::lock_guard<std::mutex> lock(translation_mutex);
+      auto queued = std::find(prewarm_jobs.begin(), prewarm_jobs.end(), translation);
+      if (queued != prewarm_jobs.end()) {
+        prewarm_jobs.erase(queued);
+        translation_jobs.push_front(translation);
+      }
+    }
+    if (!WaitForTranslation(translation)) {
+      *pending_out = true;
+      return false;
+    }
   }
   return translation->is_valid() && translation->shader_module() != VK_NULL_HANDLE;
 }
@@ -2357,18 +2401,33 @@ void Renderer::Impl::TranslationThread() {
 #endif
   while (true) {
     VulkanShader::VulkanTranslation* translation;
+    bool prewarm_finished = false;
     {
       std::unique_lock<std::mutex> lock(translation_mutex);
-      translation_cv.wait(lock, [&] { return translation_stop || !translation_jobs.empty(); });
+      translation_cv.wait(lock, [&] {
+        return translation_stop || !translation_jobs.empty() || !prewarm_jobs.empty();
+      });
       if (translation_stop) return;
-      translation = translation_jobs.front();
-      translation_jobs.pop_front();
+      if (!translation_jobs.empty()) {
+        translation = translation_jobs.front();
+        translation_jobs.pop_front();
+      } else {
+        translation = prewarm_jobs.front();
+        prewarm_jobs.pop_front();
+        prewarm_finished = prewarm_jobs.empty();
+      }
     }
     if (worker_translator->TranslateAnalyzedShader(*translation)) {
       translation->GetOrCreateShaderModule();
     } else {
       REXLOG_ERROR("[native] Shader {:016X} did not translate",
                    translation->shader().ucode_data_hash());
+    }
+    if (prewarm_finished) {
+      REXLOG_INFO("[native] Shader pre-warm done: {} translations in {:.1f} s", prewarm_queued,
+                  std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                prewarm_started)
+                      .count());
     }
     std::lock_guard<std::mutex> lock(translation_mutex);
     translations_done.push_back(translation);
@@ -5534,6 +5593,11 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
       now - last_pipeline_time > std::chrono::seconds(5) && !driver_cache_writing.load()) {
     SaveDriverCache();
   }
+  // F.E.A.R.: the shader pre-warm list, the same way.
+  if (prewarm_dirty && now - prewarm_changed > std::chrono::seconds(5) &&
+      !prewarm_writing.load()) {
+    SavePrewarm(false);
+  }
   stats().textures_uploaded = textures.stats().uploads;
   stats().texture_bytes_uploaded = textures.stats().upload_bytes;
   stats().textures_created = textures.stats().created;
@@ -5623,6 +5687,12 @@ void Renderer::InitializeDriverCache(const std::filesystem::path& cache_root,
   im.driver_cache_path =
       directory / fmt::format("native-{:08X}-{:08X}-{:08X}-{:08X}.cache", title_id,
                               properties.vendorID, properties.deviceID, properties.driverVersion);
+  // F.E.A.R.: the shader pre-warm list. Per device too: the modifications depend on its features.
+  if (REXCVAR_GET(fear_shader_prewarm)) {
+    im.prewarm_path = directory / fmt::format("prewarm-{:08X}-{:08X}-{:08X}.bin", title_id,
+                                              properties.vendorID, properties.deviceID);
+    im.LoadPrewarm();
+  }
   // The newest complete file: the rename that replaces it can fail on Horizon
   // (it does not overwrite), leaving the data in .tmp.
   std::vector<uint8_t> data = ReadDriverCache(im.driver_cache_path);
@@ -5691,6 +5761,168 @@ void Renderer::Impl::SaveDriverCache() {
     }
     driver_cache_writing = false;
   });
+}
+
+// F.E.A.R.: shader pre-warm. The file: kPrewarmMagic, payload size, XXH3 of the payload; the
+// payload: version, count, then per shader its microcode hash, type, dword count, modification
+// count, the microcode (host order) and the modifications.
+namespace {
+constexpr uint64_t kPrewarmMagic = 0x314D525750524546ull;  // "FEPRWRM1"
+constexpr uint32_t kPrewarmVersion = 1;
+
+template <typename T>
+bool ReadValue(const std::vector<uint8_t>& data, size_t& pos, T& value) {
+  if (pos + sizeof(T) > data.size()) return false;
+  std::memcpy(&value, data.data() + pos, sizeof(T));
+  pos += sizeof(T);
+  return true;
+}
+
+template <typename T>
+void WriteValue(std::vector<uint8_t>& data, const T& value) {
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
+  data.insert(data.end(), bytes, bytes + sizeof(T));
+}
+}  // namespace
+
+void Renderer::Impl::NotePrewarm(VulkanShader::VulkanTranslation* translation) {
+  if (prewarm_path.empty()) return;
+  const auto& shader = translation->shader();
+  auto [entry, added] = prewarm.try_emplace(shader.ucode_data_hash());
+  if (added) {
+    entry->second.type = uint32_t(shader.type());
+    entry->second.ucode = shader.ucode_data();
+  }
+  auto& modifications = entry->second.modifications;
+  if (std::find(modifications.begin(), modifications.end(), translation->modification()) ==
+      modifications.end()) {
+    modifications.push_back(translation->modification());
+    prewarm_dirty = true;
+    prewarm_changed = std::chrono::steady_clock::now();
+  }
+}
+
+void Renderer::Impl::LoadPrewarm() {
+  std::vector<uint8_t> data;
+  if (FILE* file = rex::filesystem::OpenFile(prewarm_path, "rb")) {
+    uint64_t header[3] = {};
+    if (fread(header, sizeof(header), 1, file) == 1 && header[0] == kPrewarmMagic &&
+        header[1] >= 8 && header[1] <= 256u * 1024 * 1024) {
+      data.resize(size_t(header[1]));
+      if (fread(data.data(), data.size(), 1, file) != 1 ||
+          XXH3_64bits(data.data(), data.size()) != header[2]) {
+        data.clear();
+      }
+    }
+    fclose(file);
+  }
+  size_t pos = 0;
+  uint32_t version = 0, count = 0;
+  if (!ReadValue(data, pos, version) || version != kPrewarmVersion ||
+      !ReadValue(data, pos, count)) {
+    return;
+  }
+  std::vector<VulkanShader::VulkanTranslation*> jobs;
+  size_t shaders_loaded = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    uint64_t hash = 0;
+    uint32_t type = 0, dwords = 0, mod_count = 0, reserved = 0;
+    if (!ReadValue(data, pos, hash) || !ReadValue(data, pos, type) ||
+        !ReadValue(data, pos, dwords) || !ReadValue(data, pos, mod_count) ||
+        !ReadValue(data, pos, reserved) || type > 1 || !dwords || dwords > 65536 ||
+        mod_count > 4096 || pos + size_t(dwords) * 4 + size_t(mod_count) * 8 > data.size()) {
+      break;
+    }
+    PrewarmShader entry;
+    entry.type = type;
+    entry.ucode.resize(dwords);
+    std::memcpy(entry.ucode.data(), data.data() + pos, size_t(dwords) * 4);
+    pos += size_t(dwords) * 4;
+    entry.modifications.resize(mod_count);
+    std::memcpy(entry.modifications.data(), data.data() + pos, size_t(mod_count) * 8);
+    pos += size_t(mod_count) * 8;
+    // The same shader object LoadShader finds by this hash when the game loads the microcode.
+    auto [it, created] = shaders.try_emplace(hash);
+    if (created) {
+      it->second = std::make_unique<VulkanShader>(device, xenos::ShaderType(type), hash,
+                                                  entry.ucode.data(), entry.ucode.size(),
+                                                  std::endian::native);
+    }
+    VulkanShader* shader = it->second.get();
+    if (!shader->is_ucode_analyzed()) {
+      shader->AnalyzeUcode(disasm);
+    }
+    for (uint64_t modification : entry.modifications) {
+      auto* translation =
+          static_cast<VulkanShader::VulkanTranslation*>(shader->GetOrCreateTranslation(modification));
+      if (translation_state.try_emplace(translation, uint8_t(1)).second) {
+        jobs.push_back(translation);
+      }
+    }
+    prewarm[hash] = std::move(entry);
+    ++shaders_loaded;
+  }
+  if (jobs.empty() || !translation_thread.joinable()) {
+    // No worker (nx_native_async_pipelines off): draws translate as they come, as before.
+    for (auto* translation : jobs) translation_state.erase(translation);
+    return;
+  }
+  prewarm_started = std::chrono::steady_clock::now();
+  prewarm_queued = jobs.size();
+  {
+    std::lock_guard<std::mutex> lock(translation_mutex);
+    prewarm_jobs.insert(prewarm_jobs.end(), jobs.begin(), jobs.end());
+  }
+  translation_cv.notify_one();
+  REXLOG_INFO("[native] Shader pre-warm: {} translations of {} shaders queued from {}",
+              jobs.size(), shaders_loaded, prewarm_path.string());
+}
+
+void Renderer::Impl::SavePrewarm(bool wait) {
+  if (prewarm_writer.joinable()) {
+    prewarm_writer.join();
+  }
+  if (prewarm_path.empty() || !prewarm_dirty) {
+    return;
+  }
+  prewarm_dirty = false;
+  std::vector<uint8_t> payload;
+  WriteValue(payload, kPrewarmVersion);
+  WriteValue(payload, uint32_t(prewarm.size()));
+  for (const auto& [hash, entry] : prewarm) {
+    WriteValue(payload, hash);
+    WriteValue(payload, entry.type);
+    WriteValue(payload, uint32_t(entry.ucode.size()));
+    WriteValue(payload, uint32_t(entry.modifications.size()));
+    WriteValue(payload, uint32_t(0));
+    const auto* ucode = reinterpret_cast<const uint8_t*>(entry.ucode.data());
+    payload.insert(payload.end(), ucode, ucode + entry.ucode.size() * 4);
+    const auto* modifications = reinterpret_cast<const uint8_t*>(entry.modifications.data());
+    payload.insert(payload.end(), modifications, modifications + entry.modifications.size() * 8);
+  }
+  auto data = std::make_shared<std::vector<uint8_t>>(std::move(payload));
+  const std::filesystem::path path = prewarm_path;
+  prewarm_writing = true;
+  prewarm_writer = std::thread([this, data, path]() {
+    auto temporary = path;
+    temporary += ".tmp";
+    if (FILE* file = rex::filesystem::OpenFile(temporary, "wb")) {
+      const uint64_t header[] = {kPrewarmMagic, uint64_t(data->size()),
+                                 XXH3_64bits(data->data(), data->size())};
+      bool written = fwrite(header, sizeof(header), 1, file) == 1 &&
+                     fwrite(data->data(), data->size(), 1, file) == 1;
+      if (fclose(file) != 0) written = false;
+      if (written) {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+        std::filesystem::rename(temporary, path, error);
+      }
+    }
+    prewarm_writing = false;
+  });
+  if (wait) {
+    prewarm_writer.join();
+  }
 }
 
 // --- Renderer ---------------------------------------------------------------------------

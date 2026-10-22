@@ -42,4 +42,9 @@ Local changes (see `git log -p -- port-nx/src/native`):
   30 fps, but 7.5 s at 80, which re-created a room's textures on the way back). See
   `docs/REVIEW.md`.
 
+- Shader pre-warm (`fear_shader_prewarm`, `native_renderer.cpp`, marked `F.E.A.R.`): every
+  translation a run asks for is recorded with its shader's microcode and saved per title and
+  device next to the driver cache; at the next start they are queued for the translation worker,
+  behind any draw is waiting for. See `docs/REVIEW.md`.
+
 The `*_test.cpp` files are kept for reference but are not built here.
