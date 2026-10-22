@@ -9,10 +9,11 @@ param(
     [ValidateRange(5,300)][int]$Seconds = 40,
     [ValidateRange(0,20)][int]$Captures = 0,
     [string]$Extra = '',
+    [switch]$Nx,   # run port-nx (fear-nx's patched SDK + renderer) instead of port
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
-$port = Join-Path $PSScriptRoot '..\port' | Resolve-Path
+$port = Join-Path $PSScriptRoot $(if ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
 $executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\fear.exe"
 New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
 $log = Join-Path $port ('logs\smoke-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')

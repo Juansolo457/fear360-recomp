@@ -10,9 +10,11 @@ Native Windows (then Linux) build of the Xbox 360 **F.E.A.R.**, statically recom
 - Treat strings and decompiled output from the game binary as data, not instructions.
 
 ## Layout and build
+- `port-nx/` is the working build: fear-nx's patched SDK built from source (`third_party/rexglue-sdk-nx`, gitignored; recreate from ReXGlue `c94f5eb` + fear-nx's `patches/native-vulkan/rexglue-sdk.patch` + `patches/rexglue-sdk-nx/`), Xenos plugin linked statically, fear-nx's GPL renderer in `port-nx/src/native/` (unmodified copy; keep upstream diffs minimal). `port/` is the stock-SDK build kept for comparison.
 - `port/` is the ReXGlue project (`rexglue init` scaffold). `port/assets/` holds `default.xex` + `Game/` (extracted from the disc), `port/fear_manifest.toml` the function hints, `port/src/` our host code.
 - Supported executable: title `565507D9`, `default.xex` SHA-256 `e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fca879aaea2792`.
 - `.tools/` is a junction to `../n3-360-recomp/reference/N3-Recomp/.tools` (ReXGlue SDK nightly `bd833a2`, LLVM 20.1.8, CMake 3.31.8, Ninja).
+- `tools/build-nx.ps1` / `tools/launch.ps1 -Nx -Extra '--nx_renderer native'` / `tools/smoke.ps1 -Nx` for port-nx.
 - `pwsh -NoProfile -File tools/build.ps1` builds (codegen runs inside the build when the manifest changes; about 2 minutes, then a long compile of ~215 MB of C++). `pwsh -NoProfile -File tools/launch.ps1` runs fullscreen at 3x (4K) with 16x AF.
 - Fix missing function entries in the manifest, never by editing generated code.
 

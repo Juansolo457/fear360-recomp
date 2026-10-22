@@ -1,0 +1,45 @@
+From 05d6ceaeaeb43efeac3b19b1857ddad440a371e3 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 22:22:35 -0700
+Subject: [PATCH] Windows: REXGLUE_GPU_XENOS_STATIC builds the Xenos plugin as
+ a static library
+
+---
+ CMakeLists.txt              | 1 +
+ src/graphics/CMakeLists.txt | 8 +++++---
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 88e8417..ac1af4a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -24,6 +24,7 @@ option(REXGLUE_ENABLE_FIDELITYFX "Enable optional AMD FidelityFX integration (ex
+ option(REXGLUE_ENABLE_TRACY                "Enable Tracy profiler integration" ON)
+ option(REXGLUE_ENABLE_PERF_COUNTERS        "Enable lightweight perf counter registry and overlay" ON)
+ option(REXGLUE_PLATFORM_SWITCH             "Build for Nintendo Switch (devkitA64 + libnx; set by the toolchain file)" OFF)
++option(REXGLUE_GPU_XENOS_STATIC            "Build rexgpu-xenos as a static library for titles that link the Xenos GPU code into the executable (always on for Switch)" OFF)
+ # Propagate profiling defines globally (compiled out in Release)
+ if(REXGLUE_ENABLE_TRACY)
+     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PROFILING>)
+diff --git a/src/graphics/CMakeLists.txt b/src/graphics/CMakeLists.txt
+index 676b94e..4c88cc1 100644
+--- a/src/graphics/CMakeLists.txt
++++ b/src/graphics/CMakeLists.txt
+@@ -98,9 +98,11 @@ if(REXGLUE_USE_D3D12)
+         ${REXGPU_XENOS_D3D12_SOURCES})
+ endif()
+ 
+-if(REXGLUE_PLATFORM_SWITCH)
+-    # Linked into the executable (gpu_plugin_loader.cpp calls rex_gpu_create
+-    # directly); a NRO cannot load plugins at run time.
++if(REXGLUE_PLATFORM_SWITCH OR REXGLUE_GPU_XENOS_STATIC)
++    # Linked into the executable (on Switch gpu_plugin_loader.cpp calls
++    # rex_gpu_create directly; a NRO cannot load plugins at run time). A desktop
++    # title that builds its own renderer on the plugin's internals links this
++    # archive whole and calls rex_gpu_create itself for the stock backends.
+     add_library(rexgpu-xenos STATIC ${REXGPU_XENOS_SOURCES})
+ else()
+     add_library(rexgpu-xenos SHARED ${REXGPU_XENOS_SOURCES})
+-- 
+2.53.0.windows.1
+

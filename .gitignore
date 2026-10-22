@@ -36,3 +36,9 @@ third_party/
 port/out/
 port/user-smoke/
 port/cache-smoke/
+port-nx/assets
+port-nx/generated/default/
+port-nx/out/
+port-nx/logs/
+port-nx/user*/
+port-nx/cache*/

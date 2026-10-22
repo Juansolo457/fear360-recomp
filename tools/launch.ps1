@@ -4,15 +4,18 @@
 #
 #   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed
+#   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
     [ValidateSet(0,1,2,3,4,5)][int]$Anisotropic = 5,   # SDK enum: 5 = 16x
     [switch]$Windowed,
+    [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
+    [string]$Extra = '',  # more flags, space separated
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
-$port = Join-Path $PSScriptRoot '..\port' | Resolve-Path
+$port = Join-Path $PSScriptRoot $(if ($Nx) { '..\port-nx' } else { '..\port' }) | Resolve-Path
 $running = Get-Process -Name fear -ErrorAction SilentlyContinue
 if ($running) { throw "fear.exe is already running (pid $($running.Id -join ', ')). Quit it first." }
 $executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\fear.exe"
@@ -22,6 +25,6 @@ $arguments = @(
     $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' }),
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
-    '--cache_root', "$port\cache", '--log_file', $log)
+    '--cache_root', "$port\cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
 $process = Start-Process -FilePath $executable -WorkingDirectory $port -ArgumentList $arguments -PassThru
 "pid $($process.Id), log $log"

@@ -20,3 +20,13 @@ and their outputs stay local.
 F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions.
 This project is not affiliated with or endorsed by Monolith Productions,
 Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.
+
+port-nx/src/native/ is an unmodified copy of src/native/ from fear-nx
+(https://github.com/infriker/fear-nx, commit acad80d), GPL-3.0-or-later,
+itself adapted from Project8Recomp (https://github.com/R-drg/project8-sw)
+and nfsmw-nx (https://github.com/StevensND/nfsmw-nx). The port-nx build that
+links it is therefore distributed under the GNU GPL v3 or later.
+
+third_party/rexglue-sdk-nx (not tracked) is ReXGlue c94f5eb with fear-nx's
+native-vulkan SDK patch and patches/rexglue-sdk-nx/ applied; ReXGlue's
+BSD-3-Clause license and Xenia's notices apply to it.

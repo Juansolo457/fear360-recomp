@@ -1,0 +1,96 @@
+# F.E.A.R. (Xbox 360, title 565507D9, default.xex SHA-256
+# e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fca879aaea2792), ReXGlue 0.10.
+
+[project]
+name = "fear"
+sdk_version = "0.10.0"
+game_root = "assets"
+
+[entrypoint]
+file_path = "assets/default.xex"
+out_directory_path = "generated/default"
+includes = []
+
+# Function entries the analyser misses: branch targets, indirect-call targets seen at
+# runtime, and .rdata method-table slots. Found and verified by the fear-nx project
+# (https://github.com/infriker/fear-nx, GPL-3.0, fear_xbox360_manifest.toml) against
+# this same executable; see that repo's docs for the evidence behind each group.
+[entrypoint.functions]
+0x82717A40 = {}
+0x82AB9F00 = {}
+0x822ADE30 = {}
+0x82B62D80 = {}
+0x821D3D00 = {}
+0x821D3D18 = {}
+0x821D3D40 = {}
+0x82AE8B48 = {}
+0x82187888 = {}
+0x82187E90 = {}
+0x8218B848 = {}
+0x8218B8A8 = {}
+0x821B5718 = {}
+0x821ED808 = {}
+0x821F0C58 = {}
+0x821F0CB0 = {}
+0x821F0D08 = {}
+0x82203C00 = {}
+0x82235038 = {}
+0x82235078 = {}
+0x822350D0 = {}
+0x8223C7D0 = {}
+0x8223C7F8 = {}
+0x822596C0 = {}
+0x8227E380 = {}
+0x829C6F80 = {}
+0x82A1E1A8 = {}
+0x82A1E1B8 = {}
+0x82A1E1C8 = {}
+0x82A1E5F0 = {}
+0x82A1E618 = {}
+0x82A1E640 = {}
+0x82A1E668 = {}
+0x82A1EA98 = {}
+0x82A1EAB8 = {}
+0x82A1EAE0 = {}
+0x82A2A100 = {}
+0x82A73E60 = {}
+0x82AACDB0 = {}
+0x82AACDB8 = {}
+0x82AAD3B0 = {}
+0x82AAD3B8 = {}
+0x82AAE340 = {}
+0x82AB6CF8 = {}
+0x82AB7B08 = {}
+0x82AB7B18 = {}
+0x82AB7B28 = {}
+0x82AB7B40 = {}
+0x82AB7B50 = {}
+0x82AB7B58 = {}
+0x82AB7B60 = {}
+0x82AB8E78 = {}
+0x82ABA2D0 = {}
+0x82ABA2D8 = {}
+0x82ABA2E0 = {}
+0x82ABA2F8 = {}
+0x82ABA308 = {}
+0x82ABA310 = {}
+0x82ABA328 = {}
+0x82ABA330 = {}
+0x82ABA338 = {}
+0x82ABA340 = {}
+0x82ABA358 = {}
+0x82ADE0C8 = {}
+0x82AF1910 = {}
+0x82B41420 = {}
+0x82CA1A80 = {}
+0x82CA1AD0 = {}
+0x82CA1C50 = {}
+0x82CED2C8 = {}
+0x82D238E8 = {}
+0x82D23FB8 = {}
+0x82D3C278 = {}
+0x8292A120 = {}
+0x8292A138 = {}
+0x8292A150 = {}
+0x8292A168 = {}
+0x8292A180 = {}

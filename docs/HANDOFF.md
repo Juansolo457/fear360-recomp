@@ -1,8 +1,22 @@
-# Handoff: F.E.A.R. 360 on Windows (paused 2026-10-21)
+# Handoff: F.E.A.R. 360 on Windows
 
 Start with [FINDINGS.md](FINDINGS.md) for the disc/XEX facts, then this file.
 
-## Where it stands
+## Update 2026-10-21 (later): menus fixed by fear-nx's renderer
+`port-nx/` builds fear-nx's patched ReXGlue SDK from source (`third_party/rexglue-sdk-nx`, + our
+`patches/rexglue-sdk-nx/0001` static-plugin option) with Vulkan on, links the Xenos plugin
+into `fear.exe`, and compiles fear-nx's `src/native/` renderer (GPL-3.0). With
+`--nx_renderer native` the **title screen, menu video and text render correctly**; the stock
+plugin on the same patched SDK still shows the font sheet, so the fix is their renderer. Build:
+`tools/build-nx.ps1` (first build ~15 min: whole SDK + codegen with its own 0.10.0 tool). Run:
+`tools/launch.ps1 -Nx -Extra '--nx_renderer native'`; test: `tools/smoke.ps1 -Nx ...`.
+Gotchas solved in the build script: `-march=x86-64-v2` (SSSE3 byte swaps), compiler-rt
+builtins linked by path (`__udivti3` from the clock patch), and `thirdparty/renderdoc` on the
+include path. Their renderer renders at the game's 1280×720 with the game's MSAA and up to
+16× AF (`nx_native_max_anisotropy`); **internal resolution scaling does not exist in it yet**,
+which is the next feature for 4K. The section below is the state before this.
+
+## Where it stood before (stock renderer)
 - `port/` (a `rexglue init` project + fear-nx's 78 function hints) **builds and runs** on Windows (D3D12, RTX 4090): the intro, Press Start, the main menu and its submenus all work, input works, audio works, and **gameplay renders correctly**. The user played an Instant Action map with a clean image: level, lighting, weapon and HUD.
 - **Still broken: menus, videos and some text.** Behind the menus the screen shows the game's font + button-glyph sheet stretched full-screen. Menu strings sometimes draw with the **right positions but wrong glyphs**. Intro and menu videos (Bink, CPU-decoded; audio plays) never appear. It flickers, and the user once saw the menu fully correct for about 5 seconds. Pattern: anything the game **writes into a texture from the CPU each frame** (glyph caches, Bink frames), or anything it renders to a texture and samples, shows stale or wrong texture contents. 3D world textures, which are static, are fine.
 
