@@ -1064,6 +1064,8 @@ struct TextureCache::Impl {
       stream_fill_ns{0};
   // fear_texture_stream_wait_ms: time this frame has waited for streaming textures.
   uint64_t frame_stream_wait_ns = 0;
+  // F.E.A.R.: (frame, time) every 60 frames, for evicting by time, not frame count (BeginFrame).
+  std::deque<std::pair<uint64_t, std::chrono::steady_clock::time_point>> eviction_marks;
 
   void StreamThread() {
 #if defined(__SWITCH__)
@@ -1517,15 +1519,29 @@ void TextureCache::BeginFrame(uint64_t frame, uint64_t completed_frame) {
   }
   // Evict textures unused for about 20 seconds; the old content of changing
   // textures (a video, a render-to-texture the CPU fills) is what this frees.
-  constexpr uint64_t kEvictFrames = 600;
+  // F.E.A.R.: 20 seconds of time, not 600 frames: 600 frames were 20 s at the
+  // Switch's 30 fps but 7.5 s at 80, so a room left for a few seconds had its
+  // textures (texture-pack ones re-read from disk) made again on the way back.
   if (frame % 60 == 0) {
-    for (auto t = im.textures.begin(); t != im.textures.end();) {
+    constexpr auto kEvictAge = std::chrono::seconds(20);
+    const auto now = std::chrono::steady_clock::now();
+    im.eviction_marks.emplace_back(frame, now);
+    // The newest mark at least 20 s old: textures last used before its frame are evicted.
+    uint64_t evict_before = 0;
+    while (!im.eviction_marks.empty() && now - im.eviction_marks.front().second >= kEvictAge) {
+      evict_before = im.eviction_marks.front().first;
+      im.eviction_marks.pop_front();
+    }
+    if (evict_before) {
+      im.eviction_marks.emplace_front(evict_before, now - kEvictAge);
+    }
+    for (auto t = im.textures.begin(); evict_before && t != im.textures.end();) {
       Texture& texture = *t->second;
       if (texture.stream) {
         ++t;
         continue;
       }
-      if (texture.last_used_frame + kEvictFrames < frame) {
+      if (texture.last_used_frame < evict_before) {
         std::vector<VkImageView> views;
         for (auto& [k, v] : texture.views) views.push_back(v);
         im.Retire(texture.image, texture.memory, std::move(views), texture.last_used_frame);

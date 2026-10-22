@@ -37,4 +37,9 @@ Local changes (see `git log -p -- port-nx/src/native`):
   holds each frame to whole refreshes before presenting, and the 10-second report gives a
   `pacing` line (refreshes between presents, counted from the display in both modes).
 
+- Texture eviction by time (`native_textures.cpp`, `BeginFrame`, marked `F.E.A.R.`): textures
+  unused for 20 seconds are evicted, measured by the clock rather than as 600 frames (20 s at
+  30 fps, but 7.5 s at 80, which re-created a room's textures on the way back). See
+  `docs/REVIEW.md`.
+
 The `*_test.cpp` files are kept for reference but are not built here.

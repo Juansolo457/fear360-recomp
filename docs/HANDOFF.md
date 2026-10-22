@@ -107,6 +107,7 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
 | `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
+| `docs/REVIEW.md` | code review and optimisation pass (2026-10-22): hitch causes from the renderer's reports, findings by priority, EchoPatch mapped onto the 360 code, hook inventory |
 
 ## Next steps (the user's list)
 **Current order (2026-10-22):** 1. Settings and Quit in the main menu: done ("looks awesome"; PROGRESS.md, "Main menu: PC Settings and Quit to Desktop"); 2. next: the *F.E.A.R. Files* campaigns at 4K with the texture pack ([FILES.md](FILES.md)); later, a side-by-side recording against the PC version with EchoPatch (PROGRESS.md, open item 13). The pistol's impacts are parked: they match a real 360 (open item 12).
