@@ -72,6 +72,13 @@ The question came up after the play-test: would it be easier to take the 360-onl
 
 **Recommendation: stay with the recomp.** The 360 content is the reason for the project, and it's free here; going the other way means rebuilding that content and logic on a closed engine. The PC version's real advantage, its textures, can be brought *into* the recomp by name. Quake 4 was different: openQ4 is an open engine and the 360's extras were small code routines.
 
+## Idea for later: engine overhauls, OpenCE-style (maybe in Rust)
+Raised 2026-10-22: rewrite parts of the engine for speed, the way OpenCE did, possibly in Rust; partly in case the movement feel comes from how the game was squeezed onto the 360 rather than from movement code.
+- **Where speed comes from here:** at 4K/120 the renderer mostly waits for the game, and the recompiled CPU code runs on a 9800X3D, far beyond a 360. There's no measured CPU bottleneck yet, so a rewrite for speed would be aimed at nothing. Profile first (the renderer already reports where frame time goes).
+- **What OpenCE's rewrites actually bought** was *behaviour*: rendering between simulation ticks (Smooth Motion), lower input latency, configurable FOV. Those come from owning the code, not from the language. The recomp already allows the same thing one function at a time: replace a recompiled function with a hand-written one, as WK2D's N3 project does with tested C++ modules.
+- **Language:** the SDK, the renderer and the generated code are C++; Rust would sit behind a C ABI at every boundary, for no speed gain (both compile through LLVM). Worth it only if a whole subsystem gets rewritten for maintainability.
+- **For the movement feel specifically:** if it turns out to be console-era tuning or a 30 Hz assumption (head bob, camera smoothing, input filtering), the fix is a small hook on that function, measured against `-FrameRate 30` and against the PC version's values.
+
 ## Open items and next steps
 1. **Frame pacing:** test `-Present fifo` / `mailbox`; then lock the virtual vblank to the display (the real fix).
 2. **Chapter cards / transition flicker:** reproduce at `-Scale 1` and `-FrameRate 30` to see whether they're ours (scaling) or upstream; fix accordingly.

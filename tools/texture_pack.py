@@ -6,7 +6,7 @@ folder (gitignored private/ by default).
   python -I tools/texture_pack.py bundle  <uberCatalog.cat> <work>          # 360 .tex -> bundle
   <port-nx>/fear_texindex <work>/x360.bundle <work>/x360.tsv <work>/x360_base.bin
   python -I tools/texture_pack.py build   <work> <PC install> <pack> [--formats dxt] [--limit N]
-  python -I tools/texture_pack.py compare <work> <runtime.log>             # keys seen in a run
+  python -I tools/texture_pack.py compare <work> <runtime.log> [--pack <pack>]  # keys seen in a run
 
 `build` matches 360 textures to PC files by path, decodes both base levels, and keeps a pair
 only if the PC texture, scaled down to the 360 size, looks like the 360 one (the quality gate).
@@ -263,14 +263,25 @@ def cmd_build(work, pc_root, pack, formats='dxt', limit=None, min_psnr=24.0):
     print(f'pack: {pack} ({done} replacements)')
 
 
-def cmd_compare(work, log):
-    keys = {}
+def cmd_compare(work, log, pack=None):
+    """Runtime keys (a log with fear_texture_log_keys) against the offline index and, given the
+    pack, what the build decided for each catalogue texture the game used."""
+    keys, by_shape = {}, {}
     with open(Path(work) / 'x360.tsv', encoding='latin-1') as f:
-        f.readline()
+        header = f.readline().rstrip('\n').split('\t')
         for line in f:
-            parts = line.rstrip('\n').split('\t')
-            if len(parts) > 1 and parts[1]:
-                keys[parts[1]] = parts[0]
+            r = dict(zip(header, line.rstrip('\n').split('\t')))
+            if r.get('key'):
+                keys[r['key']] = r['name']
+            shape = (r['format'], r['width'], r['height'])
+            by_shape.setdefault(shape, []).append(r['name'])
+    decided = {}
+    if pack:
+        with open(Path(pack) / 'report.tsv', encoding='latin-1') as f:
+            for line in f:
+                parts = line.rstrip('\n').split('\t')
+                if len(parts) > 1:
+                    decided[parts[1]] = parts[0]
     seen = []
     pattern = re.compile(r'\[texpack\] key=([0-9A-F]{16}) format=(\d+) size=(\d+)x(\d+)')
     with open(log, encoding='utf-8', errors='replace') as f:
@@ -280,8 +291,25 @@ def cmd_compare(work, log):
                 seen.append(m.groups())
     hit = [s for s in seen if s[0] in keys]
     print(f'{len(seen)} distinct runtime keys, {len(hit)} found in the offline index')
-    for s in seen[:10]:
-        print('  ', s, keys.get(s[0], '(not in index)'))
+    outcome = {}
+    for s in hit:
+        status = decided.get(keys[s[0]], '?')
+        outcome[status] = outcome.get(status, 0) + 1
+    for status, n in sorted(outcome.items(), key=lambda kv: -kv[1]):
+        print(f'  {status}: {n}')
+    # Keys the index doesn't know: dynamic content (videos, render targets) or a catalogue
+    # texture whose runtime bytes differ from the file. A shape with catalogue candidates is
+    # worth a look.
+    missing = {}
+    for s in seen:
+        if s[0] not in keys:
+            shape = (s[1], s[2], s[3])
+            missing[shape] = missing.get(shape, 0) + 1
+    print(f'{len(seen) - len(hit)} not in the index, by format/size (catalogue textures of that shape):')
+    for shape, n in sorted(missing.items(), key=lambda kv: -kv[1])[:25]:
+        candidates = by_shape.get(shape, [])
+        print(f'  {n:5d}  fmt={shape[0]:>2} {shape[1]}x{shape[2]}  ({len(candidates)})',
+              ', '.join(candidates[:3]))
 
 
 def main():
@@ -299,7 +327,7 @@ def main():
         cmd_build(args[0], args[1], args[2], formats=opts.get('--formats', 'dxt'),
                   limit=int(opts['--limit']) if '--limit' in opts else None)
     elif cmd == 'compare':
-        cmd_compare(*args[:2])
+        cmd_compare(args[0], args[1], pack=opts.get('--pack'))
     else:
         print(__doc__)
 
