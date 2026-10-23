@@ -38,6 +38,16 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Next build (2026-10-23): an SDK switch for SDL's HIDAPI drivers, the full caller chain
+- SDK patch `patches/rexglue-sdk-nx/0004-...`: cvar `hid_sdl_hidapi` (auto/on/off) sets
+  `SDL_HINT_JOYSTICK_HIDAPI` with override priority before the gamepad subsystem starts, in
+  `SDLInputDriver::OnWindowAvailable` (on the UI thread). The log line
+  `SDL: HIDAPI joystick drivers on|off (hid_sdl_hidapi ..., SDL_JOYSTICK_HIDAPI in the
+  environment: ...)` also says whether Steam passed the variable last time.
+- Profiler: `system calls from:` lists up to four other modules on the way out (each once,
+  innermost first; the exe's host code as `fear.exe`), then the first translated function.
+- Deck test: `--hid_sdl_hidapi off` at the end of the launch options.
+
 ## Deck run with `SDL_JOYSTICK_HIDAPI=0` in the launch options (`fear_017.log`, same build, Docks)
 - **It didn't take effect**: SDL still added "Steam Controller" (28DE:1302) and "Steam Deck
   Controller" (28DE:1205), and `ZwDeviceIoControlFile < HID.DLL` is still 6.6-8.7% of the game

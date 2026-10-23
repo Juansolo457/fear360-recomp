@@ -23,9 +23,12 @@
 //   2: the secondary ring, 3: the swap throttle, 6: a fence, the odd numbers 7-15: resources
 //   the GPU still uses). "untracked" is reason 0, which Direct3D doesn't count either.
 // - "system calls from": samples in ntdll, win32u, kernelbase or kernel32 by who made the call:
-//   "ntdll.dll!ZwDeviceIoControlFile < hid.dll!HidD_SetFeature < sub_821CFCD8 9%" (the first
-//   other DLL and the first translated function among the return addresses on the thread's stack;
-//   a scan of the stack, so now and then it can name a stale caller).
+//   "ntdll.dll!ZwDeviceIoControlFile < HID.DLL!... < rexruntimerd.dll!... < fear.exe <
+//   sub_821CFCD8 9%" (up to four other modules on the way out, each once, innermost first, then
+//   the first translated function, from the return addresses on the thread's stack; a scan of the
+//   stack, so it can name a stale caller, the translated function most of all). Export names are
+//   the nearest named export, so a DLL's internal code (SDL inside rexruntimerd.dll) gets a
+//   neighbour's name: read the module, not the function.
 //
 // Windows (and Proton on the Deck: Wine implements the thread calls); a no-op elsewhere.
 

@@ -282,8 +282,9 @@ uint64_t CpuTime100ns(HANDLE thread) {
 
 // --- Who made a system call (#30) ---------------------------------------------------------------
 // A sample in a system DLL (ntdll, win32u, kernelbase, kernel32) is named after its callers: the
-// first DLL outside those (hid.dll, SDL3.dll, ws2_32.dll, rexruntimerd.dll, ...) and the first
-// translated game function, from the return addresses on the thread's stack. The top of the stack
+// chain of other modules on the way out (hid.dll, then rexruntimerd.dll with SDL inside, then
+// fear.exe's host code, ...; each module once, innermost first) and the first translated game
+// function, from the return addresses on the thread's stack. The top of the stack
 // is copied while the thread is suspended (ReadProcessMemory: a system call, no user-mode lock)
 // and scanned after it resumes; a word counts as a return address when it points into a module
 // just past a call instruction. A scan can pick up a stale return address left on the stack, so
@@ -381,23 +382,31 @@ uintptr_t TebOf(HANDLE thread) {
   return reinterpret_cast<uintptr_t>(info.teb);
 }
 
-// The callers of a system-DLL sample, from a copy of the stack: the first return address in a
-// non-system DLL (a bucket, or 0) and in a translated function (its guest address, or 0).
-std::pair<uint64_t, uint32_t> SystemCallers(const uint64_t* stack, size_t words) {
-  uint64_t via = 0;
+// The callers of a system-DLL sample, from a copy of the stack: up to kChainModules non-system
+// modules, each at its innermost return address (a bucket; host code in the exe counts as the
+// module fear.exe), then the first translated function (its guest address), zeros after.
+constexpr size_t kChainModules = 4;
+using CallerChain = std::array<uint64_t, kChainModules + 1>;
+
+CallerChain SystemCallers(const uint64_t* stack, size_t words) {
+  CallerChain chain = {};
+  size_t modules = 0;
+  uintptr_t last_module = 0;
   for (size_t i = 0; i < words; ++i) {
     const uintptr_t word = uintptr_t(stack[i]);
     const CodeRange* range = CodeRangeOf(word);
     if (!range || !FollowsCall(word, *range)) continue;
     const uintptr_t module = range->module;
-    if (module == g_exe_base) {
-      const uint64_t bucket = Bucket(word);
-      if (!(bucket & kModuleTag)) return {via, uint32_t(bucket)};
-      continue;  // the SDK's or our own host code in the exe
+    const uint64_t bucket = Bucket(word);
+    if (!(bucket & kModuleTag)) {
+      chain[kChainModules] = uint32_t(bucket);  // translated code: the end of the chain
+      break;
     }
-    if (!via && !IsSystemModule(module)) via = Bucket(word);
+    if (IsSystemModule(module) || module == last_module) continue;
+    last_module = module;
+    if (modules < kChainModules) chain[modules++] = bucket;
   }
-  return {via, 0};
+  return chain;
 }
 
 struct Thread {
@@ -414,22 +423,22 @@ struct Thread {
   WaitSlot* wait_slot = nullptr;  // once the thread has waited in Direct3D
   uint64_t wait_samples = 0;
   std::array<uint32_t, std::size(kWaitReasons)> waits = {};
-  // System-DLL samples by (bucket, first non-system caller, first translated caller).
+  // System-DLL samples by (bucket, caller chain).
   uintptr_t teb = 0;
-  std::map<std::tuple<uint64_t, uint64_t, uint32_t>, uint32_t> system_callers;
+  std::map<std::pair<uint64_t, CallerChain>, uint32_t> system_callers;
 };
 
 std::string SystemCallersText(const Thread& t) {
-  std::vector<std::pair<uint32_t, std::tuple<uint64_t, uint64_t, uint32_t>>> top;
+  std::vector<std::pair<uint32_t, std::pair<uint64_t, CallerChain>>> top;
   for (const auto& [key, count] : t.system_callers) top.emplace_back(count, key);
   std::sort(top.rbegin(), top.rend());
   const uint64_t total = std::max<uint64_t>(t.samples, 1);
   std::string text;
   for (size_t i = 0; i < top.size() && i < 6 && top[i].first * 200 >= total; ++i) {
-    const auto& [bucket, via, guest] = top[i].second;
+    const auto& [bucket, callers] = top[i].second;
     std::string chain = BucketName(bucket);
-    if (via) chain += " < " + BucketName(via);
-    if (guest) chain += fmt::format(" < sub_{:08X}", guest);
+    for (size_t m = 0; m < kChainModules && callers[m]; ++m) chain += " < " + BucketName(callers[m]);
+    if (callers[kChainModules]) chain += fmt::format(" < sub_{:08X}", uint32_t(callers[kChainModules]));
     text += fmt::format("{}{} {:.1f}%", i ? ", " : "", chain, 100.0 * top[i].first / total);
   }
   return text;
@@ -578,8 +587,7 @@ void Run() {
         }
         const uintptr_t module = uintptr_t(bucket & ~kModuleTag & ~uint64_t(0xFFFF));
         if (stack_words && (bucket & kModuleTag) && module && IsSystemModule(module)) {
-          const auto [via, guest] = SystemCallers(stack_copy, stack_words);
-          ++t.system_callers[{bucket, via, guest}];
+          ++t.system_callers[{bucket, SystemCallers(stack_copy, stack_words)}];
         }
       }
     }

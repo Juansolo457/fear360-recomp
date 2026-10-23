@@ -1,0 +1,57 @@
+From 9dbf2c707ff91279eb5ef81d2eec14d766bff1b2 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 08:48:35 -0700
+Subject: [PATCH] Input: hid_sdl_hidapi sets SDL's HIDAPI joystick hint
+
+auto (default) leaves SDL's default and the SDL_JOYSTICK_HIDAPI environment
+variable; on or off sets SDL_HINT_JOYSTICK_HIDAPI with override priority
+before the gamepad subsystem starts. Under Proton every request of SDL's
+HIDAPI drivers goes through Wine's hid.dll, which on the Steam Deck costs
+the game thread 10% and more. The log says what took effect and whether
+the environment had the variable.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/input/sdl/sdl_input_driver.cpp | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index c7c440d..9d620b3 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -22,6 +22,10 @@
+ 
+ REXCVAR_DEFINE_STRING(hid_mappings_file, "gamecontrollerdb.txt", "Input",
+                       "Path to SDL gamecontroller mappings file");
++REXCVAR_DEFINE_STRING(hid_sdl_hidapi, "auto", "Input",
++                      "SDL's HIDAPI joystick drivers (talking to some pads directly, e.g. the Steam "
++                      "Deck's own controls): auto (SDL's default; the SDL_JOYSTICK_HIDAPI "
++                      "environment variable can change it), on, off (over the environment)");
+ 
+ namespace rex::input::sdl {
+ 
+@@ -88,6 +92,21 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+           },
+           this);
+ 
++      // SDL's HIDAPI drivers talk to some pads directly. Under Proton each of their requests
++      // goes through Wine's hid.dll, and on the Steam Deck those cost the game thread 10% and
++      // more; without them SDL gets the pad another way (XInput, raw input). Read when the
++      // gamepad subsystem starts, so set first; the log says what took effect.
++      const std::string hidapi = REXCVAR_GET(hid_sdl_hidapi);
++      if (hidapi == "on" || hidapi == "off") {
++        SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI, hidapi == "on" ? "1" : "0",
++                                SDL_HINT_OVERRIDE);
++      }
++      const char* hidapi_environment = SDL_getenv(SDL_HINT_JOYSTICK_HIDAPI);
++      REXLOG_INFO("SDL: HIDAPI joystick drivers {} (hid_sdl_hidapi {}, SDL_JOYSTICK_HIDAPI in "
++                  "the environment: {})",
++                  SDL_GetHintBoolean(SDL_HINT_JOYSTICK_HIDAPI, true) ? "on" : "off", hidapi,
++                  hidapi_environment ? hidapi_environment : "unset");
++
+       // Initialize game controller subsystem
+       if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+         REXLOG_ERROR("SDL: Failed to init gamecontroller subsystem: {}", SDL_GetError());
+-- 
+2.53.0.windows.1
+

@@ -52,6 +52,9 @@ Diagnosis (add to the end of the launch options, one run at a time)
     no partial vertex reads (#27):                          --fear_vertex_spans false
     no MSAA:                                                --nx_native_msaa false
     The log's "[native] vertex reads:" line confirms the setting took.
+  - Controller requests through Wine's hid.dll (#29): SDL's direct HID drivers off, so the
+    controls come through Steam Input's virtual pad:     --hid_sdl_hidapi off
+    The log's "SDL: HIDAPI joystick drivers" line confirms it.
 
 If it doesn't start
   - Make sure START IN is the fear folder (the paths in the launch options are relative to it).
