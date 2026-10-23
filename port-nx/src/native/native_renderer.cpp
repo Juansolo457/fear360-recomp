@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -357,6 +358,141 @@ struct VertexRangeKey {
 struct VertexRangeKeyHasher {
   size_t operator()(const VertexRangeKey& k) const { return size_t(k.hash ^ k.address); }
 };
+
+// F.E.A.R. (#27): the vertex buffers a vertex shader reads only at the vertex index, so that a
+// draw can only reach its own vertices: [first index, last index] x stride, plus the extent of the
+// last vertex's attributes. The translated shader puts the draw's vertex index (after the base
+// index and the min/max clamp) in r0.x; a buffer qualifies when every vfetch_full of it takes its
+// index from r0.x and nothing writes r0.x before, in a shader without loops, calls or jumps. Any
+// doubt and the buffer is read whole, as before.
+struct VertexSpanInfo {
+  std::array<uint32_t, 96> stride_bytes = {};
+  std::array<uint32_t, 96> extent_bytes = {};
+  std::array<bool, 96> safe = {};
+};
+
+void AnalyzeVertexSpans(const Shader& shader, VertexSpanInfo& info) {
+  namespace ucode = rex::graphics::ucode;
+  info = VertexSpanInfo();
+  std::array<bool, 96> seen = {}, bad = {};
+  for (const Shader::VertexBinding& binding : shader.vertex_bindings()) {
+    const uint32_t c = binding.fetch_constant;
+    if (c >= 96) continue;
+    uint32_t extent_words = 0;
+    bool ok = binding.stride_words != 0;
+    for (const Shader::VertexBinding::Attribute& attribute : binding.attributes) {
+      const auto& fetch = attribute.fetch_instr;
+      const uint32_t needed = xenos::GetVertexFormatNeededWords(fetch.attributes.data_format, 0b1111);
+      const auto& index = fetch.operands[0];
+      if (fetch.attributes.offset < 0 || !needed ||
+          index.storage_source != rex::graphics::InstructionStorageSource::kRegister ||
+          index.storage_index != 0 ||
+          index.storage_addressing_mode !=
+              rex::graphics::InstructionStorageAddressingMode::kAbsolute ||
+          index.components[0] != rex::graphics::SwizzleSource::kX) {
+        ok = false;
+        continue;
+      }
+      extent_words = std::max(extent_words, uint32_t(fetch.attributes.offset) +
+                                                uint32_t(32 - std::countl_zero(needed)));
+    }
+    const uint32_t stride = binding.stride_words * 4;
+    if (seen[c] && info.stride_bytes[c] != stride) ok = false;
+    seen[c] = true;
+    info.stride_bytes[c] = stride;
+    info.extent_bytes[c] = std::max(info.extent_bytes[c], extent_words * 4);
+    if (!ok) bad[c] = true;
+  }
+  // Program order: r0.x must still be the vertex index at each vfetch_full.
+  const std::vector<uint32_t>& code = shader.ucode_data();
+  bool written = false, linear = true, ended = false;
+  for (uint32_t pair = 0; pair < shader.cf_pair_index_bound() && linear && !ended; ++pair) {
+    if ((pair + 1) * 3 > code.size()) {
+      linear = false;
+      break;
+    }
+    ucode::ControlFlowInstruction cf[2];
+    ucode::UnpackControlFlowInstructions(code.data() + pair * 3, cf);
+    for (const ucode::ControlFlowInstruction& op : cf) {
+      if (ended) break;
+      uint32_t address = 0, count = 0, sequence = 0;
+      switch (op.opcode()) {
+        case ucode::ControlFlowOpcode::kNop:
+        case ucode::ControlFlowOpcode::kAlloc:
+        case ucode::ControlFlowOpcode::kMarkVsFetchDone:
+          continue;
+        case ucode::ControlFlowOpcode::kExec:
+        case ucode::ControlFlowOpcode::kExecEnd:
+          address = op.exec.address(), count = op.exec.count(), sequence = op.exec.sequence();
+          ended = op.opcode() == ucode::ControlFlowOpcode::kExecEnd;
+          break;
+        case ucode::ControlFlowOpcode::kCondExec:
+        case ucode::ControlFlowOpcode::kCondExecEnd:
+        case ucode::ControlFlowOpcode::kCondExecPredClean:
+        case ucode::ControlFlowOpcode::kCondExecPredCleanEnd:
+          address = op.cond_exec.address(), count = op.cond_exec.count();
+          sequence = op.cond_exec.sequence();
+          ended = op.opcode() == ucode::ControlFlowOpcode::kCondExecEnd ||
+                  op.opcode() == ucode::ControlFlowOpcode::kCondExecPredCleanEnd;
+          break;
+        case ucode::ControlFlowOpcode::kCondExecPred:
+        case ucode::ControlFlowOpcode::kCondExecPredEnd:
+          address = op.cond_exec_pred.address(), count = op.cond_exec_pred.count();
+          sequence = op.cond_exec_pred.sequence();
+          ended = op.opcode() == ucode::ControlFlowOpcode::kCondExecPredEnd;
+          break;
+        default:  // loops, calls, returns, jumps
+          linear = false;
+          break;
+      }
+      if (!linear) break;
+      for (uint32_t i = 0; i < count; ++i) {
+        if ((address + i + 1) * 3 > code.size()) {
+          linear = false;
+          break;
+        }
+        const uint32_t* words = code.data() + (address + i) * 3;
+        if ((sequence >> (i * 2)) & 1) {
+          const auto& vertex = *reinterpret_cast<const ucode::VertexFetchInstruction*>(words);
+          if (vertex.opcode() == ucode::FetchOpcode::kVertexFetch) {
+            if (!vertex.is_mini_fetch()) {
+              const uint32_t c = vertex.fetch_constant_index();
+              if (c < 96 && (written || vertex.src() != 0 || vertex.is_src_relative() ||
+                             (vertex.src_swizzle() & 3) != 0)) {
+                bad[c] = true;
+              }
+            }
+            if ((vertex.dest() == 0 || vertex.is_dest_relative()) &&
+                (vertex.dest_swizzle() & 7) != 7) {
+              written = true;
+            }
+          } else {
+            const auto& texture = *reinterpret_cast<const ucode::TextureFetchInstruction*>(words);
+            if ((texture.dest() == 0 || texture.is_dest_relative()) &&
+                (texture.dest_swizzle() & 7) != 7) {
+              written = true;
+            }
+          }
+        } else {
+          const auto& alu = *reinterpret_cast<const ucode::AluInstruction*>(words);
+          if (!alu.is_export()) {
+            if ((alu.vector_dest() == 0 || alu.is_vector_dest_relative()) &&
+                (alu.vector_write_mask() & 1)) {
+              written = true;
+            }
+            if ((alu.scalar_dest() == 0 || alu.is_scalar_dest_relative()) &&
+                (alu.scalar_write_mask() & 1)) {
+              written = true;
+            }
+          }
+        }
+      }
+    }
+  }
+  for (uint32_t c = 0; c < 96; ++c) {
+    info.safe[c] = linear && seen[c] && !bad[c] && info.stride_bytes[c] && info.extent_bytes[c];
+  }
+}
 
 }  // namespace
 
@@ -708,6 +844,27 @@ struct Renderer::Impl {
     return fresh;
   }
   bool vertex_exact = false;
+  // F.E.A.R. (#27): AnalyzeVertexSpans per vertex shader.
+  std::unordered_map<const Shader*, VertexSpanInfo> vertex_spans;
+  const VertexSpanInfo& VertexSpans(const Shader& shader) {
+    auto [it, added] = vertex_spans.try_emplace(&shader);
+    if (added) AnalyzeVertexSpans(shader, it->second);
+    return it->second;
+  }
+  // The guest index range of each converted index buffer copy, by its key's slot: (min << 32) |
+  // max, or ~0 for one without a usable index.
+  FlatMap64<uint64_t> index_bounds;
+  // A copy of a vertex span is addressed at its stream offset minus the span's offset in the
+  // range, so it has to land at least that far into the stream's lap: skip ahead once if not.
+  uint8_t* AllocateFrom(VkDeviceSize size, VkDeviceSize alignment, VkDeviceSize min_offset,
+                        VkDeviceSize& offset_out) {
+    const uint64_t start = rex::align(stream_head, uint64_t(alignment));
+    if (start % kStreamSize < min_offset && min_offset + size <= kStreamSize - kStreamGuard) {
+      stream_head = start - start % kStreamSize + min_offset;
+    }
+    uint8_t* out = Allocate(size, alignment, offset_out);
+    return out && offset_out >= min_offset ? out : nullptr;
+  }
   // F.E.A.R. (fear_vertex_audit): each copy's content when it was made, by stream position.
   FlatMap64<uint64_t> audit_content;
   bool vertex_audit = false;
@@ -3671,6 +3828,43 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
   };
   uint32_t draw_count = guest_count;
   bool host_indexed = indexed || convert_fan || convert_loop;
+  // F.E.A.R. (#27): the guest indices this draw uses, lowest and highest (reset indices aside),
+  // worked out only if a vertex buffer needs them; cached per converted index buffer copy.
+  uint64_t index_bounds_slot = UINT64_MAX;
+  int bounds_state = 0;  // 0 not yet, 1 known, 2 none usable
+  uint32_t index_lo = 0, index_hi = 0;
+  auto draw_index_bounds = [&]() -> bool {
+    if (bounds_state) return bounds_state == 1;
+    uint64_t packed = ~0ull;
+    const uint64_t* cached =
+        index_bounds_slot != UINT64_MAX ? index_bounds.find(index_bounds_slot) : nullptr;
+    if (cached) {
+      packed = *cached;
+    } else if (!indexed) {
+      packed = uint64_t(guest_count - 1);
+    } else {
+      uint32_t lo = UINT32_MAX, hi = 0;
+      for (uint32_t i = 0; i < guest_count; ++i) {
+        const uint32_t v = read_index(i);
+        if (reset_enabled && v == reset_index) continue;
+        lo = std::min(lo, v);
+        hi = std::max(hi, v);
+      }
+      if (lo <= hi) packed = (uint64_t(lo) << 32) | hi;
+      if (index_bounds_slot != UINT64_MAX) {
+        if (index_bounds.size() > 65536) index_bounds.clear();
+        index_bounds[index_bounds_slot] = packed;
+      }
+    }
+    if (packed == ~0ull) {
+      bounds_state = 2;
+      return false;
+    }
+    index_lo = uint32_t(packed >> 32);
+    index_hi = uint32_t(packed);
+    bounds_state = 1;
+    return true;
+  };
   VkIndexType index_type = index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
   VkDeviceSize index_offset = 0;
   if (host_indexed) {
@@ -3699,6 +3893,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       index_key = {dma_base, bytes | 0x80000000u,
                    index_hash ^ (uint64_t(index_endian) << 60) ^
                        (reset_enabled ? (uint64_t(reset_index) << 8) | 1 : 0)};
+      index_bounds_slot = RangeSlot(index_key);
       uint64_t found = FindRange(index_key);
       if (found != UINT64_MAX && stream_head - found < kStreamSize / 2) {
         index_offset = VkDeviceSize(found % kStreamSize);
@@ -3757,6 +3952,26 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
   // copies in the stream. Only slots written since they were last resolved,
   // or not yet resolved this frame, are looked at again.
   const Shader::ConstantRegisterMap& vs_constants = vs->constant_register_map();
+  // F.E.A.R. (#27): the vertex indices the draw can reach: its guest indices plus the base index,
+  // masked and clamped as the translated shader does (no span if they would wrap).
+  const VertexSpanInfo* spans = vertex_exact ? &VertexSpans(*vs) : nullptr;
+  int span_state = 0;  // 0 not yet, 1 known, 2 none
+  uint32_t vertex_lo = 0, vertex_hi = 0;
+  auto draw_vertex_range = [&]() -> bool {
+    if (span_state) return span_state == 1;
+    span_state = 2;
+    if (!draw_index_bounds()) return false;
+    const int64_t base = r.Get<int32_t>(rex::graphics::XE_GPU_REG_VGT_INDX_OFFSET);
+    const int64_t lo = int64_t(index_lo) + base, hi = int64_t(index_hi) + base;
+    if (lo < 0 || hi > int64_t(xenos::kVertexIndexMask)) return false;
+    const uint32_t clamp_lo = r[rex::graphics::XE_GPU_REG_VGT_MIN_VTX_INDX];
+    const uint32_t clamp_hi = r[rex::graphics::XE_GPU_REG_VGT_MAX_VTX_INDX];
+    if (clamp_lo > clamp_hi) return false;
+    vertex_lo = std::clamp(uint32_t(lo), clamp_lo, clamp_hi);
+    vertex_hi = std::clamp(uint32_t(hi), clamp_lo, clamp_hi);
+    span_state = 1;
+    return true;
+  };
   if (fetch_words_frame != frame || fetch_words_submission != submission_number) {
     // New frame: vertex data is checked for changes again. New submission:
     // copies in older submissions may be reused, but the bookkeeping is
@@ -3804,6 +4019,49 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       }
       const uint8_t* source = memory->TranslatePhysical<const uint8_t*>(address);
       VertexHash& known = vertex_hashes[(uint64_t(address) << 32) | bytes];
+      // F.E.A.R. (#27): a range on fear_vertex_exact's per-draw reads, read only over the
+      // vertices this draw can reach when the shader allows it: the span's hash names its copy,
+      // and the fetch address points that far before the copy. Its whole-range check stays once
+      // a frame, keeping its change tracking.
+      if (spans && bytes > kVertexAlwaysBytes && spans->safe[fetch_index] &&
+          draw_vertex_range()) {
+        RangeHash(known, source, bytes, address);
+        const uint64_t stride = spans->stride_bytes[fetch_index];
+        const uint64_t lo = uint64_t(vertex_lo) * stride;
+        const uint64_t hi =
+            std::min<uint64_t>(uint64_t(vertex_hi) * stride + spans->extent_bytes[fetch_index], bytes);
+        const bool recent = known.changed_frame &&
+                            frame - known.changed_frame <= kVertexRecentFrames;
+        if (recent && lo < hi && hi - lo < bytes && lo <= kStreamSize / 4) {
+          const uint32_t span_lo = uint32_t(lo), span_bytes = uint32_t(hi - lo);
+          const uint8_t* span = source + span_lo;
+          const VertexRangeKey span_key = {address + span_lo, span_bytes,
+                                           XXH3_64bits(span, span_bytes)};
+          ++stats().vertex_span_reads;
+          stats().vertex_span_bytes += span_bytes;
+          stats().vertex_span_whole_bytes += bytes;
+          uint64_t found = FindRange(span_key);
+          VkDeviceSize span_offset = 0;
+          bool placed = false;
+          if (found != UINT64_MAX && stream_head - found < kStreamSize / 2 &&
+              found % kStreamSize >= span_lo) {
+            span_offset = VkDeviceSize(found % kStreamSize);
+            current().stream_oldest = std::min(current().stream_oldest, found);
+            if (vertex_audit) AuditUse(found, span, span_bytes);
+            placed = true;
+          } else if (uint8_t* out = AllocateFrom(span_bytes, 16, span_lo, span_offset)) {
+            std::memcpy(out, span, span_bytes);
+            stats().vertex_bytes_copied += span_bytes;
+            AddRange(span_key, stream_head - span_bytes);
+            if (vertex_audit) AuditCopy(stream_head - span_bytes, span, span_bytes);
+            placed = true;
+          }
+          if (placed) {
+            dword0 = (guest_dword0 & 0x3) | uint32_t(span_offset - span_lo);
+            continue;
+          }
+        }
+      }
       VertexRangeKey range_key = {address, bytes, DrawRangeHash(known, source, bytes, address)};
       uint64_t found = FindRange(range_key);
       VkDeviceSize range_offset;

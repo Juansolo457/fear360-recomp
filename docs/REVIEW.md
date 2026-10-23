@@ -118,6 +118,12 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   each draw; the 11-minute 120 fps run counted ~408,000 draws the old check would have drawn
   stale and the tracers were clean. Cost: +1.9 ms renderer CPU a frame (hashing ~8 GB/s of whole
   ranges).
+- **Spans (#27, written, not yet built):** in heavy F.E.A.R. Files Instant Action fights the
+  per-draw reads reached 25–30 GB/s (8–12 ms renderer CPU a frame, frames at 67–90 fps): many
+  ranges run to the end of a shared ring the game rewrites constantly, so they stay "recent".
+  Now a range on per-draw reads is hashed and copied only over the vertices the draw can reach,
+  when the vertex shader provably fetches it at the vertex index (see UPSTREAM.md); the
+  10-second report gives "vertex spans: N reads, X MB hashed instead of Y MB".
 - **Made cheaper (same day, not yet built):** the cost came from the rule "re-read every range
   that has ever changed (or is under 64 KB) on every draw": a range that changed once, such as
   memory reused at a level load, stayed on per-draw reads for good. Now a range is re-read per

@@ -54,5 +54,12 @@ Local changes (see `git log -p -- port-nx/src/native`):
   data. Fixes bullet tracers sticking mid-air above ~90 fps. `fear_vertex_audit` (off) compares
   every copy a draw uses with guest memory.
 - The driver pipeline cache's data is copied out on its writer thread, not the ring thread.
+- Vertex spans (#27, with `fear_vertex_exact`): a vertex buffer on per-draw reads is hashed and
+  copied only over the vertices the draw can reach (its index range, plus the base index and
+  min/max clamp, times the stride, plus the last vertex's attribute extent), when the vertex
+  shader fetches it only at the vertex index (`AnalyzeVertexSpans`: every vfetch_full of it reads
+  r0.x and nothing writes r0.x before, no loops, calls or jumps). The fetch address is the copy's
+  stream offset minus the span's offset (`AllocateFrom` keeps that non-negative). Otherwise the
+  whole range, as before.
 
 The `*_test.cpp` files are kept for reference but are not built here.

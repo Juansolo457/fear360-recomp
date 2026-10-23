@@ -731,6 +731,12 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
                     s.vertex_stale_midframe - reported_render_.vertex_stale_midframe,
                     s.vertex_stale_missed - reported_render_.vertex_stale_missed);
       }
+      if (const uint64_t reads = s.vertex_span_reads - reported_render_.vertex_span_reads) {
+        REXLOG_INFO("[native] vertex spans (#27): {} reads of only the vertices a draw can reach, "
+                    "{} MB hashed instead of {} MB",
+                    reads, (s.vertex_span_bytes - reported_render_.vertex_span_bytes) >> 20,
+                    (s.vertex_span_whole_bytes - reported_render_.vertex_span_whole_bytes) >> 20);
+      }
       if (const uint64_t uses = s.vertex_audit_uses - reported_render_.vertex_audit_uses) {
         REXLOG_INFO("[native] vertex audit (fear_vertex_audit): {} copies used by draws, {} of "
                     "them with guest data changed since the copy (drawn stale)",

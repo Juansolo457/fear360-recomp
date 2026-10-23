@@ -67,6 +67,11 @@ struct RendererStats {
   // changed since the copy was made (drawn stale).
   uint64_t vertex_audit_uses = 0;
   uint64_t vertex_audit_stale = 0;
+  // F.E.A.R.: fear_vertex_exact's reads of only the span a draw can reach (#27): reads, the bytes
+  // hashed, and the bytes a whole-range read would have hashed.
+  uint64_t vertex_span_reads = 0;
+  uint64_t vertex_span_bytes = 0;
+  uint64_t vertex_span_whole_bytes = 0;
   uint64_t render_passes = 0;
   uint64_t submissions = 0;
   // Renderer CPU time on the ring thread (draws, resolves, swaps), and GPU
