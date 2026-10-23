@@ -38,6 +38,22 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Fresh baseline run (`fear_020.log`, 2026-10-23, full package of `2bb0774`, Interval 2)
+- User: "the best run by far", better in every problem area; a dip to the mid-40s early on.
+- Settings took (MSAA 1x, no texture pack, HIDAPI off, clean launch options). **`HID.DLL` is gone
+  from the game thread** (2 lines in the whole run, against every window before). Game-thread
+  slack (swap-throttle wait) median 36% (fear_016-019: 25-29%); heavy windows median 59.0 fps
+  (fear_019: 56.1); the heaviest window, 2,302 draws a frame (more than the old benchmark
+  room's 1,938), held 47.1 fps (was 41.5), GPU 14.8 ms, renderer 10.0 ms.
+- **The early dip is pipeline compiles**: at 10:36:11, 50 pipelines waited for (865 ms), 2,193
+  draws skipped over the wait budget, frames of 116-125 ms. The pre-warm loaded 273 pipelines,
+  but all saved with MSAA on; MSAA off changes every key. One-time: this run saved the MSAA-off
+  ones. A fix for the future: re-key the saved pipelines to the current sample count.
+- Busiest windows' game thread: engine 23-28%, engine renderer 12-15%, Havok 7-11%, ClientFX
+  6-9%, C runtime 5-8%, engine sound 5-9%, Direct3D 4-7%, game client 4-6%.
+- Next: uncapped to 120 fps (`make_package.py --settings`: timer vblank at 240 Hz, mailbox), to
+  see the headroom.
+
 ## Fresh Deck baseline (2026-10-23): pad names cached (SDK patch 0006), no MSAA, no PC textures
 - `fear_019.log` (build with patch 0005, `SDL_JOYSTICK_HIDAPI=0` still in the launch options, MSAA
   and the PC textures on): "the smoothest by far", the autosave drop "mostly gone", the

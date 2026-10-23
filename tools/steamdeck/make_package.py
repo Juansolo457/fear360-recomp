@@ -4,6 +4,9 @@
     python -I tools/steamdeck/make_package.py --programs [out.zip]
         just the programs and DLLs (default private/steamdeck/FEAR360-SteamDeck-update.zip), to
         unpack over an existing install: no data, saves or settings
+    python -I tools/steamdeck/make_package.py --settings [out.zip]
+        just both games' user/settings.toml (default private/steamdeck/FEAR360-SteamDeck-settings.zip),
+        to unpack over an existing install: the Deck settings below, saves untouched
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -25,11 +28,13 @@ import sys
 import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-ARGV = [a for a in sys.argv[1:] if a != '--programs']
+ARGV = [a for a in sys.argv[1:] if a not in ('--programs', '--settings')]
 PROGRAMS_ONLY = '--programs' in sys.argv[1:]
+SETTINGS_ONLY = '--settings' in sys.argv[1:]
 OUT = ARGV[0] if ARGV else os.path.join(
     REPO, 'private', 'steamdeck',
-    'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else 'FEAR360-SteamDeck.zip')
+    'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else
+    'FEAR360-SteamDeck-settings.zip' if SETTINGS_ONLY else 'FEAR360-SteamDeck.zip')
 TOP = 'FEAR360-SteamDeck'
 CRT_DLLS = ['msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
 ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root', 'assets',
@@ -41,11 +46,16 @@ if SHIP_TEXTURE_PACKS:
     ARGS += ['--fear_texture_pack', 'texture_pack']
 DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
-                 "# Steam Deck: 1x (1280x720 for the Deck's 1280x800 screen), and 60 fps:\n"
-                 '# the Deck reported 120 Hz through gamescope when docked, and the game\n'
-                 "# paced to 120 while the Deck's own limit showed 60 (play-test, #28).\n"
+                 "# Steam Deck: 1x (1280x720 for the Deck's 1280x800 screen).\n"
                  'nx_native_resolution_scale = 1\n'
-                 'fear_frame_rate_limit = 60\n'
+                 '# Uncapped to 120 fps (#28): the vblank from a timer at 240 Hz instead of the\n'
+                 '# display (the game presents every second one), mailbox presentation (no\n'
+                 '# tearing; on a 60 Hz screen the extra frames are dropped). 120 is the tested\n'
+                 '# ceiling: EchoPatch lists physics and particle trouble above it. For 60 again,\n'
+                 '# replace these three lines with: fear_frame_rate_limit = 60\n'
+                 'fear_vblank_source = "timer"\n'
+                 'video_mode_refresh_rate = 240\n'
+                 'vulkan_allow_present_mode_immediate = false\n'
                  "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
                  "# the GPU), SDL's HIDAPI drivers off (the controls come through Steam Input's\n"
                  '# pad, the usual Proton path; #29) and the profiler on for the logs (about 6%\n'
@@ -74,8 +84,15 @@ def crt_folder():
 
 
 def main():
+    if SETTINGS_ONLY:
+        os.makedirs(os.path.dirname(OUT), exist_ok=True)
+        with zipfile.ZipFile(OUT, 'w', zipfile.ZIP_DEFLATED) as z:
+            for folder, *_ in GAMES:
+                z.writestr(f'{TOP}/{folder}/user/settings.toml', DECK_SETTINGS)
+        print(f'{OUT}: settings.toml for {len(GAMES)} games')
+        return
     crt = crt_folder()
-    collection = ["# The F.E.A.R. collection menu, Steam Deck layout: paths relative to each "
+    collection =["# The F.E.A.R. collection menu, Steam Deck layout: paths relative to each "
                   "game's folder."]
     for folder, _, exe, _, cid, name, subtitle in GAMES:
         collection += ['', '[[title]]', f"id = '{cid}'", f"name = '{name}'",
