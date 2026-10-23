@@ -32,8 +32,10 @@ Deck's 1280x800 screen).
 
 Performance testing
   - The Deck's overlay: Quick Access (...) > Performance > Performance Overlay Level 3 or 4.
-  - The frame cap follows the display: 60 fps on the LCD Deck, 90 on the OLED (the cap is 120).
-    For a fixed lower rate, set the Deck's Framerate Limit, or PC Settings > Frame rate.
+  - The game paces itself to the display, up to its own limit: 60 fps in this package (PC
+    Settings > Frame rate). Leave the Deck's Framerate Limit off, or at the same value: the game
+    can't see the Deck's limit, and pacing to 120 while the Deck showed 60 doubled the work and
+    made frames uneven (first Deck test, #28).
   - The first run translates shaders as they appear (brief hitches the first time an effect is
     seen); each later run starts with them pre-built, so test the second run for smoothness.
   - Without the PC textures (lighter on memory): delete " --fear_texture_pack texture_pack" from
