@@ -20,14 +20,14 @@ ctr_as_local = true
 xer_as_local = true
 reserved_as_local = true
 cr_as_local = true
-# Stage A of the A/B (docs/HANDOFF-REGOPTS.md section 4): the five options above only. Stage B
-# adds non_volatile_as_local with setjmp/longjmp, stage C non_argument_as_local.
+# Stage B of the A/B (docs/HANDOFF-REGOPTS.md section 4): non_volatile_as_local with
+# setjmp/longjmp on top of the five above. Stage C adds non_argument_as_local.
 # non_argument_as_local = true
-# non_volatile_as_local = true
+non_volatile_as_local = true
 # The C runtime's setjmp and longjmp (libpng, libjpeg and the shader compilers' error paths):
 # their jmp_buf can't reach registers that are locals, so these calls become host ones.
-# setjmp_address = 0x82BBA450
-# longjmp_address = 0x82BBA200
+setjmp_address = 0x82BBA450
+longjmp_address = 0x82BBA200
 
 # Function entries the analyser misses: branch targets, indirect-call targets seen at
 # runtime, and .rdata method-table slots. Found and verified by the fear-nx project
