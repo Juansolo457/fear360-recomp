@@ -40,6 +40,7 @@ set(FEAR_SOURCES
     src/anim_timing.cpp
     src/high_fps.cpp
     src/profiler.cpp
+    src/cpu_check.cpp
     src/texture_pack.cpp
     src/crash_report.cpp
     src/display_vblank.cpp
@@ -53,6 +54,10 @@ set(FEAR_SOURCES
     ${FEAR_NATIVE_SOURCES}
 )
 
+# The CPU check runs before any x86-64-v3 code (src/cpu_check.cpp), so it is built for v2 and
+# without the precompiled header (built for v3).
+set_source_files_properties(src/cpu_check.cpp PROPERTIES COMPILE_OPTIONS "-march=x86-64-v2"
+                            SKIP_PRECOMPILE_HEADERS ON)
 add_executable(fear WIN32 ${FEAR_SOURCES})
 
 rexglue_setup_target(fear)

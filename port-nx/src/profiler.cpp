@@ -63,8 +63,51 @@ void BuildFunctionTable() {
   g_exe_end = g_exe_base + nt->OptionalHeader.SizeOfImage;
 }
 
-// A sample's bucket: a guest function (its address), or a module (tagged with the top bit set and
-// the module's base, its name looked up when reporting).
+// A module's named exports by address (RVA), sorted: a sample outside the translated code is named
+// after the nearest export at or below it ("ucrtbase.dll!fma"; a function that isn't exported gets
+// the name of the export before it). Wine's builtin DLLs are PE files with export tables too.
+// Built on first use per module; only the sampling thread touches these.
+struct Exports {
+  std::vector<std::pair<uint32_t, std::string>> by_rva;
+};
+std::unordered_map<uintptr_t, Exports> g_exports;  // by module base
+
+const Exports& ModuleExports(uintptr_t module) {
+  auto [it, added] = g_exports.try_emplace(module);
+  if (!added || !module) return it->second;
+  const auto* base = reinterpret_cast<const uint8_t*>(module);
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE) return it->second;
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE) return it->second;
+  const IMAGE_DATA_DIRECTORY& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+  if (!dir.VirtualAddress || !dir.Size) return it->second;
+  const auto* table = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(base + dir.VirtualAddress);
+  const auto* functions = reinterpret_cast<const DWORD*>(base + table->AddressOfFunctions);
+  const auto* names = reinterpret_cast<const DWORD*>(base + table->AddressOfNames);
+  const auto* ordinals = reinterpret_cast<const WORD*>(base + table->AddressOfNameOrdinals);
+  for (DWORD i = 0; i < table->NumberOfNames; ++i) {
+    if (ordinals[i] >= table->NumberOfFunctions) continue;
+    const DWORD rva = functions[ordinals[i]];
+    // A forwarder ("ntdll.RtlFoo") points into the export directory, not at code.
+    if (!rva || (rva >= dir.VirtualAddress && rva < dir.VirtualAddress + dir.Size)) continue;
+    it->second.by_rva.emplace_back(rva, reinterpret_cast<const char*>(base + names[i]));
+  }
+  std::sort(it->second.by_rva.begin(), it->second.by_rva.end());
+  return it->second;
+}
+
+std::string ModuleName(uintptr_t module) {
+  if (!module) return "(unknown)";
+  char path[MAX_PATH] = {};
+  GetModuleFileNameA(reinterpret_cast<HMODULE>(module), path, MAX_PATH);
+  const char* name = std::strrchr(path, '\\');
+  return name ? name + 1 : path;
+}
+
+// A sample's bucket: a guest function (its address), or a module and export (the top bit set,
+// the module's base, which is 64 KB aligned, and in the low 16 bits the export's index + 1, or 0
+// for none or "(unknown)": code outside any module, e.g. Wine's Unix side).
 constexpr uint64_t kModuleTag = 1ull << 63;
 
 uint64_t Bucket(uintptr_t ip) {
@@ -77,11 +120,22 @@ uint64_t Bucket(uintptr_t ip) {
       return std::prev(it)->second;
     }
   }
-  HMODULE module = nullptr;
+  HMODULE handle = nullptr;
   GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                     reinterpret_cast<LPCWSTR>(ip), &module);
-  return kModuleTag | reinterpret_cast<uint64_t>(module);
+                     reinterpret_cast<LPCWSTR>(ip), &handle);
+  const auto module = reinterpret_cast<uintptr_t>(handle);
+  uint64_t index = 0;
+  if (module && !(module & 0xFFFF) && module != g_exe_base) {
+    const auto& by_rva = ModuleExports(module).by_rva;
+    auto it = std::upper_bound(by_rva.begin(), by_rva.end(),
+                               std::make_pair(uint32_t(ip - module), std::string()),
+                               [](const auto& a, const auto& b) { return a.first < b.first; });
+    if (it != by_rva.begin() && size_t(it - by_rva.begin()) < 0xFFFF) {
+      index = uint64_t(it - by_rva.begin());  // the one before it, + 1
+    }
+  }
+  return kModuleTag | uint64_t(module) | index;
 }
 
 std::string BucketName(uint64_t bucket) {
@@ -90,12 +144,25 @@ std::string BucketName(uint64_t bucket) {
     std::snprintf(text, sizeof(text), "sub_%08X", uint32_t(bucket));
     return text;
   }
-  const auto module = reinterpret_cast<HMODULE>(bucket & ~kModuleTag);
-  if (!module) return "(unknown)";
-  char path[MAX_PATH] = {};
-  GetModuleFileNameA(module, path, MAX_PATH);
-  const char* name = std::strrchr(path, '\\');
-  return name ? name + 1 : path;
+  const uintptr_t module = uintptr_t(bucket & ~kModuleTag & ~uint64_t(0xFFFF));
+  const uint64_t index = bucket & 0xFFFF;
+  std::string name = ModuleName(module);
+  if (index) {
+    const auto& by_rva = ModuleExports(module).by_rva;
+    if (index <= by_rva.size()) name += "!" + by_rva[index - 1].second;
+  }
+  return name;
+}
+
+// Where a thread started ("ucrtbase.dll!thread_start", "dxgi.dll!..."), for threads nobody named.
+std::string StartName(HANDLE thread) {
+  using QueryThread = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+  static const auto query = reinterpret_cast<QueryThread>(
+      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
+  void* start = nullptr;
+  // 9: ThreadQuerySetWin32StartAddress.
+  if (!query || query(thread, 9, &start, sizeof(start), nullptr) < 0 || !start) return "";
+  return BucketName(Bucket(reinterpret_cast<uintptr_t>(start)));
 }
 
 std::string ThreadName(HANDLE thread, DWORD id) {
@@ -112,7 +179,11 @@ std::string ThreadName(HANDLE thread, DWORD id) {
     }
     LocalFree(wide);
   }
-  if (name.empty()) name = "thread " + std::to_string(id);
+  if (name.empty()) {
+    name = "thread " + std::to_string(id);
+    const std::string start = StartName(thread);
+    if (!start.empty()) name += " (from " + start + ")";
+  }
   return name;
 }
 
@@ -192,11 +263,15 @@ void Run() {
       if (SuspendThread(t.handle) == DWORD(-1)) continue;
       CONTEXT context = {};
       context.ContextFlags = CONTEXT_CONTROL;
-      if (GetThreadContext(t.handle, &context)) {
+      const bool sampled = GetThreadContext(t.handle, &context);
+      // Resumed before anything that can take a lock: naming the sample looks up its module
+      // (the loader lock) and counting it allocates (the heap's), and the suspended thread may
+      // hold either.
+      ResumeThread(t.handle);
+      if (sampled) {
         ++t.samples;
         ++t.buckets[Bucket(uintptr_t(context.Rip))];
       }
-      ResumeThread(t.handle);
     }
     // Every 10 s: the report.
     if (now - last_report >= std::chrono::seconds(10)) {
@@ -217,6 +292,13 @@ void Run() {
         rows.push_back({share, &t});
       }
       std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.cpu > b.cpu; });
+      // The profiler's own thread (not sampled, not in the rows). Under Wine part of its cost
+      // is in the wineserver process, which no thread here shows.
+      static uint64_t self_cpu_at_report = 0;
+      const uint64_t self_cpu = CpuTime100ns(GetCurrentThread());
+      REXLOG_INFO("[profile] the profiler itself: {:.1f}% of a core",
+                  double(self_cpu - self_cpu_at_report) / wall_100ns * 100.0);
+      self_cpu_at_report = self_cpu;
       REXLOG_INFO("[profile] CPU over 10 s: {:.2f} cores in all, {} threads", total_cpu,
                   threads.size());
       for (const Row& row : rows) {

@@ -30,6 +30,7 @@ set(FEAR_SOURCES
     ${HOST}/anim_timing.cpp
     ${HOST}/high_fps.cpp
     ${HOST}/profiler.cpp
+    ${HOST}/cpu_check.cpp
     ${HOST}/texture_pack.cpp
     ${HOST}/crash_report.cpp
     ${HOST}/display_vblank.cpp
@@ -46,6 +47,10 @@ set(FEAR_SOURCES
     ${HOST}/native/native_geometry_shaders.cpp
 )
 
+# The CPU check runs before any x86-64-v3 code (port-nx/src/cpu_check.cpp), so it is built for v2
+# and without the precompiled header (built for v3).
+set_source_files_properties(${HOST}/cpu_check.cpp PROPERTIES COMPILE_OPTIONS "-march=x86-64-v2"
+                            SKIP_PRECOMPILE_HEADERS ON)
 add_executable(fear WIN32 ${FEAR_SOURCES})
 set_target_properties(fear PROPERTIES OUTPUT_NAME fearfiles)
 # Which game the host code is built for (port-nx/src/fear_title.h): the menu hooks' addresses.

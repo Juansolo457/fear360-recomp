@@ -16,6 +16,23 @@ comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `d
 - Before that build it is worth adding the profiler attribution in finding 2 below, so the same
   Deck run that tests the FMA change also proves (or refutes) its diagnosis.
 
+## After the review (2026-10-22): done before the build
+- **Finding 2:** the profiler names samples outside the translated code by the nearest named
+  export at or below them, from each module's PE export table (`ucrtbase.dll!fma`,
+  `ntdll.dll!NtYieldExecution`, ...; Wine's builtin DLLs are PE files too). Code outside any module
+  (Wine's Unix side) stays "(unknown)".
+- **Finding 3:** the profiler's thread was in fact named and never sampled; it now logs its own CPU
+  use (`[profile] the profiler itself`; part of its cost under Wine is in the wineserver process,
+  which no thread here shows), and threads nobody named are labelled with their start function
+  (`thread 404 (from dxgi.dll!...)`).
+- **Also fixed:** the sampler named and counted a sample while the thread was still suspended
+  (`GetModuleHandleExW` takes the loader lock, the map insert the heap lock): a possible deadlock if
+  the suspended thread held either. It now resumes the thread first.
+- **Finding 5:** `port-nx/src/cpu_check.cpp`, built for x86-64-v2 without the PCH (per-file options
+  in both CMakeLists), checks every x86-64-v3 feature with `cpuid` (and XCR0 for the AVX state) from
+  a `.CRT$XCB` initializer, before the exe's own static initializers, and shows a message box and
+  exits on an older CPU. The SDK's DLL initializes before it, which no check in the exe can cover.
+
 ## Review findings (2026-10-22, Fable)
 1. **Fixed (`b1035eb`): the ports' own code built without the SDK's `-ffp-model=strict`.** The SDK
    sets it with `add_compile_options` in its own directory
