@@ -284,3 +284,12 @@ tracks bringing that cost down (hash only the vertices a draw uses).
 reach (`AnalyzeVertexSpans`), renderer CPU fell to 1.0–1.1 ms a frame on average (worst 10 s:
 1.4 ms in Files, 2.1 in F.E.A.R., against 12 ms before), 99.8–99.9% of frames on time at 120 fps,
 and 6.0 / 2.3 GB of vertex data hashed where whole ranges would have been 2,300 / 1,368 GB.
+
+## Steam Deck test package (2026-10-22)
+No Linux build yet, so the Deck runs the Windows builds through Proton (the renderer is Vulkan).
+`tools/steamdeck/make_package.py` builds `private/steamdeck/FEAR360-SteamDeck.zip` (~13 GB, kept
+out of git: it holds the game data): both games with their DLLs and the Visual C++ runtime (Proton's
+lacks `msvcp140_atomic_wait.dll`), data, texture packs, saves, render scale 1x, and a collection file
+with relative paths. The game takes its paths from the command line only, so the README's Steam
+launch options pass them relative to Steam's Start In folder. Untested on a Deck when built; the
+user's test is tracked as a GitHub issue.
