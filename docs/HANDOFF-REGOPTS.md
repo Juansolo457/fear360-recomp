@@ -184,6 +184,18 @@ To build a stage: `git -C third_party/rexglue-sdk-nx checkout register-options`,
 options of the later stages in both manifests, then `tools/build-nx.ps1`. The translator runs
 again because the manifest changed.
 
+**Stage A (2026-10-23, F.E.A.R. only).** Manifest at `555a235`, SDK branch at `e42a98c` (patches
+0007-0012 in, only 0008 active). The A side is master's build of 09:53 (`8db2298`, SDK
+`b29317c`), copied to `private/ab/A-master-8db2298/` (git-ignored). Run each side over the same
+stretch of play, with the profiler on and the same frame cap:
+
+    pwsh -NoProfile -File tools/launch.ps1 -Collection -Exe private/ab/A-master-8db2298/fear.exe -Timer -FrameRate 120 -Extra '--nx_renderer native --fear_profile true --fear_profile_hz 200'
+    pwsh -NoProfile -File tools/launch.ps1 -Collection -Timer -FrameRate 120 -Extra '--nx_renderer native --fear_profile true --fear_profile_hz 200'
+
+then `python -I tools/analysis/abcompare.py port-nx/logs/<A log> port-nx/logs/<B log>`: game-thread
+work in ms per frame (busy time minus the Direct3D wait) and per module, medians over the gameplay
+windows, B against A. The A run's log carries the folder name (`run-<time>-A-master-8db2298.log`).
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first

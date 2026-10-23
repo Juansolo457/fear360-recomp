@@ -52,6 +52,11 @@ param(
     [ValidateSet('console', 'nodelay', 'instant', 'off')][string]$LookRamp = 'off',
     [switch]$NoSoftLock,  # no aim-assist slowdown of turning near enemies
     [string]$Extra = '',  # more flags, space separated
+    # Another F.E.A.R. program instead of the build's (port-nx; with -Collection, F.E.A.R.'s
+    # entry): the A side of an A/B, e.g. private/ab/A-master-8db2298/fear.exe, with its own
+    # rexruntimerd.dll beside it. The log is named after its folder. Compare the two logs with
+    # tools/analysis/abcompare.py.
+    [string]$Exe = '',
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
@@ -67,8 +72,13 @@ $isNx = $Title -ne 'port'
 $port = Join-Path $PSScriptRoot $(switch ($Title) { 'files' { '..\port-files' } 'nx' { '..\port-nx' } default { '..\port' } }) | Resolve-Path
 $name = if ($Title -eq 'files') { 'fearfiles' } else { 'fear' }
 $executable = Join-Path $port "out\build\win-amd64-$($Configuration.ToLowerInvariant())\$name.exe"
+$tag = ''
+if ($Exe -and $Title -eq 'nx') {
+    $executable = (Resolve-Path $Exe).Path
+    $tag = '-' + (Split-Path (Split-Path $executable -Parent) -Leaf)
+}
 New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
-$log = Join-Path $port "logs\run-$stamp.log"
+$log = Join-Path $port "logs\run-$stamp$tag.log"
 $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
