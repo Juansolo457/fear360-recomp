@@ -196,6 +196,33 @@ then `python -I tools/analysis/abcompare.py port-nx/logs/<A log> port-nx/logs/<B
 work in ms per frame (busy time minus the Direct3D wait) and per module, medians over the gameplay
 windows, B against A. The A run's log carries the folder name (`run-<time>-A-master-8db2298.log`).
 
+**Stage A result (PC, RTX 4090, 2026-10-23).** Build: 5 minutes, `fear.exe` 81.98 MB to 69.7 MB.
+In the generated code `ctx.lr` went from 274,672 references to 3 (the kept `mtlr`/`blrl` in
+`_CallSettingFrame`); `ctx.ctr`, `ctx.xer`, `ctx.cr0-7` and `ctx.reserved` to 0. Both runs: Instant
+Action Interval 2, 3x scale (3840x2160), the game's MSAA, the PC texture pack, a 120 fps timer cap,
+profiler at 200 Hz (logs `port-nx/logs/run-20261023-123222-A-master-8db2298.log` and
+`run-20261023-125147.log`, git-ignored):
+
+| | A (master) | B (stage A) | |
+|---|---:|---:|---:|
+| gameplay windows (10 s) | 46 | 52 | |
+| draws per frame, median | 658 | 667 | +1% |
+| game-thread work per frame, median | 2.24 ms | 1.95 ms | **-13%** |
+| mean / p25 / p75 | 2.37 / 1.82 / 3.00 | 2.13 / 1.57 / 2.57 | -10% / -14% / -14% |
+| per 1,000 draws, median | 3.44 ms | 3.02 ms | -12% |
+| slow-frame reports | 14 | 8 | |
+| GPU per frame, mean | 3.08 ms | 3.04 ms | same |
+
+Per module the `engine` (-25%) and `ClientFX` (-24%) medians moved most; the others sit at the
+profiler's resolution at this load (0.17 ms per frame is 1% of a 120 fps window). The user's
+read: the smoothest run so far, steadier at 120 than A, no visual glitches (tracers fine), the menu
+items present (the log's "added 3 items"). Nothing broke. The GPU's 75-85% "usage" on the 4090 is
+the same in both: about 3 ms of GPU time per 8.3 ms frame at 4K with MSAA and the texture pack, at
+reduced clocks; the translator's options don't touch it.
+
+Note for runs with `-Collection`: the game waits on the collection menu (window up, nothing logged)
+until a game is picked, which looked like a hang in the first B launch.
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
