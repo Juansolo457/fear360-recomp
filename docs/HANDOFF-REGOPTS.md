@@ -306,6 +306,24 @@ reached through a fixed state (another thread whose `xmm6` holds that value). If
 path this analysis hasn't found yet. Test (1) with `--no-fear_profile` and test (2) still decide
 which. Stage A, with the profiler on, ran 10 minutes without it (`fear_021`).
 
+**Test (2), stage B on the PC (native Windows, RTX 4090), profiler on: no crash in 15 minutes**
+(`port-nx/logs/run-20261023-145530.log`, 14:55-15:10, Instant Action Interval 2, quit normally).
+The same XAudio thread (`F800004C`) ran throughout. So the crash is specific to Proton: either
+its handling of `xmm6`-`xmm15` (suspension, signals, the syscall path) or the profiler's suspends
+under it. Test (1), the Deck with `--no-fear_profile`, separates those two.
+
+Stage B's speed on the PC, same settings as stage A's run (120 fps cap, 3x, MSAA, texture pack),
+game-thread work per frame:
+
+| | windows | median | mean | per 1,000 draws | slow-frame reports |
+|---|---:|---:|---:|---:|---:|
+| master | 46 | 2.24 ms | 2.37 ms | 3.44 ms | 14 |
+| stage A | 52 | 1.95 ms | 2.13 ms | 3.02 ms | 8 |
+| stage B | 89 | 1.56 ms | 1.62 ms | 2.58 ms | 12 |
+
+Stage B against stage A: -20% median, -13% per 1,000 draws (this run's scenes averaged 611 draws per
+frame against 667). Against master: -30% median, -25% per 1,000 draws. GPU time unchanged.
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
