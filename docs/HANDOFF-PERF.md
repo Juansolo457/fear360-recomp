@@ -39,6 +39,25 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Deck diagnosis runs (build `01fc8c4`, 2026-10-23, Instant Action "Interval 2")
+- **Run 1, `fear_009.log`, `--fear_vertex_fresh true`: clean** ("looked clean, no stretched
+  debris"). So the corruption is stale vertex or index data that one of the shortcuts let through
+  (the once-a-frame check, the sampled/trusted ChangeDetector, the "changed lately" rule, or the
+  span reads' cached index bounds). It was nearly free: 60 fps throughout (one 58 fps window at
+  1,420 draws a frame), renderer CPU 3.3-8.4 ms a frame as in fear_008, ~100 MB/s hashed.
+- Likely mechanism to check: the span reads (#27) copy only the vertices a draw's indices reach,
+  with the bounds cached per converted index copy (`index_bounds`, keyed by the index range's
+  hash). With the shortcuts that hash can be stale, the bounds then too narrow, and vertices
+  outside the copied span are read from whatever follows it in the stream: a few corners far
+  off. Fresh hashes the indices exactly, so the bounds are right. Run 2 (`--fear_vertex_spans
+  false`, fresh off) says whether the spans are involved.
+- **The new profiler, first output**: every Direct3D wait on the game thread was the swap
+  throttle (reason 3), the game ahead of the display: 22-46% of the thread at 60 fps, 9% in the
+  busiest window. No ring-full or fence waits. Busiest window (58 fps, 1,420 draws): engine 25%,
+  ntdll 13% (the syscall trio), engine renderer 13%, Havok 10%, swap throttle 9%, C runtime 7%,
+  Direct3D 5%, engine sound 5%, game client 4%, ClientFX 3%, game server 2%; AI barely shows on
+  this map.
+
 ## Deck result of fear_008 (same 7d3a36c build, 2026-10-23, Instant Action "Interval 2", docked to a capture card)
 - **Performance**, comparable with fear_007 and a little better: gameplay windows median 59.9 fps,
   69% of them at 59.5+ (fear_007: 65%), slowest 49.2 (45.6). Windows over 1,000 draws a frame:
