@@ -8,13 +8,12 @@ game without asking the user**. Tracking issue: GitHub
 comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `docs/REVIEW.md`.
 
 ## Where it stands (read this first)
-- Commits since the review was asked for: `db180a0` (the three Deck changes below, **not built,
-  not run**) and `b1035eb` (the review's fix, see "Review findings"). Both pushed to `origin/master`.
-- **Next step: build both ports and run the Deck package**, with the user's go-ahead for each. The
-  build folders are mid-way through a reconfigure to `-march=x86-64-v3`; the next build finishes
-  it (full recompile, SDK included) and picks up `-ffp-contract=off`.
-- Before that build it is worth adding the profiler attribution in finding 2 below, so the same
-  Deck run that tests the FMA change also proves (or refutes) its diagnosis.
+- **2026-10-23: a second review is asked for: `docs/HANDOFF-REVIEW.md`** (the Deck corruption
+  fix, the profiler's modules/waits/system-call callers, native `memcpy`/`memset`). The sections
+  below are the history, newest first.
+- The Deck's corrupted debris and hands are fixed by `fear_vertex_fresh` (on by default since
+  `54135f6`); the best Deck run so far is `fear_015`. Built and zipped, not yet run: `c02cea4`
+  (system-call callers, native `memcpy`/`memset`).
 
 ## Overnight analysis (2026-10-23): `docs/ARCHITECTURE.md`
 Static analysis only, nothing built or run. The main-thread `ZwCreateEvent`/`ZwDeviceIoControlFile`/

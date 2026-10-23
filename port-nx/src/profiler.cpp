@@ -289,34 +289,49 @@ uint64_t CpuTime100ns(HANDLE thread) {
 // just past a call instruction. A scan can pick up a stale return address left on the stack, so
 // it is an attribution for the profile, not a stack trace.
 
-// Loaded modules by base, with their ends; refreshed with the thread list.
-std::vector<std::pair<uintptr_t, uintptr_t>> g_module_ranges;
+// The executable sections of the loaded modules: (start, end, module base), sorted; refreshed with
+// every second. Only code is looked at, so a pointer into a module's data isn't taken for a
+// return address, and only bytes of a section the module maps are read.
+struct CodeRange {
+  uintptr_t start, end, module;
+  bool operator<(const CodeRange& other) const { return start < other.start; }
+};
+std::vector<CodeRange> g_code_ranges;
 uintptr_t g_system_modules[4] = {};
 
 void RefreshModules() {
-  g_module_ranges.clear();
+  g_code_ranges.clear();
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
   if (snapshot == INVALID_HANDLE_VALUE) return;
   MODULEENTRY32W entry = {sizeof(entry)};
   for (BOOL ok = Module32FirstW(snapshot, &entry); ok; ok = Module32NextW(snapshot, &entry)) {
-    const auto base = reinterpret_cast<uintptr_t>(entry.modBaseAddr);
-    g_module_ranges.emplace_back(base, base + entry.modBaseSize);
+    const auto* base = entry.modBaseAddr;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) continue;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) continue;
+    const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+      if (!(section->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+      const auto start = reinterpret_cast<uintptr_t>(base) + section->VirtualAddress;
+      g_code_ranges.push_back(
+          {start, start + section->Misc.VirtualSize, reinterpret_cast<uintptr_t>(base)});
+    }
   }
   CloseHandle(snapshot);
-  std::sort(g_module_ranges.begin(), g_module_ranges.end());
+  std::sort(g_code_ranges.begin(), g_code_ranges.end());
   const wchar_t* names[] = {L"ntdll.dll", L"win32u.dll", L"kernelbase.dll", L"kernel32.dll"};
   for (size_t i = 0; i < std::size(names); ++i) {
     g_system_modules[i] = reinterpret_cast<uintptr_t>(GetModuleHandleW(names[i]));
   }
 }
 
-// The base of the module holding an address, or 0.
-uintptr_t ModuleOf(uintptr_t address) {
-  auto it = std::upper_bound(g_module_ranges.begin(), g_module_ranges.end(),
-                             std::make_pair(address, UINTPTR_MAX));
-  if (it == g_module_ranges.begin()) return 0;
+// The code section holding an address, or nullptr.
+const CodeRange* CodeRangeOf(uintptr_t address) {
+  auto it = std::upper_bound(g_code_ranges.begin(), g_code_ranges.end(), CodeRange{address, 0, 0});
+  if (it == g_code_ranges.begin()) return nullptr;
   --it;
-  return address < it->second ? it->first : 0;
+  return address < it->end ? &*it : nullptr;
 }
 
 bool IsSystemModule(uintptr_t module) {
@@ -324,10 +339,10 @@ bool IsSystemModule(uintptr_t module) {
          std::end(g_system_modules);
 }
 
-// Whether the bytes before an address in a module are a call: E8 rel32, or FF /2 (with or without
-// a REX prefix or a displacement).
-bool FollowsCall(uintptr_t address, uintptr_t module) {
-  if (address < module + 8) return false;
+// Whether the bytes before an address in a code section are a call: E8 rel32, or FF /2 (with or
+// without a REX prefix or a displacement).
+bool FollowsCall(uintptr_t address, const CodeRange& range) {
+  if (address < range.start + 8) return false;
   const auto* code = reinterpret_cast<const uint8_t*>(address);
   if (code[-5] == 0xE8) return true;
   for (int back = 2; back <= 7; ++back) {
@@ -372,8 +387,9 @@ std::pair<uint64_t, uint32_t> SystemCallers(const uint64_t* stack, size_t words)
   uint64_t via = 0;
   for (size_t i = 0; i < words; ++i) {
     const uintptr_t word = uintptr_t(stack[i]);
-    const uintptr_t module = ModuleOf(word);
-    if (!module || !FollowsCall(word, module)) continue;
+    const CodeRange* range = CodeRangeOf(word);
+    if (!range || !FollowsCall(word, *range)) continue;
+    const uintptr_t module = range->module;
     if (module == g_exe_base) {
       const uint64_t bucket = Bucket(word);
       if (!(bucket & kModuleTag)) return {via, uint32_t(bucket)};
@@ -482,6 +498,9 @@ void Run() {
     // Once a second: the process's threads, and which of them used the CPU since.
     if (now - last_refresh >= std::chrono::seconds(1)) {
       last_refresh = now;
+      // And the modules' code sections, for the stack scans: a DLL unloaded since would have its
+      // code read for at most a second.
+      RefreshModules();
       HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
       if (snapshot != INVALID_HANDLE_VALUE) {
         THREADENTRY32 entry = {sizeof(entry)};
@@ -636,7 +655,6 @@ void Run() {
         t.waits = {};
         t.system_callers.clear();
       }
-      RefreshModules();
     }
     next += interval;
     const auto after = Clock::now();
