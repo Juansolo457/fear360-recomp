@@ -281,11 +281,30 @@ screen), an access violation on guest thread `F800004C` (`XThread021C`):
   real data (here `{0, 0x60}`, which looks like two 64-bit locals) instead of a stale copy of the
   same zero.
 - **Tests that separate it, no build needed:** (1) stage B on the Deck with
-  `--fear_profile false` at the end of the launch options, for a long session; (2) stage B on the
+  `--no-fear_profile` at the end of the launch options, for a long session; (2) stage B on the
   PC (native Windows), profiler on, for the planned A/B. A crash in (1) means the profiler isn't
   the cause; no crash in (2) but a crash in (1) points at Proton itself. If the profiler is the
   cause, the fix is in `port-nx/src/profiler.cpp`, not in the translator (for example, sample
   without suspending threads under Wine).
+
+**Two more runs (`fear_024.log`, `fear_025.log`, crashes `144032` and `144706`): the same crash,
+deterministic.** Meant as test (1), but the profiler was still on: both logs have the `[profile]
+sampling busy threads` line. My instruction was wrong. For an on/off cvar, `--fear_profile false`
+turns it **on**: CLI11 reads `--fear_profile` as the flag, and the parser stashes the separate
+`false` as a positional (`src/core/cvar.cpp`, "a separated --name value pair ... never consumed").
+Off is `--no-fear_profile` or `--fear_profile=false`. The Deck README's diagnosis section used the
+same wrong form and is fixed (`tools/steamdeck/README-SteamDeck.txt`). Earlier diagnosis runs that
+used it (`--fear_vertex_fresh false`, `--nx_native_msaa false`, `docs/HANDOFF-PERF.md`) may not
+have run with the setting they meant to. `fear_010` printed no `vertex reads:` line to confirm
+either way, and the MSAA run's log isn't in `private/deck-logs/`.
+
+What the three crashes share: 50, 62 and 78 s after the game started, on the same thread, with the
+same registers (`rcx = 0x60`, `rbx = 0x283399200`, `r10 = 0x833992C8`, `r12 = 0x1F`, the same `rsp`
+and `rbp`). A random interruption wouldn't leave `{0, 0x60}` in `xmm6` three times out of three. So
+whatever replaces `xmm6` does it the same way each time. If it's the profiler or Proton, it's
+reached through a fixed state (another thread whose `xmm6` holds that value). If it's our code, a
+path this analysis hasn't found yet. Test (1) with `--no-fear_profile` and test (2) still decide
+which. Stage A, with the profiler on, ran 10 minutes without it (`fear_021`).
 
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the

@@ -50,12 +50,15 @@ Performance testing
     the PC for a read.
 
 Diagnosis (add to the end of the launch options, one run at a time; a flag beats settings.toml)
-  - The profiler is on in this package (user/settings.toml); off: --fear_profile false
+  On/off settings are switched on with --name and off with --no-name (or --name=false).
+  "--name false" does NOT turn one off: the parser reads --name as on and skips the "false".
+  - The profiler is on in this package (user/settings.toml); off: --no-fear_profile
+    The log has no "[profile] sampling busy threads" line when it is off.
   - The corrupted particles/hands (#28) are fixed by exact vertex checks, now the default.
-    To compare: the older checks:                           --fear_vertex_fresh false
-    no partial vertex reads (#27):                          --fear_vertex_spans false
+    To compare: the older checks:                           --no-fear_vertex_fresh
+    no partial vertex reads (#27):                          --no-fear_vertex_spans
     The log's "[native] vertex reads:" line confirms the setting.
-  - MSAA back on (the game's own 2x/4x):                    --nx_native_msaa true
+  - MSAA back on (the game's own 2x/4x):                    --nx_native_msaa
   - SDL's direct HID drivers back on (#29):                 --hid_sdl_hidapi on
     The log's "SDL: HIDAPI joystick drivers" line confirms it.
 
