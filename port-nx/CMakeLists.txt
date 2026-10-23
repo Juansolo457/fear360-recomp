@@ -32,6 +32,7 @@ set(FEAR_NATIVE_SOURCES
 set(FEAR_SOURCES
     src/main.cpp
     src/anim_timing.cpp
+    src/high_fps.cpp
     src/texture_pack.cpp
     src/crash_report.cpp
     src/display_vblank.cpp

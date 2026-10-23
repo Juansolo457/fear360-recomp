@@ -22,6 +22,7 @@ set(HOST "${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/src")
 set(FEAR_SOURCES
     ${HOST}/main.cpp
     ${HOST}/anim_timing.cpp
+    ${HOST}/high_fps.cpp
     ${HOST}/texture_pack.cpp
     ${HOST}/crash_report.cpp
     ${HOST}/display_vblank.cpp

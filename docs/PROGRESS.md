@@ -261,3 +261,17 @@ option sets console variables per level (Maximum / Medium / Minimum). What the 3
   `sub_822FC710`).
 - Not checked yet: the 360's values for shadows, soft shadows, volumetric lights, shell casings
   and particle bouncing.
+
+## EchoPatch as the standard (2026-10-22)
+The goal: F.E.A.R. and F.E.A.R. Files should match the PC version with EchoPatch. Its feature list
+is the backlog: tracking issue #2 on GitHub, one issue per item that applies (#3–#26), each with
+what's known about the 360 code. PC reference code: `GameServer.dll`, `GameClient.dll` and
+`ClientFx.fxd` from the PC's `FEARE_8.Arch00` (1.08), extracted to `private/pc_ref/bin/`.
+
+**AI at high frame rates (#3), written, not built yet.** The user at 120 fps: enemies "caught off
+guard … still very accurate but kind of slow". Same code as the PC: the AI asks for its next
+update in 0.01 s, so above 100 fps it updates every other frame and its timers run at about half
+speed (EchoPatch's "Degraded AI reactions"). `fear_ai_every_frame` (on) makes that delay shorter
+than a frame in both games (`src/high_fps.*`; F.E.A.R. `sub_8263D2A0`, Files `sub_8266F620`). Unlike
+the PC, the 360 also calls it with 0 (stop updating), which is left alone. EchoPatch's exception for
+severed limbs isn't ported yet.

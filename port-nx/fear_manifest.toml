@@ -299,3 +299,10 @@ registers = ["r11"]
 name = "FearDebugTracerUpdate"
 address = 0x82B9EA98
 registers = ["r31", "f1"]
+
+# High-FPS fixes (src/high_fps.h): the AI's update delay (0.01 s) made shorter than a frame, so
+# enemies update every frame above 100 fps. SetNextServerUpdate, at its fmr f31,f1 (delay in f1).
+[[entrypoint.midasm_hook]]
+name = "FearAiNextUpdate"
+address = 0x8263D2B8
+registers = ["f1"]
