@@ -18,6 +18,12 @@ if(NOT REXGLUE_GPU_XENOS_STATIC)
     message(FATAL_ERROR "port-nx links the Xenos plugin into fear.exe: pass -DREXGLUE_GPU_XENOS_STATIC=ON.")
 endif()
 
+# No floating-point contraction: built for x86-64-v3 (tools/build-nx.ps1), clang's default
+# -ffp-contract=on fuses a*b+c into one FMA, rounding once where the PowerPC rounded twice. The
+# SDK sets -ffp-model=strict for its own targets only; this covers the translated code, the
+# renderer and the PCH. The generator's explicit std::fma still becomes a single vfmadd.
+add_compile_options($<$<CXX_COMPILER_ID:Clang,AppleClang>:-ffp-contract=off>)
+
 include(generated/rexglue.cmake)
 
 # fear-nx's renderer (unchanged copy; see src/native/UPSTREAM.md). The tests
