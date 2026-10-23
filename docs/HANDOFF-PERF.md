@@ -39,6 +39,28 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Deck story run with exact vertex checks by default (`fear_015.log`, build `54135f6`, 2026-10-23, Docks)
+- User: "the best run so far of the story content. It loaded the smoothest"; tracers fixed,
+  frame rate "much more stable"; one decal looked briefly corrupted near the end ("like it had
+  just a little millisecond loading in"), with nothing in the log to explain it (no stale-data
+  catches, no skipped draws, no texture drawn before it was ready). Fresh was on (no
+  `vertex reads:` line: that line only printed on a change, because the renderer's frame count
+  starts at 1; fixed to print at the first swap, not built yet). Exact reads 600-1,570 MB per
+  10 s, as in run 1.
+- 52 gameplay windows: median 59.9 fps, 73% at 59.5+ (fear_007: 65%, fear_008: 69%). Over 1,000
+  draws a frame: median 56.9, GPU 12.7 ms median, 13.5 max, renderer 6.9 ms. Slow frames are in
+  menus and loading (the level's first frame: 192 ms creating 638 textures); in ~8 minutes of
+  play only two over 50 ms (55, 53).
+- Busiest windows (54-56 fps, 1,050-1,415 draws), game thread: engine 23-25%, ntdll 11-14% (the
+  syscall trio), engine renderer 10-11%, Havok 8-10%, C runtime 7-8%, game client 4-7%, engine
+  sound 4-6%, ClientFX 3-5%, Direct3D 4-5%, rexruntimerd 3%, game server 2-3%, AI planner 2%;
+  swap-throttle wait 2-18%. The one 44 fps window had 18% swap-throttle wait and engine sound
+  at 16%: a stall, not a busy fight.
+- `Texture not handled: format 6, dimension 2, 16x16x16`: a 16³ RGBA8 volume (3D) texture,
+  which the renderer doesn't support; for ~30 s (06:51:33-06:52:03) 2,092 lookups drew without
+  it. The PC logs show the same warning. An effect that has probably always been drawn without
+  its texture here; worth its own issue.
+
 ## Deck diagnosis runs (build `01fc8c4`, 2026-10-23, Instant Action "Interval 2")
 - **Run 1, `fear_009.log`, `--fear_vertex_fresh true`: clean** ("looked clean, no stretched
   debris"). So the corruption is stale vertex or index data that one of the shortcuts let through
@@ -51,13 +73,13 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
   outside the copied span are read from whatever follows it in the stream: a few corners far
   off. Fresh hashes the indices exactly, so the bounds are right. Run 2 (`--fear_vertex_spans
   false`, fresh off) says whether the spans are involved.
-- **Run 2, `fear_010.log` (06:23), meant to be spans off: it ran a build without the switches.**
-  No `[native] vertex reads:` line (every build with them prints one), and the span reads were
-  active, so `--fear_vertex_spans false` was ignored: the old behaviour, with the profiler. The
+- **Run 2, `fear_010.log` (06:23), meant to be spans off: it ran the old behaviour.** The span
+  reads were active and exact reads were at the old volume (200-270 MB per 10 s), so the spans
+  flag didn't take: either an older build or the flag missing from the launch options (the
+  missing `vertex reads:` line doesn't tell which: it only printed on a change). The
   corruption came back ("corruption was back"), and its video (`Desktop 2026.10.23 -
   06.25.16.09.mp4`) has one-frame glitch events in 0.43% of frames, like fear_008's 0.41%
-  (PC clean run: 0.16%). Consistent with run 1, but says nothing about the spans: an older update
-  zip had been extracted over run 1's. The spans test is still to do (`--fear_vertex_fresh false
+  (PC clean run: 0.16%). Consistent with run 1, but says nothing about the spans. The spans test is still to do (`--fear_vertex_fresh false
   --fear_vertex_spans false` on a current build).
 - **Run 3 (06:37, `--nx_native_msaa false`, the same old build): corruption back** (video
   `Desktop 2026.10.23 - 06.37.41.11.mp4`, 47 s: one-frame events in 0.75% of frames). MSAA isn't

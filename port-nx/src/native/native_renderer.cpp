@@ -6036,8 +6036,10 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   ++frame;
   vertex_exact = REXCVAR_GET(fear_vertex_exact);
   vertex_audit = REXCVAR_GET(fear_vertex_audit);
+  // Logged at the first swap and on every change (the frame count starts at 1, so it is 2 here
+  // the first time).
   if (vertex_spans_on != REXCVAR_GET(fear_vertex_spans) ||
-      vertex_fresh != REXCVAR_GET(fear_vertex_fresh) || frame == 1) {
+      vertex_fresh != REXCVAR_GET(fear_vertex_fresh) || frame == 2) {
     vertex_spans_on = REXCVAR_GET(fear_vertex_spans);
     vertex_fresh = REXCVAR_GET(fear_vertex_fresh);
     REXLOG_INFO("[native] vertex reads: exact {}, spans {}, fresh {}", vertex_exact, vertex_spans_on,
