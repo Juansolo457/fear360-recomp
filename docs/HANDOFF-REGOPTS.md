@@ -223,6 +223,26 @@ reduced clocks; the translator's options don't touch it.
 Note for runs with `-Collection`: the game waits on the collection menu (window up, nothing logged)
 until a game is picked, which looked like a hang in the first B launch.
 
+Stage A on the Deck (`fear_021`, uncapped): game-thread work per frame -17% against `fear_020`,
+median 88 fps on the OLED's 90 Hz screen; see `docs/HANDOFF-PERF.md`.
+
+**Stage B (2026-10-23, F.E.A.R. only).** Manifest at `c3498d1`: stage A plus
+`non_volatile_as_local` and the setjmp/longjmp addresses; patches 0009-0012 and the
+`share_registers` entries now take effect. Built in 3 minutes with no errors; `fear.exe` 69.7 MB to
+65.3 MB. In the generated code, context references to r14-r31 went from 930,890 to 3,969 (the
+hand-offs and the `share_registers` functions) and to f14-f31 to 2,990. Save/restore helper calls
+went from 39,300 to 8, all in Havok's v92 chain, which keeps them (patch 0011). The solver hands
+`v92` to `sub_828F0790`, the menu hooks get the locals (`FearMenuAddItems(ctx.r1, r23, ..., r30)`),
+and there are 10 `ppc_setjmp` and 24 `ppc_longjmp` sites. Not run yet. The A side is stage A's
+build, copied to `private/ab/A-stageA-555a235/`:
+
+    pwsh -NoProfile -File tools/launch.ps1 -Collection -Exe private/ab/A-stageA-555a235/fear.exe -Timer -FrameRate 120 -Extra '--nx_renderer native --fear_profile true --fear_profile_hz 200'
+    pwsh -NoProfile -File tools/launch.ps1 -Collection -Timer -FrameRate 120 -Extra '--nx_renderer native --fear_profile true --fear_profile_hz 200'
+
+What to watch beyond the numbers, because this stage is where the review's breakages were:
+physics (props, ragdolls, anything flung: the v92 constant), crashes, the three menu items, textures
+and effects loading (the setjmp paths), a save and a load.
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
