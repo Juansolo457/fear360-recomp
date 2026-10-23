@@ -109,13 +109,15 @@ REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 100, "F.E.A.R.",
 // queued for the translation worker behind any the game asks for. See "Shader pre-warm" below.
 // F.E.A.R.: vertex data is checked once a frame per range, and a range unchanged for a while is
 // only sampled or trusted (ChangeDetector), so a range the game rewrites after its first draw in a
-// frame, or changes while trusted, is drawn from the old copy. Suspected for the tracers that
-// stick mid-air at 120 fps; this reads every range that has ever changed again for each draw and
-// counts the draws the usual checks would have got wrong (the 10-second report).
-REXCVAR_DEFINE_BOOL(fear_vertex_exact, false, "F.E.A.R.",
-                    "Read vertex and index data that has ever changed again for every draw, and "
-                    "report the draws the usual once-a-frame checks would have drawn stale "
-                    "(diagnosis; costs CPU)");
+// frame, or changes while trusted, was drawn from the old copy: the bullet tracers that twitched
+// and stuck mid-air above ~90 fps. With this, every range that has ever changed (or is small) is
+// read again for each draw, and the 10-second report counts the draws the usual checks would have
+// drawn stale (120 fps play-test: ~408,000 in 11 minutes, up to ~13 a frame in firefights; tracers
+// clean; renderer CPU 0.7 -> 2.5 ms a frame on the ring thread).
+REXCVAR_DEFINE_BOOL(fear_vertex_exact, true, "F.E.A.R.",
+                    "Read vertex and index data that has ever changed again for every draw, so "
+                    "geometry the game rewrites within a frame (bullet tracers) is never drawn "
+                    "stale (costs ~2 ms of renderer CPU a frame)");
 REXCVAR_DEFINE_BOOL(fear_shader_prewarm, true, "F.E.A.R.",
                     "Translate the shaders seen in earlier runs in the background at startup "
                     "(kept per title in the cache folder), so new effects don't stall a frame")

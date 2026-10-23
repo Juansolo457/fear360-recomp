@@ -29,21 +29,22 @@ Commits: `a616a08` (port-nx + renderer), `e678aea` (resolution scaling), `4614a8
 ## Frame rate: what is known
 - The game presents every second vblank interrupt (D3D `Present` interval 2), so its frame
   rate is the guest vblank rate over two: 30 fps at the console's 60 Hz. Game speed is
-  right at any rate tried (variable timestep), but **above ~90 fps the 360's effect code
-  breaks** (bullet tracers twitch and freeze mid-air: a per-frame step).
+  right at any rate tried (variable timestep). Bullet tracers twitched and froze mid-air above
+  ~90 fps; that was the renderer drawing vertex data the game had rewritten within the frame
+  (`fear_vertex_exact`, on by default since play-test 5), not the game: 120 fps plays clean.
 - **Pacing is locked to the display** (`port-nx/src/display_vblank.*`, default
   `fear_vblank_source=display`): the guest vblank follows the display's real vblank (DXGI
   `WaitForVBlank`), the guest refresh rate is set to the display's, and `native_system.cpp`
   `PaceToDisplay` holds each frame to exactly N refreshes (N = ceil(refresh /
-  `fear_frame_rate_limit`), limit 90), presenting right after a vblank through mailbox. 80 fps
+  `fear_frame_rate_limit`), limit 120), presenting right after a vblank through mailbox. 120 fps
   on 240 Hz, 72 on 144, 60 on 60 (two guest vblanks per refresh). Falls back to the timer if
   the vblanks stop coming at the display's rate (variable refresh).
 - `fear_vblank_source=timer` (launcher `-Timer`) is fear-nx's software timer at
   `video_mode_refresh_rate` (24–480 Hz with SDK patch 0003); it drifts against the display.
 - The 10-second report's `pacing` line gives the time between presents and the display
   refreshes between them (from the real vblank in both modes).
-- Past ~90 fps needs the tracer step fixed in the game code (decompile) or frame
-  interpolation (OpenCE "Smooth Motion").
+- Above 120: not played yet. EchoPatch's PC high-FPS fixes (physics, movement) are the list of
+  what else may break (docs/REVIEW.md).
 
 ## How it is built and run
 ```

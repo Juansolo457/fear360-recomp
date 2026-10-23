@@ -27,16 +27,16 @@ param(
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
     [switch]$Files,       # run F.E.A.R. Files (port-files: the same host code as port-nx)
     [switch]$Collection,  # the collection menu over F.E.A.R. and F.E.A.R. Files (implies -Nx)
-    # The game presents every 2 vblanks: 30 fps at the console's 60 Hz. Above ~90 fps the 360's
-    # effect code breaks (bullet tracers twitch and freeze mid-air).
+    # The game presents every 2 vblanks: 30 fps at the console's 60 Hz.
     # port-nx follows the display's own vblank (port-nx/src/display_vblank.h): each frame is
     # shown for a whole number of refreshes, the fewest that keep it at or under FrameRate
-    # (auto = 90): 80 fps on 240 Hz ("80 feels great… better than 90"), 72 on 144 Hz, 82.5 on
-    # 165 Hz, 60 on 60 or 120 Hz; 30 gives the console's rate on any of those.
+    # (auto = the game's default, 120): 120 fps on 240 or 120 Hz, 72 on 144 Hz, 82.5 on 165 Hz,
+    # 60 on 60 Hz; 30 gives the console's rate on any of those. (The tracers that broke above
+    # ~90 were the renderer's stale vertex data, fixed by fear_vertex_exact.)
     [ValidateScript({ $_ -eq 'auto' -or ([double]::TryParse($_, [ref]$null) -and [double]$_ -ge 20 -and [double]$_ -le 240) })]
     [string]$FrameRate = 'auto',
     # A software timer for the vblank instead (port, or port-nx with -Timer), at FrameRate x 2
-    # (up to 480 Hz with SDK patch 0003); auto picks the highest rate up to 90 that divides the
+    # (up to 480 Hz with SDK patch 0003); auto picks the highest rate up to 120 that divides the
     # display's refresh. It drifts against the display, so a frame now and then is shown a
     # refresh early or late.
     [switch]$Timer,
@@ -97,7 +97,7 @@ if ($isNx -and !$Timer) {
         $refresh = (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
             Where-Object { $_.CurrentRefreshRate } | Measure-Object CurrentRefreshRate -Maximum).Maximum
         if (!$refresh) { $refresh = 60 }
-        $divisor = [math]::Ceiling($refresh / 90)
+        $divisor = [math]::Ceiling($refresh / 120)
         $fps = $refresh / $divisor
         Write-Host "display ${refresh} Hz: $fps fps on a timer (each frame shown for $divisor refreshes, now and then one more or less)"
     } else {

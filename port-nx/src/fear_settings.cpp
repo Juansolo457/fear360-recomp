@@ -95,11 +95,11 @@ std::vector<Setting> BuildSettings() {
                       "fear_frame_rate_limit",
                       {{"30", FrameRateLabel(30) + " (the 360's)"},
                        {"60", FrameRateLabel(60)},
-                       {"90", FrameRateLabel(90)}},
+                       {"90", FrameRateLabel(90)},
+                       {"120", FrameRateLabel(120)}},
                       false,
                       "Each frame is shown for a whole number of your display's refreshes, the "
-                      "fewest that keep it at or under the limit. Above about 90 the 360's "
-                      "effects break (bullet tracers)."});
+                      "fewest that keep it at or under the limit."});
   settings.push_back({"Texture filtering",
                       "nx_native_max_anisotropy",
                       {{"1", "Off"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}},

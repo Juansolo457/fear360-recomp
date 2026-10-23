@@ -112,7 +112,12 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   360 hitches here too. Possible later work: measure the time inside the VFS for these opens
   and reads; make failed lookups cheap; a read-ahead cache for the catalogue.
 
-### P2. A dynamic vertex range rewritten mid-frame can be drawn stale
+### P2 → fixed. A dynamic vertex range rewritten mid-frame can be drawn stale
+- **Confirmed and fixed (play-test 5):** this was the bullet-tracer glitch above ~90 fps. With
+  `fear_vertex_exact` (now on by default) every range that has ever changed is read again for
+  each draw; the 11-minute 120 fps run counted ~408,000 draws the old check would have drawn
+  stale and the tracers were clean. Cost: +1.9 ms renderer CPU a frame (hashing ~8 GB/s of whole
+  ranges). Next: hash only the vertex span each draw uses.
 - *Where:* `native_renderer.cpp`, `RangeHash` (~line 628) and the fetch-constant resolve
   (~line 3578: `fetch_resolved_frame`, `vertex_hashes`).
 - *How:* a vertex range is hashed (or, once it changes every frame, given a per-frame hash

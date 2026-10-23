@@ -105,6 +105,7 @@ Asked after play-test 3: what in fear-nx's renderer is a Switch tradeoff that a 
 3. **No pop-in on first sight** (the shader/pipeline item above).
 4. **Even pacing: done** (display-locked, play-test 4). Left: **120 fps without the tracer glitch** (the per-frame step in the game's effect code), and any other per-frame step like the animation one fixed in play-test 4.
    **Tracers, from the code (2026-10-22):** tracers are the effect type "Tracer" (`FX/TracerFX/*` records name `Tracer_AssaultRifle`, `Tracer_SMG`, ...). Its update is the same on PC and 360 (PC `ClientFx.fxd` `0x10026DA0`, 360 `sub_82B9EA80`, same object layout): the distance travelled grows by velocity x frame time, head and tail are clamped to the ray. Nothing there depends on the frame rate, so "the per-frame step in the effect code" is not in the tracer itself. The 360's particle update rule (wait 5 ms, then catch up) is not it either. Two places left: what the tracer is given (frame times, updates stopping while it is still drawn), and our renderer, which checks each vertex range once a frame and only samples or trusts ranges that have not changed for a while, so geometry the game rewrites can be drawn from an old copy (`docs/REVIEW.md`, P2). Two switches for one 120 fps test (both off by default): `fear_debug_tracers` logs, every 10 s, the frame times tracers were updated with, how far they moved, gaps between one tracer's updates and tracers alive over 1 s; `fear_vertex_exact` reads every vertex range that has ever changed again for each draw and reports how many draws the usual checks would have drawn stale. Tracers clean with it on and the count above 0: our renderer, fixed there. Still glitching: the game side, and the tracer log says where.
+   **Found: it was our renderer (play-test 5, 2026-10-22, 120 fps, 11 minutes, firefights with and without slow-mo).** With `fear_vertex_exact` on: "huge improvement, no tracer issues, best play test so far… the frame rate was rock solid, feels like the PC version". The renderer counted about 408,000 draws (up to ~13 a frame in firefights) that the usual once-a-frame check would have drawn from vertex data the game had rewritten since, and 1,402 changes the sampled/trusted check missed. The game side was fine: every tracer updated every frame with the right time step (about 8 ms; 1–6 ms in slow-mo), none stalled in normal time. Cost: renderer CPU 0.7 → 2.5 ms a frame on average (6.7 ms in the busiest 10 s), on its own thread; 120 fps held (8.36 ms apart, deviation 0.25). **`fear_vertex_exact` is now on by default and the frame-rate limit is 120** (PC Settings offers 30/60/90/120). Follow-up: the re-reads hash ~8 GB/s (whole ranges, ~86 KB each); hashing only the vertices a draw uses would cut most of that.
 5. **A level sweep:** every Interval, the bonus level and the Instant Action maps, played or driven, for crashes and visual faults; the crash reporter catches anything.
 6. **Linux** build; ***F.E.A.R. Files***.
 
@@ -240,3 +241,22 @@ The repository is public: <https://github.com/Juansolo457/fear360-recomp>.
 ## Sister projects
 - `../n3-360-recomp`: N3: Ninety-Nine Nights on WK2D's ReXGlue recomp, parked at 4K / 40 fps.
 - `../quake4-360-recomp`: Quake 4 Definitive Edition (openQ4 + the 360 controller feel).
+
+## PC detail settings on the 360 (2026-10-22, from the data and code)
+Asked after play-test 5: does the PC have settings the 360 lacks (bodies being removed, thicker
+explosion smoke)? The 360's game database still has the PC's whole detail-options table
+(`Performance/Options`: effects, corpse detail, particle bouncing, shell casings, shadows, soft
+shadows, volumetric lights and density, world detail, model decals, texture resolution). Each
+option sets console variables per level (Maximum / Medium / Minimum). What the 360 runs:
+- **Effects: Maximum.** `ClientFXDetailLevel` defaults to 2 (the PC's Maximum) in the 360 code
+  (`0x8234C0E4`, VarTrack setup `sub_822FC710`), so every effect gets all its detail layers.
+  The impact effects compared so far are identical to the PC's; explosions not compared yet.
+- **Bodies: Medium.** `Server/Limits`: `BodyCapTotalCount` 10, `BodyCapRadiusCount` 4 within
+  `BodyCapRadius` 500, the PC's Medium values. The PC's Maximum has no caps (-1): bodies stay.
+  Minimum also fades them after 15 s (`BodyLifetime`).
+- **FOV:** `FovY` defaults to 70 (`0x823B9948`), as on PC. EchoPatch's Custom FOV changes that
+  and corrects the weapon model for wide FOVs. An FOV setting here would use the console-variable
+  hook F.E.A.R. Files already has (`FearConsoleVarDefault`; in F.E.A.R. VarTrack::Init is
+  `sub_822FC710`).
+- Not checked yet: the 360's values for shadows, soft shadows, volumetric lights, shell casings
+  and particle bouncing.

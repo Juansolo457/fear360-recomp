@@ -18,10 +18,11 @@ REXCVAR_DEFINE_STRING(fear_vblank_source, "display", "F.E.A.R.",
                       "timer = a software timer at video_mode_refresh_rate")
     .allowed({"display", "timer"})
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-REXCVAR_DEFINE_DOUBLE(fear_frame_rate_limit, 90.0, "F.E.A.R.",
+REXCVAR_DEFINE_DOUBLE(fear_frame_rate_limit, 120.0, "F.E.A.R.",
                       "Highest frame rate with fear_vblank_source=display; the rate used is the "
                       "display's refresh over the smallest whole number that keeps it at or "
-                      "under this. Above ~90 the 360's effects break (bullet tracers)")
+                      "under this. Played at 120; the tracers that broke above ~90 were the "
+                      "renderer's (fear_vertex_exact)")
     .range(20.0, 240.0)
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
