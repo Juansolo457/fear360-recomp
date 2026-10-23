@@ -16,6 +16,17 @@ comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `d
 - Before that build it is worth adding the profiler attribution in finding 2 below, so the same
   Deck run that tests the FMA change also proves (or refutes) its diagnosis.
 
+## Overnight analysis (2026-10-23): `docs/ARCHITECTURE.md`
+Static analysis only, nothing built or run. The main-thread `ZwCreateEvent`/`ZwDeviceIoControlFile`/
+`ZwClose` trio matches the Deck controller's rumble: SDL's Steam Deck driver sends each change as a
+synchronous HID feature report on the game thread, and Wine's `HidD_SetFeature` creates and closes
+an event per report. **Test first, no build: vibration off in the game's options.** The hottest
+main-thread function, `sub_82973C88`, is the 360 Direct3D's spin loop waiting for the GPU (fence,
+ring space, swap throttle): 24% of the thread at 60 fps (idle time burnt as power), about 1% in the
+slow fights. Those are CPU-bound: 19 ms of game-thread work per frame (median), with the renderer
+thread at 4.6 ms and the GPU at 13 ms. The doc ranks the options (rumble thread, per-module profile,
+`[rexcrt]`, the translator's register options, a native Direct3D layer) and maps the executable.
+
 ## Deck result of 7d3a36c (`fear_007.log`, 2026-10-22)
 Fights at 1,000–2,500 draws went from 52.6 to **56.7 fps** (77% → 90% of frames on time); all
 gameplay 56.6 → 58.3 fps (92% → 95%); total CPU 2.1–3.5 → 1.5–2.1 cores. ucrtbase is gone from the
