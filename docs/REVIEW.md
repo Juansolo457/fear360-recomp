@@ -81,6 +81,15 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   keys. Type-checked, not yet run. *To verify:* two runs again (the first writes version 2);
   the second logs "Shader pre-warm: ... N pipelines to follow" and "Pipeline pre-warm done", and
   its load spikes show few pipelines ("slow frame N ms: ... N pipelines").
+  **Verified (2026-10-22, F.E.A.R., two ~18-minute runs through the same Docks stretch, 4K/80
+  fps, texture pack):** run 2 logged "220 translations of 158 shaders queued, 212 pipelines to
+  follow" and had them all built 0.1 s in. Draws waiting for a shader or pipeline: 220 waits
+  (275 ms) and 4 skipped draws in run 1; 4 waits (1 ms) and none skipped in run 2. Frames over
+  50 ms during play: run 1 had 6 (50-125 ms; 42 pipelines and 3 shaders created inside them),
+  run 2 none: every 10-second window after the first 30 s had its longest frame at 12.5-13 ms.
+  Run 2's 5 slow frames (69-219 ms) are all at boot and level load with the ring idle for the
+  whole frame (the game itself loading, 25-36 draws: the loading screen), 0 shaders, 0
+  pipelines. What remains is the game's own loading (P2 above).
 
 ### P1. Texture eviction counted frames, not time — **Changed**
 - *Where:* `port-nx/src/native/native_textures.cpp`, `TextureCache::BeginFrame` (eviction at
