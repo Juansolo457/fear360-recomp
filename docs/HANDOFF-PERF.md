@@ -59,6 +59,9 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
   (PC clean run: 0.16%). Consistent with run 1, but says nothing about the spans: an older update
   zip had been extracted over run 1's. The spans test is still to do (`--fear_vertex_fresh false
   --fear_vertex_spans false` on a current build).
+- **Run 3 (06:37, `--nx_native_msaa false`, the same old build): corruption back** (video
+  `Desktop 2026.10.23 - 06.37.41.11.mp4`, 47 s: one-frame events in 0.75% of frames). MSAA isn't
+  involved.
 - **`fear_vertex_fresh` is now on by default** (both games, PC and Deck). Runs 2 and 3 on a
   build after this need `--fear_vertex_fresh false` to test the old behaviour. Still to check: the
   PC's renderer CPU at 120 fps and 3x with it on.
