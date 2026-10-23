@@ -1,6 +1,9 @@
 """Build the Steam Deck test package: both games' Windows builds for Proton, as one zip.
 
     python -I tools/steamdeck/make_package.py [out.zip]     (default private/steamdeck/FEAR360-SteamDeck.zip)
+    python -I tools/steamdeck/make_package.py --programs [out.zip]
+        just the programs and DLLs (default private/steamdeck/FEAR360-SteamDeck-update.zip), to
+        unpack over an existing install: no data, saves or settings
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -21,8 +24,11 @@ import sys
 import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, 'private', 'steamdeck',
-                                                         'FEAR360-SteamDeck.zip')
+ARGV = [a for a in sys.argv[1:] if a != '--programs']
+PROGRAMS_ONLY = '--programs' in sys.argv[1:]
+OUT = ARGV[0] if ARGV else os.path.join(
+    REPO, 'private', 'steamdeck',
+    'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else 'FEAR360-SteamDeck.zip')
 TOP = 'FEAR360-SteamDeck'
 CRT_DLLS = ['msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
 ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root', 'assets',
@@ -82,13 +88,16 @@ def main():
                         add(src, f'{arc_root}/{rel}')
 
         add(os.path.join(REPO, 'tools', 'steamdeck', 'README-SteamDeck.txt'), 'README-SteamDeck.txt')
-        z.writestr(f'{TOP}/collection.toml', '\n'.join(collection) + '\n')
+        if not PROGRAMS_ONLY:
+            z.writestr(f'{TOP}/collection.toml', '\n'.join(collection) + '\n')
         for folder, project, exe, pack, *_ in GAMES:
             build = os.path.join(REPO, project, 'out', 'build', 'win-amd64-relwithdebinfo')
             for f in (exe, 'rexruntimerd.dll', 'TracyClientrd.dll'):
                 add(os.path.join(build, f), f'{folder}/{f}')
             for f in CRT_DLLS:
                 add(os.path.join(crt, f), f'{folder}/{f}')
+            if PROGRAMS_ONLY:
+                continue
             add_tree(os.path.join(REPO, project, 'assets'), f'{folder}/assets')
             add_tree(os.path.join(REPO, project, 'user'), f'{folder}/user', skip={'settings.toml'})
             z.writestr(f'{TOP}/{folder}/user/settings.toml', DECK_SETTINGS)
