@@ -125,17 +125,20 @@ REXCVAR_DEFINE_BOOL(fear_vertex_audit, false, "F.E.A.R.",
                     "Compare every vertex and index copy a draw uses with guest memory and report "
                     "the draws that used data the game had changed since (diagnosis; costs a lot "
                     "of CPU)");
-// F.E.A.R. (#28, the Steam Deck's corrupted particles and hands): switches to take the vertex
-// shortcuts out one at a time. Without spans every per-draw read covers the whole range (as
-// before #27). With fresh, every draw hashes its vertex and index data as guest memory holds it
-// now, whatever the range's history (no once-a-frame check, sampling or "changed lately" rule),
-// and a copy is reused only for byte-identical content: no draw can use stale data.
+// F.E.A.R. (#28, the Steam Deck's corrupted particles and hands): with fresh (default), every
+// draw hashes its vertex and index data as guest memory holds it now, whatever the range's history
+// (no once-a-frame check, sampling or "changed lately" rule), and a copy is reused only for
+// byte-identical content: no draw can use stale data. The Deck drew impact debris and the
+// player's hands as huge stretched polygons without it (one of those shortcuts let old data
+// through; the PC never showed it) and was clean with it, at the same renderer CPU time (run 1,
+// fear_009, 2026-10-23). Without spans every per-draw read covers the whole range (as before #27).
 REXCVAR_DEFINE_BOOL(fear_vertex_spans, true, "F.E.A.R.",
                     "Read only the vertices a draw can reach where the shader allows it (#27); off "
                     "= read whole ranges (diagnosis)");
-REXCVAR_DEFINE_BOOL(fear_vertex_fresh, false, "F.E.A.R.",
+REXCVAR_DEFINE_BOOL(fear_vertex_fresh, true, "F.E.A.R.",
                     "Check every draw's vertex and index data against guest memory exactly, "
-                    "reusing a copy only when it is identical (diagnosis; costs CPU)");
+                    "reusing a copy only when it is identical (off = the older once-a-frame "
+                    "checks, which let stale data through on the Steam Deck)");
 REXCVAR_DEFINE_BOOL(fear_shader_prewarm, true, "F.E.A.R.",
                     "Translate the shaders seen in earlier runs in the background at startup "
                     "(kept per title in the cache folder), so new effects don't stall a frame")
@@ -856,7 +859,7 @@ struct Renderer::Impl {
   }
   bool vertex_exact = false;
   bool vertex_spans_on = true;  // fear_vertex_spans
-  bool vertex_fresh = false;    // fear_vertex_fresh
+  bool vertex_fresh = true;     // fear_vertex_fresh
   // F.E.A.R. (#27): AnalyzeVertexSpans per vertex shader.
   std::unordered_map<const Shader*, VertexSpanInfo> vertex_spans;
   const VertexSpanInfo& VertexSpans(const Shader& shader) {

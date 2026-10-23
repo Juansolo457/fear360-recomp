@@ -47,9 +47,10 @@ Performance testing
 Diagnosis (add to the end of the launch options, one run at a time)
   - Profiler (where the CPU time goes, in the log every 10 s):
       --fear_profile true --fear_profile_hz 200
-  - The corrupted particles/hands (#28): no MSAA:          --nx_native_msaa false
-    every draw's vertex data checked exactly:               --fear_vertex_fresh true
+  - The corrupted particles/hands (#28) are fixed by exact vertex checks, now the default.
+    To compare: the older checks:                           --fear_vertex_fresh false
     no partial vertex reads (#27):                          --fear_vertex_spans false
+    no MSAA:                                                --nx_native_msaa false
     The log's "[native] vertex reads:" line confirms the setting took.
 
 If it doesn't start

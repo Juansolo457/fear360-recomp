@@ -51,6 +51,9 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
   outside the copied span are read from whatever follows it in the stream: a few corners far
   off. Fresh hashes the indices exactly, so the bounds are right. Run 2 (`--fear_vertex_spans
   false`, fresh off) says whether the spans are involved.
+- **`fear_vertex_fresh` is now on by default** (both games, PC and Deck). Runs 2 and 3 on a
+  build after this need `--fear_vertex_fresh false` to test the old behaviour. Still to check: the
+  PC's renderer CPU at 120 fps and 3x with it on.
 - **The new profiler, first output**: every Direct3D wait on the game thread was the swap
   throttle (reason 3), the game ahead of the display: 22-46% of the thread at 60 fps, 9% in the
   busiest window. No ring-full or fence waits. Busiest window (58 fps, 1,420 draws): engine 25%,
