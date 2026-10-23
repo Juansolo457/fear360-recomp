@@ -1,10 +1,70 @@
-# Handoff: Steam Deck performance (for a review before the next build)
+# Handoff: Steam Deck performance (reviewed; next is the build and a Deck run)
 
-Written 2026-10-22 for a second opinion (Fable) on the Deck performance work. **The user wants
-this reviewed before another build is made**: review the code and the plan, change what is wrong,
-and don't build or launch the game without asking the user. Tracking issue: GitHub
+Written 2026-10-22 for a second opinion on the Deck performance work, **reviewed the same evening
+(Fable, adversarial review; its findings are on #28)**, and updated for whoever continues. The user's
+standing rules: review the code and the plan, change what is wrong, and **don't build or launch the
+game without asking the user**. Tracking issue: GitHub
 [#28](https://github.com/Juansolo457/fear360-recomp/issues/28) (all the numbers below are in its
 comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `docs/REVIEW.md`.
+
+## Where it stands (read this first)
+- Commits since the review was asked for: `db180a0` (the three Deck changes below, **not built,
+  not run**) and `b1035eb` (the review's fix, see "Review findings"). Both pushed to `origin/master`.
+- **Next step: build both ports and run the Deck package**, with the user's go-ahead for each. The
+  build folders are mid-way through a reconfigure to `-march=x86-64-v3`; the next build finishes
+  it (full recompile, SDK included) and picks up `-ffp-contract=off`.
+- Before that build it is worth adding the profiler attribution in finding 2 below, so the same
+  Deck run that tests the FMA change also proves (or refutes) its diagnosis.
+
+## Review findings (2026-10-22, Fable)
+1. **Fixed (`b1035eb`): the ports' own code built without the SDK's `-ffp-model=strict`.** The SDK
+   sets it with `add_compile_options` in its own directory
+   (`third_party/rexglue-sdk-nx/CMakeLists.txt`), which never reached `fear_recomp` (the translated
+   code), `src/native/*.cpp` or the PCH: `build.ninja` had `-march=x86-64-v3 -O2` and nothing else for
+   them. Harmless under v2; under v3 clang's default `-ffp-contract=on` fuses `a*b+c` written in one
+   expression into an FMA (one rounding where the PowerPC had two). Both `port-nx/CMakeLists.txt` and
+   `port-files/CMakeLists.txt` now add `-ffp-contract=off` at directory scope, before
+   `include(generated/rexglue.cmake)`. Verified with `.tools/llvm` clang
+   (`--target=x86_64-pc-windows-msvc -O2`): with the flag `std::fma` is still one `vfmadd213sd` and
+   `a*b+c` stays `vmulsd`+`vaddsd`; without it both fuse. Not `-ffp-model=strict`: that also forces
+   strict FP-exception semantics across the whole translated image. The generated code itself is
+   probably unaffected (one statement per instruction; SIMDe's `add(mul())` crosses function
+   boundaries, which frontend contraction does not fuse), so this mostly protects the renderer.
+2. **The `fma` diagnosis is unproven.** The profiler buckets by module only
+   (`port-nx/src/profiler.cpp`, `Bucket()`), so "ucrtbase" could be `fma`, `memcpy`/`memset` (the
+   SDK's HLE kernel and the renderer call the CRT's), `vsnprintf`, `qsort`... The main thread's
+   ucrtbase share in `fear_006.log` is 0% / 9% / 17% in three consecutive windows, and there is **no
+   PC profile of the main thread** to compare against. Cheap and worth doing before the build: walk
+   `ucrtbase.dll`'s export table (nearest export at or below the IP; no dbghelp) and report
+   `ucrtbase!fma` etc. The same attribution answers the main thread's 11-14% in ntdll (open item 4).
+3. **Unnamed threads.** The profiler samples from its own unnamed `std::thread`
+   (`profiler.cpp`, near the end), and under Wine `SuspendThread`/`GetThreadContext` at 200 Hz on
+   ~8 threads are server round-trips, so one of "thread 404 / 492 / 332" is probably it: name it.
+   Thread 404 has our vsync thread's exact mix (ntdll 57%, unknown 32%, dxgi 11%), so it is probably
+   Wine's DXGI vblank worker; the next run tells (it should vanish now that we never call
+   `WaitForVBlank`). **Thread 332 (~15% of a core, 87% in win32u.dll) is unexplained** and was not in
+   the earlier analysis: a message pump spinning in `NtUserPeekMessage`?
+4. **The ring's 200 us sleep will be ~1 ms on the Deck.** `rex::thread::SleepUntil` uses a waitable
+   timer; under Proton timers are wineserver-signalled and its timeout loop is millisecond-granular
+   even with fsync. The Deck logs show **exactly 1.0 wait a frame, 4-14 ms long**, right before the
+   present, so the wake-up slip adds to present latency (with mailbox at a 120 Hz refresh, a 0.5 ms
+   average slip now and then crosses a refresh). Probably still a net win over the hyperthread
+   contention, but check the `[native] per frame: ... waits for the game, ... ms waiting` and
+   `frames shown N refreshes` report lines before and after. The real fix is an event the game's
+   fence write can signal instead of polling.
+5. **x86-64-v3 is a silent hard requirement for PC users.** No AVX2 (pre-Haswell; Pentium/Celeron
+   before 2017) crashes in the SDK's static initialisers before any log line. If the PC release
+   stays v3, `src/main.cpp` needs `IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE)` with a
+   message box first thing. `-msse4.1` in the recomp options is now redundant.
+6. Checked and fine: `UnderWine()` -> `DisplayVblankLoop` returns false -> `VblankLoop`'s timer
+   fallback at `display_hz x guest_vblanks_per_refresh` with `DisplayRefresh()` every `per_refresh`
+   vblanks and `PaceToDisplay` holding to `refreshes_per_frame`; `WatchDisplay` (the other
+   `WaitForVBlank` user) only starts when `!display_pacing_`, so nothing spins in DXGI under Wine;
+   `Configure()`'s one-shot `Waiter::Open()` is fine. The vblank timer jitters by the same ~1 ms
+   under Wine; the catch-up loop handles it.
+7. Perspective: items 1-3 of the plan below are unlikely on their own to take a 19-24 ms fight frame
+   under 16.7 ms. The headroom for 60 fps in fights is in open items 5 (codegen register locals) and
+   6 (3 us a draw on the Deck vs 0.3 on the PC). Don't read the next build as "the fix".
 
 ## The goal and the user's constraints
 - **60 fps held on the Steam Deck in the biggest fights** (and 120 on the PC, which already
@@ -48,7 +108,7 @@ PC reference (same scenes on a fast PC, 120 fps): renderer ~1 ms CPU a frame, fr
 | GPU ring native (F800001C), our renderer | 47–59% | ntdll 65–72% (yield loop, below), `sub_8307D8A8` 16–23% (that is our renderer's host code misattributed: see "profiler") |
 | rex::thread::TimerQueue, Audio Worker, XThread0210 | 10–14% each | ntdll 75–96% |
 
-## What is diagnosed, and what was changed (commit `db180a0`, **not built, not run**)
+## What was changed in `db180a0` (**not built, not run**) and what the review said about each
 1. **`std::fma` is a C runtime call.** The code generator translates every PowerPC
    `fmadd`/`fmsub`/`fnmsub` (scalar) as `std::fma(...)` (see any `generated/default/*.cpp`).
    Built with `-march=x86-64-v2` (no FMA) clang can't inline it, so each is a call into
@@ -61,9 +121,11 @@ PC reference (same scenes on a fast PC, 120 fps): renderer ~1 ms CPU a frame, fr
    available, clang's default `-ffp-contract=on` may fuse `a*b+c` written in one expression
    that the PowerPC rounded separately; the generator mostly rounds through
    `double(float(...))` per instruction, but SIMDe paths (`vmaddfp` is emitted as
-   `add(mul(...))`) and the SDK may be affected. Consider `-ffp-contract=off` to keep exact
-   semantics except the explicit `std::fma`; (c) the SDK's own code assumptions under v3 (its
-   presets use v2; the comment in `build-nx.ps1` says its byte-swaps need SSSE3).
+   `add(mul(...))`) and the SDK may be affected. **Reviewed: (b) was real for the ports' own code
+   and is fixed in `b1035eb` (finding 1); (a) confirmed by compiling a test, still disassemble a
+   built function to be sure; the diagnosis itself is finding 2.** (c) the SDK's own code
+   assumptions under v3 (its presets use v2; the comment in `build-nx.ps1` says its byte-swaps
+   need SSSE3; its mac preset already uses v3).
 2. **Two threads spin in `WaitForVBlank` under Proton.** **Change:**
    `display_vblank::UnderWine()` (Wine's ntdll exports `wine_get_version`);
    `NativeGraphicsSystem::DisplayVblankLoop` (`native_system.cpp`) returns false under Wine, so the
@@ -72,14 +134,17 @@ PC reference (same scenes on a fast PC, 120 fps): renderer ~1 ms CPU a frame, fr
    *Review:* the timer drifts against the real display (gamescope composites with mailbox), so
    expect an occasional frame shown a refresh early/late; is there a better vblank source under
    gamescope (e.g. Vulkan `VK_KHR_present_wait`/present timing, or letting FIFO pace)? Is
-   "thread 404" really DXGI's, and does it stop?
+   "thread 404" really DXGI's, and does it stop? **Reviewed: the fallback path is correct
+   (finding 6); thread 404 is finding 3.**
 3. **The ring thread spun while waiting for the game.** Its WAIT_REG_MEM loop yielded 64 times,
    then called `rex::thread::Sleep(50 us)`, which the SDK turns into a yield for anything under
    100 us (`third_party/rexglue-sdk-nx/src/core/threading_win.cpp`), so it never slept.
    **Change:** 16 yields, then `rex::thread::SleepUntil(now + 200 us)` (a high-resolution
    waitable timer). *Review:* latency cost on the PC (the ring waits ~1x a frame); whether Wine
    honours `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` (if not, `SleepUntil` falls back to
-   `Sleep(us)` → 1 ms); whether an event the game signals could replace polling.
+   `Sleep(us)` → 1 ms); whether an event the game signals could replace polling. **Reviewed:
+   expect ~1 ms under Proton regardless of the flag, and it is on the present's critical path
+   (finding 4); measure with the per-frame wait report.**
 
 ## Open, not yet worked
 4. **Main thread's ntdll share (11–14%).** Not attributed. Candidates: QueryPerformanceCounter
