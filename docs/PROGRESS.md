@@ -275,3 +275,8 @@ speed (EchoPatch's "Degraded AI reactions"). `fear_ai_every_frame` (on) makes th
 than a frame in both games (`src/high_fps.*`; F.E.A.R. `sub_8263D2A0`, Files `sub_8266F620`). Unlike
 the PC, the 360 also calls it with 0 (stop updating), which is left alone. EchoPatch's exception for
 severed limbs isn't ported yet.
+**Played (2026-10-22, both games, 120 fps):** "AI is a bit faster now". The log confirms the hook
+ran in both. F.E.A.R.: 99.4% of frames on time. F.E.A.R. Files Instant Action dipped to 67–90 fps
+in big fights, but that was the renderer, not the AI: 7.8–12 ms of renderer CPU a frame with up to
+2,526 draws, from `fear_vertex_exact` hashing 25–30 GB/s (whole ranges per draw). GitHub issue #27
+tracks bringing that cost down (hash only the vertices a draw uses).
