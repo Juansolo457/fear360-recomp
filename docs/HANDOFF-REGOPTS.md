@@ -324,6 +324,30 @@ game-thread work per frame:
 Stage B against stage A: -20% median, -13% per 1,000 draws (this run's scenes averaged 611 draws per
 frame against 667). Against master: -30% median, -25% per 1,000 draws. GPU time unchanged.
 
+**Test (1), the Deck with the profiler really off (`--no-fear_profile`; `fear_026.log`,
+`fear_027.log`, crashes `151551` and `152233`): the same crash.** Neither log has the profiler's
+sampling line. Crash signature and registers are identical to the first three. Time from the game
+starting to the crash, all five runs:
+
+| Run | profiler | seconds |
+|---|---|---:|
+| `fear_023` | on | 62 |
+| `fear_024` | on | 50 |
+| `fear_025` | on | 78 |
+| `fear_026` | off | 129 |
+| `fear_027` | off | 385 |
+
+The profiler isn't the cause. It may make the crash come sooner, but five runs are too few to say.
+All five crashed in ordinary play at 80-90 fps, with no slow frames, loading or log event before the
+crash. The user's video of `fear_027` shows 75-89 fps in a firefight up to the crash. The Deck's
+Mesa build (`git-035ae2f854`) is the same in every run today, the clean stage A run included. A
+Proton update since 13:54 isn't ruled out (it wouldn't change Mesa): the user mentioned SteamOS,
+controller and dock firmware updates today.
+
+**Next test: stage A on the Deck again** (`private/steamdeck/FEAR360-SteamDeck-stageA.zip`, the same
+`fear.exe` as `fear_021`, copied from `private/ab/A-stageA-555a235/`). A crash would mean today's
+updates broke something under every build. No crash pins it on stage B under Proton.
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
