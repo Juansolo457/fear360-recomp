@@ -12,8 +12,49 @@ comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `d
   fix, the profiler's modules/waits/system-call callers, native `memcpy`/`memset`). The sections
   below are the history, newest first.
 - The Deck's corrupted debris and hands are fixed by `fear_vertex_fresh` (on by default since
-  `54135f6`); the best Deck run so far is `fear_015`. Built and zipped, not yet run: `c02cea4`
-  (system-call callers, native `memcpy`/`memset`).
+  `54135f6`).
+- **Best Deck run so far: `fear_021`** (below): register-options stage A (#34), uncapped to 120 on
+  the OLED's 90 Hz screen, no MSAA, no PC textures. Median 88 fps; the heavy benchmark-room
+  scenes bottom out near 60, limited by the game thread and the GPU together.
+
+## Deck run of register-options stage A, uncapped (`fear_021.log`, 2026-10-23, branch `register-options` at `a20d6fd`)
+The update zip with stage A's `fear.exe` (`skip_lr` and CTR/XER/CR/reservation as locals,
+`docs/HANDOFF-REGOPTS.md`) and the uncapped settings zip: a 240 Hz timer (up to 120 fps), mailbox
+presentation, 1x scale, no MSAA, HIDAPI off, profiler on. Deck OLED at 90 Hz. Story play including
+the benchmark room and a late firefight, about 10 minutes. (`fear_022.log` is a collection-menu
+start that switched to F.E.A.R. Files, nothing else.) The user: the best Deck run so far, "7 out of
+10"; it holds near 90 most of the time; the benchmark room still dips, then recovers quickly; the
+late firefight held up; the autosave control drop (#36) is gone or nearly imperceptible.
+
+`tools/analysis/abcompare.py private/deck-logs/fear_020.log private/deck-logs/fear_021.log`:
+
+| | `fear_020` (master `2bb0774`, 60 cap) | `fear_021` (stage A, 120 cap) | |
+|---|---:|---:|---:|
+| fps, median | 59.8 | 88.0 | +47% |
+| draws per frame, median | 661 | 625 | -6% |
+| game-thread work per frame, median | 9.68 ms | 8.02 ms | **-17%** |
+| renderer CPU per frame | 6.90 ms | 7.90 ms | +15% |
+| GPU per frame | 12.4 ms | 9.8 ms | (not like for like: higher clocks at 88 fps) |
+| slow frames (50 ms+) | 51 | 17, nearly all at loading | |
+
+Per module (ms per frame): engine 3.15 to 2.57, game client 0.81 to 0.64, C runtime 0.81 to 0.66,
+Havok 0.97 to 0.83, game server 0.36 to 0.22; engine sound and ClientFX unchanged.
+
+Heavy scenes (windows of 1,200+ draws per frame, the benchmark room among them):
+
+| Run | windows | fps min / median | game-thread work | GPU | work per 1,000 draws |
+|---|---:|---|---:|---:|---:|
+| `fear_018` | 10 | 41.5 / 54.4 | 14.5 ms | 14.4 ms | 11.15 ms |
+| `fear_019` | 6 | 51.3 / 55.0 | 15.3 ms | 14.2 ms | 10.97 ms |
+| `fear_020` | 7 | 47.1 / 54.6 | 13.9 ms | 13.3 ms | 10.12 ms |
+| `fear_021` | 5 | **59.2 / 64.9** | 14.7 ms | 12.8 ms | 9.77 ms |
+
+The dip itself (13:59:12-13:59:22): 1,500-1,600 draws per frame, about 2.5 times the run's median,
+with 15.7 ms of game-thread work and 13.9 ms of GPU per frame, and almost no Direct3D wait. Both
+are near the 16.7 ms of a 60 fps frame, so it settles at 60. Holding 90 there needs both under
+about 11 ms: the CPU from stages B and C of #34, the GPU from #37. Slow frames in play: one at the
+level start (644 texture uploads at once, 186 ms) and two at 14:03 (54 and 62 ms, the game thread
+not submitting: possibly the autosave).
 
 ## Overnight analysis (2026-10-23): `docs/ARCHITECTURE.md`
 Static analysis only, nothing built or run. The main-thread `ZwCreateEvent`/`ZwDeviceIoControlFile`/
