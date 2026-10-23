@@ -107,6 +107,15 @@ REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 100, "F.E.A.R.",
 // fear_shader_wait_ms, then skipped draws (docs/REVIEW.md). Every translation a run asks for is
 // now remembered with its shader's microcode, per title in the cache folder, and at the next start
 // queued for the translation worker behind any the game asks for. See "Shader pre-warm" below.
+// F.E.A.R.: vertex data is checked once a frame per range, and a range unchanged for a while is
+// only sampled or trusted (ChangeDetector), so a range the game rewrites after its first draw in a
+// frame, or changes while trusted, is drawn from the old copy. Suspected for the tracers that
+// stick mid-air at 120 fps; this reads every range that has ever changed again for each draw and
+// counts the draws the usual checks would have got wrong (the 10-second report).
+REXCVAR_DEFINE_BOOL(fear_vertex_exact, false, "F.E.A.R.",
+                    "Read vertex and index data that has ever changed again for every draw, and "
+                    "report the draws the usual once-a-frame checks would have drawn stale "
+                    "(diagnosis; costs CPU)");
 REXCVAR_DEFINE_BOOL(fear_shader_prewarm, true, "F.E.A.R.",
                     "Translate the shaders seen in earlier runs in the background at startup "
                     "(kept per title in the cache folder), so new effects don't stall a frame")
@@ -627,6 +636,12 @@ struct Renderer::Impl {
     uint64_t content = 0;
     uint32_t changes = 0;
     ChangeDetector detector;
+    // F.E.A.R. (fear_vertex_exact): seen changing at least once; this frame's hash is unique to
+    // the frame rather than the content's; the content at its last exact read.
+    bool checked = false;
+    bool dynamic = false;
+    bool unique = false;
+    uint64_t exact = 0;
   };
   // This frame's hash of a vertex or index range. Data the game rewrites
   // every frame (skinned meshes, particles) was hashed in full every frame
@@ -639,9 +654,13 @@ struct Renderer::Impl {
     known.frame = frame;
     if (known.changes >= 4 && (frame & 15)) {
       known.hash = (frame + 1) * 0xD1B54A32D192ED03ull ^ (uint64_t(address) << 20) ^ bytes;
+      known.unique = true;
       return known.hash;
     }
+    known.unique = false;
     uint64_t content = known.detector.Check(data, bytes, frame, address >> 4, vertex_hash_bytes);
+    if (known.checked && content != known.content) known.dynamic = true;
+    known.checked = true;
     known.changes = content != known.content ? std::min(known.changes + 1, 8u) : 0;
     known.content = content;
     known.hash = content;
@@ -649,6 +668,28 @@ struct Renderer::Impl {
   }
   uint64_t vertex_hash_bytes = 0;
   FlatMap64<VertexHash> vertex_hashes;
+  // F.E.A.R.: RangeHash, then with fear_vertex_exact the content as it is now for a range that has
+  // ever changed (or is small), counting the draws the usual hash would have drawn stale.
+  uint64_t DrawRangeHash(VertexHash& known, const uint8_t* data, uint32_t bytes,
+                         uint32_t address) {
+    const bool first_this_frame = known.frame != frame;
+    const uint64_t hash = RangeHash(known, data, bytes, address);
+    if (!vertex_exact || !(known.dynamic || bytes <= 65536)) {
+      return hash;
+    }
+    const uint64_t fresh = XXH3_64bits(data, bytes);
+    ++stats().vertex_exact_reads;
+    stats().vertex_exact_bytes += bytes;
+    if (first_this_frame) {
+      // A unique hash copies the data as it is now; a content hash may be an old one.
+      if (!known.unique && hash != fresh) ++stats().vertex_stale_missed;
+    } else if (fresh != known.exact) {
+      ++stats().vertex_stale_midframe;
+    }
+    known.exact = fresh;
+    return fresh;
+  }
+  bool vertex_exact = false;
 
   // Swap.
   VkDescriptorSetLayout swap_layout_ramp = VK_NULL_HANDLE;
@@ -3622,10 +3663,10 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     if (dma_base && !convert_fan && !convert_loop) {
       uint32_t bytes = guest_count * (index32 ? 4 : 2);
       VertexHash& known = vertex_hashes[(uint64_t(dma_base) << 32) | bytes];
-      RangeHash(known, guest_indices, bytes, dma_base);
+      const uint64_t index_hash = DrawRangeHash(known, guest_indices, bytes, dma_base);
       // The conversion also depends on the byte order and the reset index.
       index_key = {dma_base, bytes | 0x80000000u,
-                   known.hash ^ (uint64_t(index_endian) << 60) ^
+                   index_hash ^ (uint64_t(index_endian) << 60) ^
                        (reset_enabled ? (uint64_t(reset_index) << 8) | 1 : 0)};
       uint64_t found = FindRange(index_key);
       if (found != UINT64_MAX && stream_head - found < kStreamSize / 2) {
@@ -3709,7 +3750,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     while (rex::bit_scan_forward(bits, &bit)) {
       bits &= ~(1u << bit);
       uint32_t fetch_index = word * 32 + bit;
-      if (fetch_resolved_frame[fetch_index] == frame) {
+      if (fetch_resolved_frame[fetch_index] == frame && !vertex_exact) {
         continue;
       }
       fetch_resolved_frame[fetch_index] = frame;
@@ -3727,8 +3768,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       }
       const uint8_t* source = memory->TranslatePhysical<const uint8_t*>(address);
       VertexHash& known = vertex_hashes[(uint64_t(address) << 32) | bytes];
-      RangeHash(known, source, bytes, address);
-      VertexRangeKey range_key = {address, bytes, known.hash};
+      VertexRangeKey range_key = {address, bytes, DrawRangeHash(known, source, bytes, address)};
       uint64_t found = FindRange(range_key);
       VkDeviceSize range_offset;
       if (found != UINT64_MAX && stream_head - found < kStreamSize / 2) {
@@ -5678,6 +5718,7 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   }
   trace_frame_draw = 0;
   ++frame;
+  vertex_exact = REXCVAR_GET(fear_vertex_exact);
   profile_frame = profile_pool && frame % 16 == 0;
   PollCompleted();
   ProfileReport();

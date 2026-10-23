@@ -48,4 +48,8 @@ Local changes (see `git log -p -- port-nx/src/native`):
   behind any draw is waiting for. Pipelines too: each one's key is recorded, and at the next
   start created on the pipeline worker once its shaders are translated. See `docs/REVIEW.md`.
 
+- `fear_vertex_exact` (diagnosis, off): vertex and index ranges that have ever changed are read
+  again for every draw (no once-a-frame reuse, no sampled/trusted shortcut), and the 10-second
+  report counts the draws the usual checks would have drawn from old data.
+
 The `*_test.cpp` files are kept for reference but are not built here.

@@ -56,6 +56,13 @@ struct RendererStats {
   uint64_t textures_pending = 0;
   uint64_t textures_replaced = 0;
   uint64_t vertex_bytes_copied = 0;
+  // F.E.A.R.: fear_vertex_exact. Ranges read again for a draw, their bytes, and the draws the
+  // usual checks would have drawn from old data: rewritten since the range's first draw in the
+  // frame, or changed while the trusted/sampled check said it had not.
+  uint64_t vertex_exact_reads = 0;
+  uint64_t vertex_exact_bytes = 0;
+  uint64_t vertex_stale_midframe = 0;
+  uint64_t vertex_stale_missed = 0;
   uint64_t render_passes = 0;
   uint64_t submissions = 0;
   // Renderer CPU time on the ring thread (draws, resolves, swaps), and GPU

@@ -723,6 +723,14 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           s.textures_streamed - reported_render_.textures_streamed,
           s.textures_replaced - reported_render_.textures_replaced,
           s.textures_pending - reported_render_.textures_pending);
+      if (const uint64_t reads = s.vertex_exact_reads - reported_render_.vertex_exact_reads) {
+        REXLOG_INFO("[native] vertex data read for each draw (fear_vertex_exact): {} reads, {} MB; "
+                    "draws the usual checks would have drawn stale: {} rewritten within the "
+                    "frame, {} changes missed",
+                    reads, (s.vertex_exact_bytes - reported_render_.vertex_exact_bytes) >> 20,
+                    s.vertex_stale_midframe - reported_render_.vertex_stale_midframe,
+                    s.vertex_stale_missed - reported_render_.vertex_stale_missed);
+      }
       REXLOG_INFO("[native] shader translations and pipelines: {} waited for ({:.1f} ms), {} "
                   "draws skipped (over the frame's wait budget)",
                   s.compile_waits - reported_render_.compile_waits,

@@ -277,3 +277,123 @@ void FearDebugParticleSkip(PPCRegister& r11) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (ShotParticles* shot = ShotOf(g_system_shot, r11.u32)) ++shot->skipped;
 }
+
+// Bullet tracers above ~90 fps (open item: they "twitch in midair and are stuck there for a
+// second" in heavy firefights at 120). CTracerFX::Update (sub_82B9EA80) moves a tracer by
+// velocity x frame time, as on PC, so this checks what it is given: per 10 s, the frame times
+// tracers were updated with, how far they advanced, gaps between one tracer's updates, and
+// tracers alive for over a second. The tracer's fields (the PC layout, the same on 360): +0x14
+// its properties (+0x38 length, +0x44 velocity, +0x4F start emitted), +0x80 the distance
+// travelled, +0x84 the length of its ray.
+REXCVAR_DEFINE_BOOL(fear_debug_tracers, false, "F.E.A.R.",
+                    "Log bullet tracers' updates every 10 s: frame times, progress, stalls "
+                    "(debugging)");
+
+namespace {
+
+struct Tracer {
+  int64_t first_ns = 0, last_ns = 0;
+  float distance = 0;
+  uint32_t updates = 0;
+};
+
+struct TracerWindow {
+  int64_t start_ns = 0;
+  uint32_t updates = 0, tracers = 0, gaps = 0, past_end = 0, long_lived = 0;
+  uint32_t buckets[6] = {};  // frame time: 0, <2, <6, <10, <20, >=20 ms
+  double dt_sum = 0, dt_max = 0, advance_sum = 0, gap_max_ms = 0, life_max_ms = 0;
+};
+
+std::mutex g_tracer_mutex;
+std::unordered_map<uint32_t, Tracer> g_tracers;
+TracerWindow g_tracer_window;
+uint32_t g_tracer_lines = 0;
+
+float GuestFloat(uint32_t address) {
+  const uint32_t word = GuestWord(address);
+  float value;
+  std::memcpy(&value, &word, 4);
+  return value;
+}
+
+int64_t NowNs() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+void EndTracer(TracerWindow& w, const Tracer& t) {
+  const double life_ms = double(t.last_ns - t.first_ns) / 1e6;
+  w.life_max_ms = std::max(w.life_max_ms, life_ms);
+  if (life_ms > 1000.0) ++w.long_lived;
+}
+
+void ReportTracers(int64_t now) {
+  TracerWindow& w = g_tracer_window;
+  // Tracers not updated for 0.5 s are gone (their pool slots are reused).
+  for (auto it = g_tracers.begin(); it != g_tracers.end();) {
+    if (now - it->second.last_ns > 500000000) {
+      EndTracer(w, it->second);
+      it = g_tracers.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (w.updates && g_tracer_lines < 2000) {
+    ++g_tracer_lines;
+    REXLOG_INFO("[tracers] {} updates of {} tracers; frame time avg {:.2f} ms, max {:.2f}; "
+                "0/<2/<6/<10/<20/20+ ms: {}/{}/{}/{}/{}/{}; advance avg {:.1f} units; {} gaps "
+                "over 50 ms between one tracer's updates (longest {:.0f} ms); {} updates past "
+                "the end of the ray; {} tracers alive over 1 s (longest {:.0f} ms)",
+                w.updates, w.tracers, w.dt_sum / w.updates * 1000.0, w.dt_max * 1000.0,
+                w.buckets[0], w.buckets[1], w.buckets[2], w.buckets[3], w.buckets[4],
+                w.buckets[5], w.advance_sum / w.updates, w.gaps, w.gap_max_ms, w.past_end,
+                w.long_lived, w.life_max_ms);
+  }
+  w = TracerWindow();
+  w.start_ns = now;
+}
+
+}  // namespace
+
+void FearDebugTracerUpdate(PPCRegister& r31, PPCRegister& f1) {
+  if (!REXCVAR_GET(fear_debug_tracers)) return;
+  const int64_t now = NowNs();
+  const double dt = f1.f64;
+  const uint32_t props = GuestWord(r31.u32 + 0x14);
+  const float distance = GuestFloat(r31.u32 + 0x80);
+  const float ray = GuestFloat(r31.u32 + 0x84);
+  const float velocity = GuestFloat(props + 0x44);
+  const bool start_emitted = (GuestWord(props + 0x4C) & 0xFF) != 0;  // the byte at +0x4F
+  const float length = start_emitted ? ray : GuestFloat(props + 0x38);
+  std::lock_guard<std::mutex> lock(g_tracer_mutex);
+  TracerWindow& w = g_tracer_window;
+  if (!w.start_ns) w.start_ns = now;
+  auto [it, added] = g_tracers.try_emplace(r31.u32);
+  Tracer& t = it->second;
+  // A slot reused by a new tracer: its distance starts over.
+  if (!added && (distance < t.distance || now - t.last_ns > 500000000)) {
+    EndTracer(w, t);
+    t = Tracer();
+    added = true;
+  }
+  if (added) {
+    t.first_ns = now;
+    ++w.tracers;
+  } else {
+    const double gap_ms = double(now - t.last_ns) / 1e6;
+    if (gap_ms > 50.0) ++w.gaps;
+    w.gap_max_ms = std::max(w.gap_max_ms, gap_ms);
+  }
+  t.last_ns = now;
+  t.distance = distance;
+  ++t.updates;
+  ++w.updates;
+  const double ms = dt * 1000.0;
+  ++w.buckets[ms <= 0.0 ? 0 : ms < 2 ? 1 : ms < 6 ? 2 : ms < 10 ? 3 : ms < 20 ? 4 : 5];
+  w.dt_sum += dt;
+  w.dt_max = std::max(w.dt_max, dt);
+  w.advance_sum += dt * velocity;
+  if (distance - length >= ray) ++w.past_end;
+  if (now - w.start_ns >= 10000000000ll) ReportTracers(now);
+}

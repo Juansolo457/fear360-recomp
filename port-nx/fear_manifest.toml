@@ -290,3 +290,12 @@ registers = ["r11"]
 name = "FearDebugParticleSkip"
 address = 0x82BAE404
 registers = ["r11"]
+
+# Debugging (src/fx_debug.cpp, fear_debug_tracers): each bullet tracer's update. CTracerFX::Update
+# (sub_82B9EA80, the effect type "Tracer"; the PC's ClientFx.fxd 0x10026DA0 does the same: the
+# distance travelled grows by velocity x frame time), after the effect is in r31 and with the
+# frame time still in f1.
+[[entrypoint.midasm_hook]]
+name = "FearDebugTracerUpdate"
+address = 0x82B9EA98
+registers = ["r31", "f1"]
