@@ -38,6 +38,22 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Deck run with `SDL_JOYSTICK_HIDAPI=0` in the launch options (`fear_017.log`, same build, Docks)
+- **It didn't take effect**: SDL still added "Steam Controller" (28DE:1302) and "Steam Deck
+  Controller" (28DE:1205), and `ZwDeviceIoControlFile < HID.DLL` is still 6.6-8.7% of the game
+  thread (+1-2% each for `ZwCreateEvent`/`ZwClose`). Either Steam didn't pass the variable or
+  SDL finds the pads another way that also uses `hid.dll`; the log can't tell. The SDK sets no
+  SDL joystick hints itself (only audio category and video driver).
+- Performance about the same, as the user felt: 67% of windows at 59.5+ (fear_016: 74%), heavy
+  windows median 56.0 (57.9), slowest 45.8. Run-to-run variation, nothing changed.
+- The autosave input drop came back (#36 reopened): intermittent, present in fear_015 and
+  fear_017, not fear_016.
+- The translated function at the end of the HID chain is mostly `sub_822263B8`, a recursive tree
+  walk with no imports (calls only itself and `sub_822261D0`): it can't be the real caller, so
+  that end of the scan is picking up stale frames. To pin the path: record every non-system
+  module on the chain (is it `rexruntimerd.dll` with SDL inside, `dinput8.dll`, `xinput1_4.dll`?),
+  and set the SDL hint from code with a switch instead of the environment.
+
 ## Deck run of `40af21a` (`fear_016.log`, 2026-10-23, Docks into the water treatment facility)
 - User: the last firefight was the best yet, close to 60 and smooth with no visual hiccups; an
   earlier fight still dropped into the 40s (about midway, a tight room full of debris and
