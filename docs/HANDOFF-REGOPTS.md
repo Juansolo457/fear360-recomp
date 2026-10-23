@@ -243,6 +243,50 @@ What to watch beyond the numbers, because this stage is where the review's break
 physics (props, ragdolls, anything flung: the v92 constant), crashes, the three menu items, textures
 and effects loading (the setjmp paths), a save and a load.
 
+**Stage B crash on the Deck (`fear_023.log`, `crash-20261023-141856.txt`/`.dmp`, in
+`private/deck-logs/`).** About a minute into play after the Docks load (70-85 fps, nothing odd on
+screen), an access violation on guest thread `F800004C` (`XThread021C`):
+- The stack, symbolized against this build's PDBs (`llvm-symbolizer`): `rexruntimerd.dll+0x50CB8D`
+  is `HostToGuestFunction<KeWaitForSingleObject_entry>` reading the wait's timeout argument (r7,
+  context offset 0x38) as a guest pointer. Its caller is `sub_82ABD508` (`fear_recomp.176.cpp`, the
+  thread's entry), which `XThread::Execute` calls directly. The guest address read was `0x60`.
+- `sub_82ABD508` is an XAudio voice thread's loop (`XAudioGetVoiceCategoryVolume`, spin locks,
+  `KeReleaseSemaphore`). It waits on a fixed event (`0x833992C8`) with `r6 = 0` and `r7 = 0` before
+  each wait. **The compiled code stores both with one `vmovaps %xmm6, (%r14)`** (r14 = `&ctx.r6`)
+  and keeps the zero in `xmm6` for the whole loop, because `xmm6`-`xmm15` are callee-saved in the
+  Windows x64 ABI. So `xmm6` came back from one of the loop's calls as `{0, 0x60}`, and r7 became
+  `0x60`. The whole 16-byte register, including the high half the r6 store doesn't show, was wrong.
+- The master and stage A builds compile this function the same way (zero in `xmm6`, the same merged
+  store; checked in `private/ab/`), and neither ever crashed there.
+- What the loop calls, and why none of it explains this so far:
+  - **The game code it calls:** under stage B the translated callees (`sub_82ABCD80`,
+    `sub_82ABCC10`, `sub_82ABB7C8`, `sub_82ABBE78`, `sub_82ABC8A8`, `sub_82ABC608`,
+    `sub_82AC1978`) **don't touch `xmm6`-`xmm15` at all** (disassembled). It makes no indirect calls,
+    and its call tree reaches no setjmp or longjmp site.
+  - **The kernel imports it calls:** `KeWaitForSingleObject`, `KeSetEvent`, `KeReleaseSemaphore`,
+    spin locks, `KeRaiseIrqlToDpcLevel`/`KfLowerIrql` (which only write a byte) and two XAudio
+    getters. They're the same in all three builds: `rexruntimerd.dll` differs between stage A and B
+    only in its timestamp and PDB id (15 bytes). None of them runs game callbacks on this thread.
+  - **Ruled out:** the SDK writing another thread's context (it only writes the current one's);
+    GPU interrupts (they run on the thread that raises them); fibers (host fibers, own stacks); host
+    stack overflow (16 MiB per thread); a `{r6 = 0, r7 = 96}` pair anywhere in the game code. The
+    SDK's exception handler writes back whole XMM registers, and only the ones it changed.
+- **The leading hypothesis is untested:** something asynchronous replaces this thread's `xmm6`
+  between the loop's calls. Under Proton that's thread suspension and signal delivery: our profiler
+  suspends every busy thread 200 times a second (`SuspendThread`, `GetThreadContext` with
+  `CONTEXT_CONTROL`, a stack read, `ResumeThread`), and the audio thread is suspended mostly inside
+  `ZwWaitForSingleObject`. It would explain why stage B is the first build hit: until now the
+  translated code almost never kept live values in `xmm6`-`xmm15` across a call. Stage B keeps
+  f14-f31 and the vector registers there all the time, so a register that gets replaced now carries
+  real data (here `{0, 0x60}`, which looks like two 64-bit locals) instead of a stale copy of the
+  same zero.
+- **Tests that separate it, no build needed:** (1) stage B on the Deck with
+  `--fear_profile false` at the end of the launch options, for a long session; (2) stage B on the
+  PC (native Windows), profiler on, for the planned A/B. A crash in (1) means the profiler isn't
+  the cause; no crash in (2) but a crash in (1) points at Proton itself. If the profiler is the
+  cause, the fix is in `port-nx/src/profiler.cpp`, not in the translator (for example, sample
+  without suspending threads under Wine).
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
