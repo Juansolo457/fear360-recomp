@@ -22,7 +22,11 @@ Setup (Desktop Mode)
          (Steam fills this in; check it).
        - Shortcut > LAUNCH OPTIONS: paste this one line:
 
-WINEDLLOVERRIDES="msvcp140,msvcp140_atomic_wait,vcruntime140,vcruntime140_1=n,b" %command% --resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user --cache_root cache --nx_renderer native --fear_texture_pack texture_pack --fear_collection ../collection.toml
+WINEDLLOVERRIDES="msvcp140,msvcp140_atomic_wait,vcruntime140,vcruntime140_1=n,b" %command% --resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user --cache_root cache --nx_renderer native --fear_collection ../collection.toml
+
+     Nothing else: the Deck's settings are in each game's user/settings.toml (1x render scale,
+     60 fps, no MSAA, SDL's HIDAPI drivers off, the profiler on for the logs). The package has no
+     PC texture pack; the baseline is the 360's own textures.
 
   4. Rename the entry (e.g. "F.E.A.R. Collection") and go back to Game Mode.
 
@@ -38,22 +42,20 @@ Performance testing
     made frames uneven (first Deck test, #28).
   - The first run translates shaders as they appear (brief hitches the first time an effect is
     seen); each later run starts with them pre-built, so test the second run for smoothness.
-  - Without the PC textures (lighter on memory): delete " --fear_texture_pack texture_pack" from
-    the launch options.
+  - Saving PC Settings in the game rewrites user/settings.toml with only the panel's settings:
+    MSAA, the HIDAPI setting and the profiler then go back to their defaults.
   - Logs: fear/logs/fear_NNN.log and fearfiles/logs/fearfiles_NNN.log (one per run). Every 10 s
     they give frame pacing, renderer CPU/GPU time per frame and slow frames. Copy them back to
     the PC for a read.
 
-Diagnosis (add to the end of the launch options, one run at a time)
-  - Profiler (where the CPU time goes, in the log every 10 s):
-      --fear_profile true --fear_profile_hz 200
+Diagnosis (add to the end of the launch options, one run at a time; a flag beats settings.toml)
+  - The profiler is on in this package (user/settings.toml); off: --fear_profile false
   - The corrupted particles/hands (#28) are fixed by exact vertex checks, now the default.
     To compare: the older checks:                           --fear_vertex_fresh false
     no partial vertex reads (#27):                          --fear_vertex_spans false
-    no MSAA:                                                --nx_native_msaa false
-    The log's "[native] vertex reads:" line confirms the setting took.
-  - Controller requests through Wine's hid.dll (#29): SDL's direct HID drivers off, so the
-    controls come through Steam Input's virtual pad:     --hid_sdl_hidapi off
+    The log's "[native] vertex reads:" line confirms the setting.
+  - MSAA back on (the game's own 2x/4x):                    --nx_native_msaa true
+  - SDL's direct HID drivers back on (#29):                 --hid_sdl_hidapi on
     The log's "SDL: HIDAPI joystick drivers" line confirms it.
 
 If it doesn't start

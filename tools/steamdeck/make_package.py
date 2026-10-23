@@ -10,8 +10,9 @@ Layout (FEAR360-SteamDeck/):
   collection.toml        the collection menu, with paths relative to each game's folder
   fear/, fearfiles/      each game's program, rexruntimerd.dll, TracyClientrd.dll and the Visual
                          C++ runtime (Proton's builtin one lacks msvcp140_atomic_wait.dll), its
-                         assets/ (game data), user/ (saves; settings.toml replaced with the Deck's:
-                         render scale 1x) and texture_pack/ when one is built (docs/TEXTURES.md)
+                         assets/ (game data) and user/ (saves; settings.toml replaced with the
+                         Deck's, see DECK_SETTINGS). No PC texture pack: the Deck baseline is the
+                         360's own textures (SHIP_TEXTURE_PACKS).
 
 The game reads its paths from the command line only, so the Steam launch options in the README pass
 them relative to the game's folder (Steam's Start In). No shader cache: it is per GPU, and the Deck
@@ -32,15 +33,27 @@ OUT = ARGV[0] if ARGV else os.path.join(
 TOP = 'FEAR360-SteamDeck'
 CRT_DLLS = ['msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
 ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root', 'assets',
-        '--user_data_root', 'user', '--cache_root', 'cache', '--nx_renderer', 'native',
-        '--fear_texture_pack', 'texture_pack']
+        '--user_data_root', 'user', '--cache_root', 'cache', '--nx_renderer', 'native']
+# The PC texture packs (4x the pixels) cost the Deck's shared memory bandwidth; the baseline is the
+# 360's own textures. True ships them and passes --fear_texture_pack again.
+SHIP_TEXTURE_PACKS = False
+if SHIP_TEXTURE_PACKS:
+    ARGS += ['--fear_texture_pack', 'texture_pack']
 DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
                  "# Steam Deck: 1x (1280x720 for the Deck's 1280x800 screen), and 60 fps:\n"
                  '# the Deck reported 120 Hz through gamescope when docked, and the game\n'
                  "# paced to 120 while the Deck's own limit showed 60 (play-test, #28).\n"
                  'nx_native_resolution_scale = 1\n'
-                 'fear_frame_rate_limit = 60\n')
+                 'fear_frame_rate_limit = 60\n'
+                 "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
+                 "# the GPU), SDL's HIDAPI drivers off (the controls come through Steam Input's\n"
+                 '# pad, the usual Proton path; #29) and the profiler on for the logs (about 6%\n'
+                 '# of a core). Saving PC Settings in the game rewrites this file without them.\n'
+                 'nx_native_msaa = false\n'
+                 'hid_sdl_hidapi = "off"\n'
+                 'fear_profile = true\n'
+                 'fear_profile_hz = 200\n')
 GAMES = [
     # (folder in the zip, project, program, texture pack, id, name, subtitle)
     ('fear', 'port-nx', 'fear.exe', os.path.join('private', 'texture_pack'),
@@ -101,7 +114,7 @@ def main():
             add_tree(os.path.join(REPO, project, 'assets'), f'{folder}/assets')
             add_tree(os.path.join(REPO, project, 'user'), f'{folder}/user', skip={'settings.toml'})
             z.writestr(f'{TOP}/{folder}/user/settings.toml', DECK_SETTINGS)
-            if os.path.exists(os.path.join(REPO, pack, 'index.tsv')):
+            if SHIP_TEXTURE_PACKS and os.path.exists(os.path.join(REPO, pack, 'index.tsv')):
                 add_tree(os.path.join(REPO, pack), f'{folder}/texture_pack')
             print(f'{folder}: {count} files, {total / 2**30:.1f} GB so far', flush=True)
     print(f'{OUT}: {count} files, {total / 2**30:.2f} GB')

@@ -38,6 +38,27 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Fresh Deck baseline (2026-10-23): pad names cached (SDK patch 0006), no MSAA, no PC textures
+- `fear_019.log` (build with patch 0005, `SDL_JOYSTICK_HIDAPI=0` still in the launch options, MSAA
+  and the PC textures on): "the smoothest by far", the autosave drop "mostly gone", the
+  benchmark room about 10 fps better by feel. In the log: the slowest heavy window 51.3 fps
+  (fear_018: 41.5), but at 1,427 draws a frame against 1,938, so part of that is the room being
+  lighter that time; at equal load (1,300-1,400 draws) about 2-3 fps better.
+- **The HID calls were still there** (~9-11% of the game thread): `ZwDeviceIoControlFile <
+  HID.DLL < xinput1_4.dll!XInputGetCapabilitiesEx < rexruntimerd.dll`. Wine's
+  `XInputGetCapabilitiesEx` makes a synchronous `HidD_GetAttributes` request on every call (and
+  rescans devices for an empty slot). The caller: the SDK's `SDLInputDriver::EnumerateDevices`,
+  which runs on every guest poll (`RefreshDevices` in `GetState`, `GetCapabilities`, `SetState`,
+  `GetKeystroke`) and asked SDL for each pad's name and GUID every time; under Steam
+  `SDL_GetGamepadName` looks up the pad's Steam virtual gamepad slot, which for an XInput pad is
+  `XInputGetCapabilitiesEx` (likely; the source of `SDL_GetGamepadName` wasn't read through).
+  **SDK patch 0006** reads both once, when the pad connects.
+- Package (`tools/steamdeck/make_package.py`): a full fresh package for a clean install. No PC
+  texture packs shipped or passed (`SHIP_TEXTURE_PACKS = False`); `user/settings.toml` carries
+  `nx_native_msaa = false`, `hid_sdl_hidapi = "off"`, `fear_profile = true`,
+  `fear_profile_hz = 200` besides 1x and 60 fps. The launch options are back to the short line in
+  the README.
+
 ## Deck run of `9bcea1e` with `--hid_sdl_hidapi off` (`fear_018.log`, 2026-10-23, Interval 2)
 - The switch took (`SDL: HIDAPI joystick drivers off ... SDL_JOYSTICK_HIDAPI in the environment:
   0`: the launch-option variable of fear_017 *had* reached the game). The cost stayed, by another

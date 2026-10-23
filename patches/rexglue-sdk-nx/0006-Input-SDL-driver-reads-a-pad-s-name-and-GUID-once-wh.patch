@@ -1,0 +1,85 @@
+From b29317c55c9525bae7ac7d62639f42ea49fa3b41 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 09:52:15 -0700
+Subject: [PATCH] Input: SDL driver reads a pad's name and GUID once, when it
+ connects
+
+EnumerateDevices runs on every guest poll (every XamInputGetState,
+GetCapabilities, SetState and GetKeystroke, from the game's thread) and
+asked SDL for each pad's name and GUID every time. Under Steam,
+SDL_GetGamepadName looks up the pad's Steam virtual gamepad slot, which for
+an XInput pad is XInputGetCapabilitiesEx; Wine answers that with a
+synchronous HID request (HidD_GetAttributes) per call: about 10% of the
+Steam Deck's game thread. Both are now read when the pad is added.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/input/sdl/sdl_input_driver.h |  4 ++++
+ src/input/sdl/sdl_input_driver.cpp       | 19 +++++++++++++------
+ 2 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+index 3969d19..10871f5 100644
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -14,6 +14,7 @@
+ #include <atomic>
+ #include <mutex>
+ #include <optional>
++#include <string>
+ #include <vector>
+ 
+ #include <rex/input/input_driver.h>
+@@ -67,6 +68,9 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+     DeviceId id;
+     // Per pad rather than per guest user, so it survives reassignment.
+     KeystrokeState keystroke;
++    // Its name and GUID, read once when it connects (EnumerateDevices runs on every poll).
++    std::string name;
++    std::string guid;
+     // The last vibration sent to SDL, and when (SetDeviceVibration skips repeats).
+     bool vibration_sent = false;
+     uint16_t vibration_left = 0;
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index 469ded7..77b79ca 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -173,15 +173,16 @@ void SDLInputDriver::EnumerateDevices(std::vector<DeviceInfo>& out) {
+ 
+   auto guard = DrainAndLock();
+ 
++  // The name and GUID were read when the pad connected: this runs on every guest poll (every
++  // XamInputGetState, GetCapabilities, SetState and GetKeystroke, from the game's thread), and
++  // SDL_GetGamepadName isn't free. Under Steam it looks up the pad's Steam virtual gamepad slot,
++  // which for an XInput pad is XInputGetCapabilitiesEx: in Wine a HID request per call, about
++  // 10% of the Steam Deck's game thread (fear360-recomp #29).
+   for (const auto& controller : controllers_) {
+     DeviceInfo info;
+     info.id = controller.id;
+-    const char* name = SDL_GetGamepadName(controller.sdl);
+-    info.name = name ? name : "";
+-    char guid_text[33] = {};
+-    SDL_GUIDToString(SDL_GetJoystickGUID(SDL_GetGamepadJoystick(controller.sdl)), guid_text,
+-                     static_cast<int>(sizeof(guid_text)));
+-    info.guid = guid_text;
++    info.name = controller.name;
++    info.guid = controller.guid;
+     info.synthetic = false;
+     out.push_back(info);
+   }
+@@ -500,6 +501,12 @@ void SDLInputDriver::OnControllerDeviceAddedLocked(const SDL_Event& event) {
+   ControllerState state = {};
+   state.sdl = controller;
+   state.id = AllocateDeviceId();
++  const char* name = SDL_GetGamepadName(controller);
++  state.name = name ? name : "";
++  char guid_text[33] = {};
++  SDL_GUIDToString(SDL_GetJoystickGUID(SDL_GetGamepadJoystick(controller)), guid_text,
++                   static_cast<int>(sizeof(guid_text)));
++  state.guid = guid_text;
+   state.state_changed = true;  // XInput starts with packet_number = 1
+   UpdateXCapabilities(state);
+   controllers_.push_back(state);
+-- 
+2.53.0.windows.1
+
