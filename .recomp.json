@@ -1,0 +1,19 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "F.E.A.R.",
+  "system": "Xbox 360",
+  "type": "recomp",
+  "project": "F.E.A.R. 360 Recompiled",
+  "status": "in-progress",
+  "targets": ["Windows", "Steam Deck"],
+  "toolchain": "Rexglue",
+  "approach": "The 360 default.xex statically recompiled with ReXGlue, drawn by fear-nx's native Vulkan Xenos renderer with integer resolution scaling and display-locked pacing.",
+  "notes": "The Xbox 360 version: Instant Action, the dual machine pistols and a bonus level the PC never got. Campaign, Instant Action and saving work on PC at up to 4K and an even 80 fps on a 240 Hz display, with optional PC textures built from your own PC copy. Runs on the Steam Deck under Proton. F.E.A.R. Files (Extraction Point and Perseus Mandate, 360) is recompiled in the same repository, and both start from one collection menu. No game data included: bring your own Xbox 360 copy.",
+  "help": ["Steam Deck performance testing", "Linux build"],
+  "tags": ["vulkan", "4k", "high-framerate", "steam-deck"],
+  "maintainers": [{"name": "Juansolo457", "link": "https://github.com/Juansolo457"}],
+  "links": [
+    {"label": "Steam Deck video", "url": "https://youtu.be/6rP_icfY-sM"},
+    {"label": "fear-nx renderer", "url": "https://github.com/infriker/fear-nx"}
+  ]
+}
