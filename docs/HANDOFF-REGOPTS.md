@@ -414,6 +414,98 @@ changed, or keeping stage B off on Proton (stage A only on the Deck).
 3. Is the working explanation (Proton swapping in other XMM contents during system calls) plausible,
    and is there a known Wine/Proton issue to cite? The Deck's Proton version isn't in our logs.
 
+### 7.1 Review of patch 0013 (2026-10-23, third pass, nothing built)
+**1. The fix is correct as written.**
+- A clobber in an `asm` is a definition of the register to LLVM, and a callee-saved register
+  defined anywhere in a function is saved in the prologue and restored in the epilogue (on Win64
+  the whole 128 bits, `movaps`). Clang does not elide it for an empty asm. The same function
+  already compiles `asm volatile("" ::: "memory")` in this build, so the syntax is known to be
+  accepted by clang-cl. All three carriers are `noinline` (`[[gnu::noinline]] inline` is fine:
+  `inline` for linkage, `noinline` for codegen), so the save and restore sit in a frame of their
+  own around the host call.
+- The wrapper's own values are safe. The clobber sits right after the host call: anything live
+  across the call and used after the asm cannot be in `xmm6`-`xmm15`, nothing runs between the
+  call's return and the asm, and a volatile asm is not reordered across a call. What the patch
+  cannot protect is host code *inside* the call (the export body, if inlined into the wrapper, or
+  any runtime code) that keeps a value of its own in `xmm6`-`xmm15` across a Win32 call: that is
+  the exposure the whole DLL has if the registers really change, patch or not.
+- Include order: `pch_h.inja` includes `<rex/ppc.h>` (which includes `rex/ppc/function.h`) at
+  line 32 and `<rex/system/mmio_handler.h>` at 38, both before the helpers at 167. The MMIO
+  macros' continuation lines are odd-looking but syntactically right; `REX_CHECK_GLOBAL_LOCK`
+  still reads the count with the lock held; `u32`/`u64` are in scope.
+- **Cost item missed:** `[entrypoint.rexcrt]`'s `memcpy` and `memset` are `REX_HOOK`s too, so
+  every call now saves and restores ten vector registers around a copy that was already 1-4% of
+  the game thread. Worth a wrapper variant without the clobber for `REXCRT_EXPORT` (a template
+  flag on `HostToGuestFunction`). Not done here: untested, and a measurement call.
+
+**2. Coverage.** Covered: every `REX_EXPORT` (through `REX_HOOK`), rexcrt included; the MMIO
+accesses; the global lock. Not covered, and why it is fine for now:
+- `REX_STUB`/`REX_STUB_RETURN`/`REX_STUB_LOG` exports log on every call (spdlog, a file write):
+  none fired in `fear_023`-`fear_027` (no `STUB` line).
+- `REX_HOOK_RAW` exports: the eleven printf-family ones in `xboxkrnl_strings.cpp`;
+  `DbgPrint`/`XamDbgPrint` log. None in these runs.
+- `ppc_trap` (logs), and `REX_CALL_INDIRECT_FUNC`'s miss path (`ResolveIndirectFunction`, which
+  locks): only for targets outside the dispatch table.
+- The midasm hooks: `fear_menu` and `fx_debug` log (not in this loop); the profiler's are atomics.
+- `REX_QUERY_TIMEBASE` is `host_tick_count_platform()`: QPC, which Wine answers with `rdtsc` on an
+  invariant-TSC CPU. No system call, as stated.
+- **The asynchronous path is outside the patch by design:** the SDK write-watches GPU memory
+  (`EnableAccessCallbacks`, `exception_handler_win.cpp`'s vectored handler). Under Wine a watched
+  store in translated code is a `SIGSEGV`, `KiUserExceptionDispatcher`, our handler, `NtContinue`.
+  That is a context save and restore at an arbitrary instruction, on whichever thread wrote.
+
+**3. The diagnosis.** Wine's x86-64 syscall dispatcher (current `dlls/ntdll/unix/signal_x86_64.c`)
+saves the whole FP state into the thread's syscall frame on entry (`xsave64`, or `xsavec64` when
+`XState.CompactionEnabled`, mask `XState.EnabledFeatures & 7`; `fxsave64` without XSAVE) and on
+the fast return restores `xmm6`-`xmm15` from that area with `movaps 0x1c0(%rcx),%xmm6` ...
+`movaps 0x250(%rcx),%xmm15` (`xrstor64` only when the frame's restore flags ask for FP or
+XSTATE); the unix-call dispatcher saves and restores them with `movdqa`. So keeping them across a
+system call is designed in, and a swap needs a bug in that save or restore. One of exactly that
+shape is on record: [Wine bug 58335](https://bugs.winehq.org/show_bug.cgi?id=58335) (10.9-10.10,
+mid 2025): `init_xstate_features` left `EnabledFeatures` at 0, `xsave64` with an empty mask
+stored nothing, and the return still restored `xmm6` from the unwritten slot, so a function that
+kept a value in `xmm6` across a system call got the frame's stale contents back. It hit only CPUs
+without AVX (the Deck's Van Gogh has AVX2) and is fixed (`03039ab2`, `e5f591f3`). Nothing is on
+record for AVX CPUs or for `NtWaitForSingleObject`. So: plausible as a bug of that shape in the
+Proton build on the Deck, unconfirmed; the Proton version is the first thing to learn (the crash
+report now prints it, 7.2).
+
+Two refinements of the working explanation:
+- "Contents from elsewhere" is more likely **this thread's own stale frame** than another thread's
+  registers: the syscall frame is per thread and reused by every system call, so an unsaved slot
+  holds the `xmm6` of the last call that did save it. That also explains why the same loop never
+  crashed in master and stage A: stage B is the first build whose translated code leaves non-zero
+  data in `xmm6`-`xmm15` across system calls, so before it the stale slot held zero, which is
+  what the loop expected anyway.
+- `{0, 0x60}` is the shape of a `li rN,0; li rN+1,96` pair stored as one vector. Twenty
+  translated functions build one (`sub_82345958`, `sub_8243EEA8`, `sub_8245C280`, `sub_825419F0`,
+  `sub_82569690`, `sub_825A8118`, `sub_825B0A40`, `sub_825D8660`, `sub_825F0160`, `sub_8262E2F0`,
+  `sub_82646A40`, `sub_826A9D68`, `sub_826E4B38`, `sub_826F1338`, `sub_826FAC50`, `sub_827AAAB8`,
+  `sub_828544A0`, `sub_82854640`, `sub_82A7C0E8`, `sub_82CC94D0`), but **none is in the voice
+  loop's call tree** (seven translated functions). So the value came from host code on that
+  thread, or from another thread's context after all. A diagnostic build settles it.
+
+What a diagnostic build should record, if the patched build still crashes:
+1. A checking variant of `REX_KEEP_CALLEE_SAVED_XMM` in `HostToGuestFunction`: copy
+   `xmm6`-`xmm15` to a 160-byte stack buffer before the host call (`movaps` in an asm), compare
+   after, and on a mismatch log once per export: the export's name, thread id, the register, both
+   values, `MXCSR`, and `wine_get_version()`. The same in the MMIO and lock helpers.
+2. In the vectored handler: a per-thread count of write-watch faults, printed in the crash report
+   for the faulting thread. A crash with no mismatch from (1) and faults on that thread points at
+   the exception path; no mismatch and no faults points at signals or thread-context changes.
+3. On the Deck, no build needed: `PROTON_LOG=1` (its log header names the Wine build), a run on a
+   different Proton (9.0 against 10 or Experimental), and `PROTON_NO_FSYNC=1 PROTON_NO_ESYNC=1`,
+   which moves the waits onto a different system-call path.
+
+**4. Section 7 otherwise.** "Every kernel export" means every `REX_EXPORT`; the stubs and raw hooks
+above are outside. "Our midasm hooks (no system calls)": two of them log. The loop description,
+the counts and the cost statement hold. None of patches 0007-0013 has been compiled.
+
+### 7.2 What changed on the branch in this pass
+`port-nx/src/crash_report.cpp`: the report text now prints `xmm6`-`xmm15`, `MXCSR` and, under
+Wine, `wine_get_version`/`wine_get_build_id`, so the next Deck crash shows the register and the
+Proton build without the dump. Patch 0013 and the manifests are unchanged.
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
