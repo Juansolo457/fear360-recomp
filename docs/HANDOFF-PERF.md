@@ -25,7 +25,8 @@ main-thread function, `sub_82973C88`, is the 360 Direct3D's spin loop waiting fo
 ring space, swap throttle): 24% of the thread at 60 fps (idle time burnt as power), about 1% in the
 slow fights. Those are CPU-bound: 19 ms of game-thread work per frame (median), with the renderer
 thread at 4.6 ms and the GPU at 13 ms. The doc ranks the options (rumble thread, per-module profile,
-`[rexcrt]`, the translator's register options, a native Direct3D layer) and maps the executable.
+`[rexcrt]`, the translator's register options, a native Direct3D layer) and maps the executable. Filed as #29 (rumble), #30 (profiler), #31 (`[rexcrt]`), #32 (Direct3D spin), #33 (SDK
+spinning), #34 (register options) and #35 (native Direct3D research).
 
 ## Deck result of 7d3a36c (`fear_007.log`, 2026-10-22)
 Fights at 1,000–2,500 draws went from 52.6 to **56.7 fps** (77% → 90% of frames on time); all
