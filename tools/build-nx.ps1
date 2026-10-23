@@ -42,10 +42,14 @@ $sdkPath = ($sdk -replace '\\', '/')
 $builtins = Get-ChildItem "$tools/llvm/lib/clang/*/lib/windows/clang_rt.builtins-x86_64.lib" | Select-Object -First 1
 if (!$builtins) { throw 'clang_rt.builtins-x86_64.lib not found in the LLVM toolchain.' }
 $builtinsPath = ($builtins.FullName -replace '\\', '/')
-# The SDK's own presets build for x86-64-v2 (its byte-swap code uses SSSE3 intrinsics).
+# The SDK's own presets build for x86-64-v2 (its byte-swap code uses SSSE3 intrinsics). We build
+# for x86-64-v3 (AVX2, FMA, BMI; every PC CPU since ~2013 and the Steam Deck's Zen 2): the
+# translated code turns every PowerPC multiply-add into std::fma, which without FMA in the target
+# is a call into the C runtime, and under Proton Wine's fma() is software: 15-21% of the game's
+# main thread on the Deck (#28 profile).
 $configureArgs = @('--preset', $preset,
     "-DREXSDK_DIR=$sdkPath",
-    '-DCMAKE_C_FLAGS=-march=x86-64-v2', '-DCMAKE_CXX_FLAGS=-march=x86-64-v2',
+    '-DCMAKE_C_FLAGS=-march=x86-64-v3', '-DCMAKE_CXX_FLAGS=-march=x86-64-v3',
     "-DCMAKE_EXE_LINKER_FLAGS=$builtinsPath", "-DCMAKE_SHARED_LINKER_FLAGS=$builtinsPath",
     '-DREXGLUE_USE_D3D12=ON', '-DREXGLUE_USE_VULKAN=ON', '-DREXGLUE_GPU_XENOS_STATIC=ON',
     '-DREXGLUE_BUILD_TESTS=OFF')

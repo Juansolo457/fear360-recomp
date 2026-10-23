@@ -76,6 +76,12 @@ bool Waiter::Wait() {
   return output_ && SUCCEEDED(static_cast<IDXGIOutput*>(output_)->WaitForVBlank());
 }
 
+bool UnderWine() {
+  static const bool wine =
+      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr;
+  return wine;
+}
+
 }  // namespace fear::display_vblank
 
 #else
@@ -84,6 +90,7 @@ namespace fear::display_vblank {
 Waiter::~Waiter() = default;
 bool Waiter::Open() { return false; }
 bool Waiter::Wait() { return false; }
+bool UnderWine() { return false; }
 }  // namespace fear::display_vblank
 
 #endif

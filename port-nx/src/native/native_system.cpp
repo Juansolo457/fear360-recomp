@@ -555,6 +555,12 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   // display_vblank.h). False, to go on with the timer, if there is no display to follow or its
   // vblanks stop coming at its refresh rate (variable refresh, or switched off).
   bool DisplayVblankLoop(const fear::display_vblank::Plan& plan) {
+    if (fear::display_vblank::UnderWine()) {
+      REXLOG_INFO("[native] Under Proton: pacing on a timer at the display's {} Hz (its "
+                  "WaitForVBlank spins)",
+                  plan.display_hz);
+      return false;
+    }
     fear::display_vblank::Waiter waiter;
     if (!waiter.Open()) {
       REXLOG_WARN("[native] No display vblank to follow; pacing on a timer instead");
@@ -1002,10 +1008,15 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           waited = true;
           // The game usually releases what the ring waits for within tens of
           // microseconds; yielding first avoids oversleeping each wait.
-          if (attempt < 64) {
+          // F.E.A.R.: then a real sleep. rex::thread::Sleep turns anything under 100 us into
+          // a yield, so the 50 us "sleep" here was a yield too and the thread spun for the
+          // whole wait (2-12 ms a frame): under Proton a syscall each, ~half a core on the
+          // Steam Deck next to the game's thread (#28 profile). SleepUntil waits on a
+          // high-resolution timer.
+          if (attempt < 16) {
             std::this_thread::yield();
           } else {
-            rex::thread::Sleep(std::chrono::microseconds(50));
+            rex::thread::SleepUntil(Clock::now() + std::chrono::microseconds(200));
           }
         }
         if (waited) {

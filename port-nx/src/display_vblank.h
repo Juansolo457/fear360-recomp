@@ -13,6 +13,10 @@
 //
 // A display whose vblanks stop coming at its refresh rate (variable refresh, or switched off)
 // falls back to the timer at the same rate, which suits variable refresh anyway.
+//
+// Under Proton (Steam Deck) the same plan runs on the timer from the start: there DXGI's
+// WaitForVBlank kept two threads spinning at ~60% of a core each (#28 profile), on a 4-core CPU
+// whose other hyperthread is the game's.
 
 #pragma once
 
@@ -34,6 +38,9 @@ struct Plan {
 // rate x guest_vblanks_per_refresh) and mailbox presentation. Native renderer only.
 void Configure();
 const Plan& GetPlan();
+
+// Running under Wine (Proton): its ntdll exports wine_get_version.
+bool UnderWine();
 
 class Waiter {
  public:
