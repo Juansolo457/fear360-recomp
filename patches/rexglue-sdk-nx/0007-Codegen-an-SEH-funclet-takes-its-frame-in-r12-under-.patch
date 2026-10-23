@@ -1,0 +1,58 @@
+From 6e77ef86e3a4ca0359a713beaa5cd4f7d7985e72 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 11:20:03 -0700
+Subject: [PATCH 7/9] Codegen: an SEH funclet takes its frame in r12 under
+ non_argument_as_local
+
+MSVC's Xbox 360 code calls a __finally funclet inline with the owner's
+frame in r12 (addi r12,r31,N; bl funclet), and the funclet recovers it
+with addi r31,r12,-N. The C runtime's _CallSettingFrame does the same
+through LR (mr r12,r4; mtlr r3; blrl). With non_argument_as_local, r12
+was a local on both sides, so the funclet read 0 and ran on a garbage
+frame (F.E.A.R.: 85 such funclets, 42 inline calls).
+
+A share_registers function now reads r12 from ctx, and the hand-off at a
+direct call to one writes the caller's r12 there first. Only with
+non_argument_as_local; the output is unchanged otherwise.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/codegen/builders/context.cpp | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
+index f78e0d8..5fb63c4 100644
+--- a/src/codegen/builders/context.cpp
++++ b/src/codegen/builders/context.cpp
+@@ -48,10 +48,12 @@ bool BuilderContext::localizeNonVolatiles() const {
+   return config().nonVolatileRegistersAsLocalVariables && !fn.sharesRegisters();
+ }
+ 
++// An SEH funclet also takes its owner's frame in r12 (addi r12,r31,N; bl funclet, or the C
++// runtime's _CallSettingFrame: mr r12,r4; mtlr r3; blrl), so it reads r12 from ctx.
+ std::string BuilderContext::r(size_t index) {
+   const auto& cfg = config();
+   if ((cfg.nonArgumentRegistersAsLocalVariables &&
+-       (index == 0 || index == 2 || index == 11 || index == 12)) ||
++       (index == 0 || index == 2 || index == 11 || (index == 12 && !fn.sharesRegisters()))) ||
+       (localizeNonVolatiles() && index >= 14)) {
+     locals.r[index] = true;
+     return fmt::format("r{}", index);
+@@ -211,8 +213,12 @@ void BuilderContext::emit_function_call(uint32_t address) {
+       // An SEH funclet runs on its owner's frame and reads whatever non-volatiles
+       // the owner left live, so hand it the localized copies through ctx and take
+       // them back afterwards. Only registers already localized here can be live at
+-      // this point, so that set is the whole live-in the funclet can see.
+-      if (targetFn->sharesRegisters() && localizeNonVolatiles()) {
++      // this point, so that set is the whole live-in the funclet can see. The frame
++      // itself comes in r12 (addi r12,r31,N just before the bl).
++      if (targetFn->sharesRegisters() &&
++          (localizeNonVolatiles() || cfg.nonArgumentRegistersAsLocalVariables)) {
++        if (cfg.nonArgumentRegistersAsLocalVariables && !fn.sharesRegisters())
++          println("\tctx.r12 = {};", r(12));
+         for (size_t i = 14; i < 32; ++i) {
+           if (locals.r[i])
+             println("\tctx.r{} = r{};", i, i);
+-- 
+2.53.0.windows.1
+

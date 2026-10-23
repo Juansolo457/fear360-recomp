@@ -99,26 +99,24 @@ void Show(PPCContext& ctx, uint32_t control, bool show) {
   Call(ctx, Load32(Load32(control) + kShowSlot));
 }
 
-// A non-volatile register by number (the layout arguments are in r23-r29).
-const PPCRegister& Gpr(const PPCContext& ctx, int n) {
-  switch (n) {
-    case 23: return ctx.r23;
-    case 24: return ctx.r24;
-    case 25: return ctx.r25;
-    case 26: return ctx.r26;
-    case 27: return ctx.r27;
-    case 28: return ctx.r28;
-    case 29: return ctx.r29;
-    case 30: return ctx.r30;
-    default: return ctx.r31;
+// The non-volatile registers Build leaves the layout arguments in, as the hook was handed them.
+struct Gprs {
+  const PPCRegister* r[7];  // r23-r29
+  const PPCRegister& operator()(int n) const { return *r[n - 23]; }
+};
+constexpr bool InGprs(const MenuCode& code) {
+  for (int n : code.layout) {
+    if (n < 23 || n > 29) return false;
   }
+  return code.stack_word >= 23 && code.stack_word <= 29;
 }
+static_assert(InGprs(kFear) && InGprs(kFiles), "FearMenuAddItems is handed r23-r29");
 
-// The thread's context, if the hook was handed this thread's registers (the generated code
-// keeps them in the context, not in locals).
-PPCContext* Context(const PPCRegister& reg, const PPCRegister PPCContext::*field) {
+// The thread's context, if the hook was handed this thread's registers. r1 is the one checked: it
+// stays in the context whatever the translator's options (the non-volatiles may be locals).
+PPCContext* Context(const PPCRegister& r1) {
   PPCContext* ctx = rex::runtime::current_ppc_context();
-  if (!ctx || &(ctx->*field) != &reg) {
+  if (!ctx || &ctx->r1 != &r1) {
     static bool logged = false;
     if (!logged) REXLOG_ERROR("F.E.A.R. menu: hook registers are not the thread's context");
     logged = true;
@@ -146,12 +144,15 @@ void SetActions(Actions actions) {
 // At the end of CScreenMain::Build, after Options. The arguments are Options' own: the layout
 // struct is passed by value in r5-r10 and on the stack (80: its last word), with the command and
 // help ID in its first doubleword (112, 116); the non-volatile registers still hold the rest.
-void FearMenuAddItems(PPCRegister& r30) {
-  PPCContext* ctx = Context(r30, &PPCContext::r30);
+void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRegister& r25,
+                      PPCRegister& r26, PPCRegister& r27, PPCRegister& r28, PPCRegister& r29,
+                      PPCRegister& r30) {
+  PPCContext* ctx = Context(r1);
   if (!ctx) return;
   const uint32_t screen = r30.u32;
   if (Load8(screen + kNoMenuFlag)) return;
 
+  const Gprs gpr = {{&r23, &r24, &r25, &r26, &r27, &r28, &r29}};
   const PPCContext saved = *ctx;
   const uint32_t sp = saved.r1.u32;
   uint32_t controls[kItemCount] = {};
@@ -163,7 +164,7 @@ void FearMenuAddItems(PPCRegister& r30) {
       if (!g_texts[i]) g_texts[i] = GuestText(kItems[i].text);
     }
     if (!g_texts[i]) continue;
-    Store32(sp + 80, Gpr(saved, kCode.stack_word).u32);
+    Store32(sp + 80, gpr(kCode.stack_word).u32);
     Base()[sp + 95] = 0;      // fixed width: no
     Store32(sp + 100, 0);     // font: the screen's
     Store32(sp + 108, 0);     // font size: the screen's
@@ -172,11 +173,11 @@ void FearMenuAddItems(PPCRegister& r30) {
     ctx->r3.u64 = screen;
     ctx->r4.u64 = g_texts[i];
     ctx->r5.u64 = (uint64_t(kItems[i].command) << 32) | kCode.empty_help;
-    ctx->r6 = Gpr(saved, kCode.layout[0]);
-    ctx->r7 = Gpr(saved, kCode.layout[1]);
-    ctx->r8 = Gpr(saved, kCode.layout[2]);
-    ctx->r9 = Gpr(saved, kCode.layout[3]);
-    ctx->r10 = Gpr(saved, kCode.layout[4]);
+    ctx->r6 = gpr(kCode.layout[0]);
+    ctx->r7 = gpr(kCode.layout[1]);
+    ctx->r8 = gpr(kCode.layout[2]);
+    ctx->r9 = gpr(kCode.layout[3]);
+    ctx->r10 = gpr(kCode.layout[4]);
     Call(*ctx, kCode.add_text_item);
     const uint32_t control = ctx->r3.u32;
     if (!control) continue;
@@ -196,8 +197,8 @@ void FearMenuAddItems(PPCRegister& r30) {
 }
 
 // Press Start accepted (F.E.A.R.: command 19; Files: 21) has just shown the game's items.
-void FearMenuShowItems(PPCRegister& r31) {
-  PPCContext* ctx = Context(r31, &PPCContext::r31);
+void FearMenuShowItems(PPCRegister& r1, PPCRegister& r31) {
+  PPCContext* ctx = Context(r1);
   if (!ctx) return;
   uint32_t controls[kItemCount];
   {

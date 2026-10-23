@@ -1,0 +1,85 @@
+From 3dcdcd3dcdb9e36e146733c7da5eb0bbe185e7a2 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 11:31:54 -0700
+Subject: [PATCH] Codegen: a conditional tail call into a funclet hands it the
+ registers too
+
+MSVC's 360 code reaches an inline __finally block with a conditional
+branch from its owner (F.E.A.R. Files: bge cr6,0x821a989c), and the block
+goes on using the owner's frame pointer in r31. The analyser splits the
+block off as a function and the funclet sweep marks it share_registers,
+but only a bl/b went through the hand-off that copies the owner's localized
+non-volatiles (and now r12) into ctx: the conditional tail call called it
+bare, so under non_volatile_as_local the block read the context's stale
+r31. The hand-off is now one helper used by both.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/codegen/builders/context.cpp | 37 +++++++++++++++++++++-----------
+ 1 file changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
+index 802dd63..6345456 100644
+--- a/src/codegen/builders/context.cpp
++++ b/src/codegen/builders/context.cpp
+@@ -26,6 +26,26 @@ namespace rex::codegen {
+ /// if the next instruction after a load/store is eieio, the access is MMIO.
+ static constexpr uint32_t kEieioEncoding = 0xAC06007C;
+ 
++// An SEH funclet runs on its owner's frame and reads whatever non-volatiles the owner
++// left live, so a call to one hands it the localized copies through ctx (and takes them
++// back afterwards). Only registers already localized here can be live at this point, so
++// that set is the whole live-in the funclet can see. The frame itself comes in r12
++// (addi r12,r31,N just before the bl). The owner also reaches a split-off inline
++// __finally block by a conditional tail call (bge cr6,block), which needs the same.
++static bool HandsRegistersTo(const BuilderContext& ctx, const FunctionNode& target) {
++  return target.sharesRegisters() && (ctx.localizeNonVolatiles() ||
++                                      ctx.config().nonArgumentRegistersAsLocalVariables);
++}
++
++static void HandRegistersOver(BuilderContext& ctx, const char* indent) {
++  if (ctx.config().nonArgumentRegistersAsLocalVariables && !ctx.fn.sharesRegisters())
++    ctx.println("{}ctx.r12 = {};", indent, ctx.r(12));
++  for (size_t i = 14; i < 32; ++i) {
++    if (ctx.locals.r[i])
++      ctx.println("{}ctx.r{} = r{};", indent, i, i);
++  }
++}
++
+ //=============================================================================
+ // Convenience Accessors
+ //=============================================================================
+@@ -242,19 +262,8 @@ void BuilderContext::emit_function_call(uint32_t address) {
+         return;
+       }
+ 
+-      // An SEH funclet runs on its owner's frame and reads whatever non-volatiles
+-      // the owner left live, so hand it the localized copies through ctx and take
+-      // them back afterwards. Only registers already localized here can be live at
+-      // this point, so that set is the whole live-in the funclet can see. The frame
+-      // itself comes in r12 (addi r12,r31,N just before the bl).
+-      if (targetFn->sharesRegisters() &&
+-          (localizeNonVolatiles() || cfg.nonArgumentRegistersAsLocalVariables)) {
+-        if (cfg.nonArgumentRegistersAsLocalVariables && !fn.sharesRegisters())
+-          println("\tctx.r12 = {};", r(12));
+-        for (size_t i = 14; i < 32; ++i) {
+-          if (locals.r[i])
+-            println("\tctx.r{} = r{};", i, i);
+-        }
++      if (HandsRegistersTo(*this, *targetFn)) {
++        HandRegistersOver(*this, "\t");
+         emitCtx.reference(name);
+         println("\t{}(ctx, base);", name);
+         for (size_t i = 14; i < 32; ++i) {
+@@ -336,6 +345,8 @@ void BuilderContext::emit_conditional_branch(bool not_, std::string_view cond) {
+           auto* targetFn = callTarget->asFunction();
+           emitCtx.reference(targetFn->name());
+           println("\tif ({}{}.{}) {{", not_ ? "!" : "", cr(insn.operands[0]), cond);
++          if (HandsRegistersTo(*this, *targetFn))
++            HandRegistersOver(*this, "\t\t");
+           println("\t\t{}(ctx, base);", targetFn->name());
+           println("\t\treturn;");
+           println("\t}}");
+-- 
+2.53.0.windows.1
+

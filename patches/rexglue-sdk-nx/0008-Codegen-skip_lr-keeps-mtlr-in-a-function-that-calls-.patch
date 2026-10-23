@@ -1,0 +1,55 @@
+From ab0be2ce2c9131ab8766ed34b8c64bfc7177d18a Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 11:20:28 -0700
+Subject: [PATCH 8/9] Codegen: skip_lr keeps mtlr in a function that calls
+ through LR
+
+skip_lr drops every write of ctx.lr (bl, mtlr) on the grounds that blr is
+a plain return. blrl is not: it calls the address in LR, so its mtlr has
+to stay. The C runtime's _CallSettingFrame (mr r12,r4; mtlr r3; blrl)
+calls an SEH funclet that way; with the mtlr gone it called whatever ctx.lr
+last held. A function containing blrl/bclrl now keeps its mtlr; there is
+one in F.E.A.R. Unchanged without skip_lr.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/codegen/builders/system.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/codegen/builders/system.cpp b/src/codegen/builders/system.cpp
+index b2d70f5..9a8c16e 100644
+--- a/src/codegen/builders/system.cpp
++++ b/src/codegen/builders/system.cpp
+@@ -12,6 +12,8 @@
+ #include "builder_context.h"
+ #include "helpers.h"
+ 
++#include <rex/types.h>
++
+ namespace rex::codegen {
+ 
+ //=============================================================================
+@@ -309,8 +311,19 @@ bool build_mtctr(BuilderContext& ctx) {
+   return true;
+ }
+ 
++// Whether the function calls through LR (blrl, bclrl). Under skip_lr such a function still
++// loads LR: the C runtime's _CallSettingFrame (mtlr r3; blrl) calls an SEH funclet that way.
++static bool CallsThroughLr(const BuilderContext& ctx) {
++  const uint32_t* insn = ctx.data - (ctx.base - ctx.fn.base()) / 4;
++  for (uint32_t address = ctx.fn.base(); address < ctx.fn.end(); address += 4, ++insn) {
++    if ((byte_swap(*insn) & 0xFC0007FF) == 0x4C000021)
++      return true;
++  }
++  return false;
++}
++
+ bool build_mtlr(BuilderContext& ctx) {
+-  if (!ctx.config().skipLr)
++  if (!ctx.config().skipLr || CallsThroughLr(ctx))
+     ctx.println("\tctx.lr = {}.u64;", ctx.r(ctx.insn.operands[0]));
+   return true;
+ }
+-- 
+2.53.0.windows.1
+

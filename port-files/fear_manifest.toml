@@ -12,6 +12,17 @@ file_path = "assets/default.xex"
 out_directory_path = "generated/default"
 includes = []
 
+# The translator's register options (#34, docs/HANDOFF-REGOPTS.md), as in port-nx's manifest.
+skip_lr = true
+ctr_as_local = true
+xer_as_local = true
+reserved_as_local = true
+cr_as_local = true
+non_argument_as_local = true
+non_volatile_as_local = true
+setjmp_address = 0x82B95310
+longjmp_address = 0x82B94EC0
+
 # Tail-call targets the analyser misses (first translation, 2026-10-22, docs/FILES.md).
 [entrypoint.functions]
 0x827C6B58 = {}
@@ -150,6 +161,8 @@ includes = []
 0x82C4D4A8 = {}
 0x82C4D4B8 = {}
 0x82C4D4C8 = {}
+# The C runtime's _CallSettingFrame (port-nx's manifest has why).
+0x828A0000 = { share_registers = true }
 
 # Model animations step by the exact time that passed (port-nx/src/anim_timing.h); the
 # addresses are this build's, found by tools/find_anim_sites.py.
@@ -183,13 +196,13 @@ registers = ["r5", "f1"]
 [[entrypoint.midasm_hook]]
 name = "FearMenuAddItems"
 address = 0x823EAF24
-registers = ["r30"]
+registers = ["r1", "r23", "r24", "r25", "r26", "r27", "r28", "r29", "r30"]
 
 # OnCommand's command 21 (Press Start accepted) has shown the game's items: show ours.
 [[entrypoint.midasm_hook]]
 name = "FearMenuShowItems"
 address = 0x823EB274
-registers = ["r31"]
+registers = ["r1", "r31"]
 
 # CScreenMain::OnCommand (sub_823EAF68): our commands are handled by the host (r3 = 1).
 [[entrypoint.midasm_hook]]

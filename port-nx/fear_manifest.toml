@@ -11,6 +11,22 @@ file_path = "assets/default.xex"
 out_directory_path = "generated/default"
 includes = []
 
+# The translator's register options (#34, docs/HANDOFF-REGOPTS.md): these registers become each
+# generated function's C++ locals instead of fields of the shared context, so the host compiler
+# can keep them in host registers. Needs the SDK's patches 0007-0010. skip_msr stays off: it drops
+# the global lock that the 202 mtmsrd sites take.
+skip_lr = true
+ctr_as_local = true
+xer_as_local = true
+reserved_as_local = true
+cr_as_local = true
+non_argument_as_local = true
+non_volatile_as_local = true
+# The C runtime's setjmp and longjmp (libpng, libjpeg and the shader compilers' error paths):
+# their jmp_buf can't reach registers that are locals, so these calls become host ones.
+setjmp_address = 0x82BBA450
+longjmp_address = 0x82BBA200
+
 # Function entries the analyser misses: branch targets, indirect-call targets seen at
 # runtime, and .rdata method-table slots. Found and verified by the fear-nx project
 # (https://github.com/infriker/fear-nx, GPL-3.0, fear_xbox360_manifest.toml) against
@@ -94,6 +110,10 @@ includes = []
 0x8292A150 = {}
 0x8292A168 = {}
 0x8292A180 = {}
+# The C runtime's _CallSettingFrame calls an SEH funclet with the frame in r12 (mr r12,r4;
+# mtlr r3; blrl): under the register options it keeps r12 and the non-volatiles in the context,
+# as the funclets themselves do.
+0x82BC0B70 = { share_registers = true }
 
 # F.E.A.R.: model animations step by the exact time that passed, not whole milliseconds a frame
 # (src/anim_timing.h). Each hook runs just before the fctidz that drops the fraction.
@@ -225,16 +245,17 @@ registers = ["r31", "f0", "f13", "f1", "f12"]
 
 # PC Settings and Quit to Desktop in the main menu (src/fear_menu.*). CScreenMain::Build
 # (sub_823FF3C0) ends at 0x823FF7A8, where both its paths meet: add our two items after Options.
+# The hooks take r1 and the non-volatiles they read (Options' layout is in r23-r28).
 [[entrypoint.midasm_hook]]
 name = "FearMenuAddItems"
 address = 0x823FF7A8
-registers = ["r30"]
+registers = ["r1", "r23", "r24", "r25", "r26", "r27", "r28", "r29", "r30"]
 
 # OnCommand's command 19 (Press Start accepted) has shown the game's items: show ours.
 [[entrypoint.midasm_hook]]
 name = "FearMenuShowItems"
 address = 0x823FF910
-registers = ["r31"]
+registers = ["r1", "r31"]
 
 # CScreenMain::OnCommand (sub_823FF7E8): our commands are handled by the host (r3 = 1).
 [[entrypoint.midasm_hook]]

@@ -1,0 +1,73 @@
+From f36391d3ef3901fe9e0eed55ac3264e1e07cde91 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 11:22:18 -0700
+Subject: [PATCH 9/9] Codegen: setjmp keeps localized non-volatiles for the
+ longjmp return
+
+ppc_setjmp copies ctx into env before the host setjmp and back on the
+longjmp return, which restores everything the guest's jmp_buf would
+(r14-r31, f14-f31, CR) only while those live in ctx. Under
+non_volatile_as_local (and cr_as_local for cr2-cr4) they are the calling
+function's C++ locals, and a local that changed between the setjmp and the
+longjmp is indeterminate afterwards. env now holds them too, written before
+the setjmp and never after, and the longjmp return takes them back.
+
+Only at the setjmp_address call sites (F.E.A.R.: 10, in the D3DX image
+libraries and the shader compiler); unchanged without the options.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/codegen/builders/context.cpp | 34 +++++++++++++++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
+index 5fb63c4..802dd63 100644
+--- a/src/codegen/builders/context.cpp
++++ b/src/codegen/builders/context.cpp
+@@ -186,10 +186,42 @@ void BuilderContext::emit_function_call(uint32_t address) {
+   if (address == cfg.setJmpAddress) {
+     // Save PPCContext for restoration after longjmp
+     println("\t{} = ctx;", env());
++    // The guest's jmp_buf holds the non-volatiles (r14-r31, f14-f31, CR) too. Localized ones
++    // are this function's C++ locals, whose values after a longjmp are indeterminate if they
++    // changed after the setjmp, so env keeps them as well (written before the setjmp, never
++    // after) and the longjmp return takes them back.
++    const bool nonVolatiles = localizeNonVolatiles();
++    const bool crs = cfg.crRegistersAsLocalVariables;
++    if (nonVolatiles) {
++      for (size_t i = 14; i < 32; ++i)
++        println("\t{}.r{} = {};", env(), i, r(i));
++      for (size_t i = 14; i < 32; ++i)
++        println("\t{}.f{} = {};", env(), i, f(i));
++    }
++    if (crs) {
++      for (size_t i = 2; i <= 4; ++i)
++        println("\t{}.cr{} = {};", env(), i, cr(i));
++    }
+     // Use custom ppc_setjmp that uses guest address as key
+     println("\t{}.s64 = ppc_setjmp({}.u32);", temp(), r(3));
+     // Restore PPCContext if returning from longjmp
+-    println("\tif ({}.s64 != 0) ctx = {};", temp(), env());
++    if (nonVolatiles || crs) {
++      println("\tif ({}.s64 != 0) {{", temp());
++      println("\t\tctx = {};", env());
++      if (nonVolatiles) {
++        for (size_t i = 14; i < 32; ++i)
++          println("\t\t{} = {}.r{};", r(i), env(), i);
++        for (size_t i = 14; i < 32; ++i)
++          println("\t\t{} = {}.f{};", f(i), env(), i);
++      }
++      if (crs) {
++        for (size_t i = 2; i <= 4; ++i)
++          println("\t\t{} = {}.cr{};", cr(i), env(), i);
++      }
++      println("\t}}");
++    } else {
++      println("\tif ({}.s64 != 0) ctx = {};", temp(), env());
++    }
+     println("\t{} = {};", r(3), temp());
+     return;
+   }
+-- 
+2.53.0.windows.1
+

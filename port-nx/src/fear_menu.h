@@ -41,6 +41,10 @@ void SetActions(Actions actions);
 
 }  // namespace fear::menu
 
-void FearMenuAddItems(PPCRegister& r30);
-void FearMenuShowItems(PPCRegister& r31);
+// The hooks take every register they read, r1 included: under the translator's
+// non_volatile_as_local the non-volatiles are the generated function's locals, not the context's.
+void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRegister& r25,
+                      PPCRegister& r26, PPCRegister& r27, PPCRegister& r28, PPCRegister& r29,
+                      PPCRegister& r30);
+void FearMenuShowItems(PPCRegister& r1, PPCRegister& r31);
 bool FearMenuCommand(PPCRegister& r3, PPCRegister& r4);
