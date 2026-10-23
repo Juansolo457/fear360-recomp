@@ -16,6 +16,16 @@ comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `d
 - Before that build it is worth adding the profiler attribution in finding 2 below, so the same
   Deck run that tests the FMA change also proves (or refutes) its diagnosis.
 
+## Deck result of 7d3a36c (`fear_007.log`, 2026-10-22)
+Fights at 1,000–2,500 draws went from 52.6 to **56.7 fps** (77% → 90% of frames on time); all
+gameplay 56.6 → 58.3 fps (92% → 95%); total CPU 2.1–3.5 → 1.5–2.1 cores. ucrtbase is gone from the
+main thread (the `fma` diagnosis holds) and the `WaitForVBlank` spinners are gone. The main thread
+(~89% of a core) is still the limit: ~15% of it in Wine system calls (`ZwDeviceIoControlFile`
+8–10%, `ZwCreateEvent`, `ZwClose`, `ZwWaitForAlertByThreadId`), the rest game code spread thinly.
+Also: the SDK's `TimerQueue` spin-waits (~14% of a core, disruptorplus `spin_wait_strategy`),
+Wine's message thread 332 polls (~25%). **The user still sees Deck-only graphics glitches**
+(tracers, corruption; same build clean on the PC); video to come. Next steps are on #28.
+
 ## After the review (2026-10-22): done before the build
 - **Finding 2:** the profiler names samples outside the translated code by the nearest named
   export at or below them, from each module's PE export table (`ucrtbase.dll!fma`,
