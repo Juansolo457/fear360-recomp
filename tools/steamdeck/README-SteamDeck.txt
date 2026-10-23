@@ -25,8 +25,8 @@ Setup (Desktop Mode)
 WINEDLLOVERRIDES="msvcp140,msvcp140_atomic_wait,vcruntime140,vcruntime140_1=n,b" %command% --resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user --cache_root cache --nx_renderer native --fear_collection ../collection.toml
 
      Nothing else: the Deck's settings are in each game's user/settings.toml (1x render scale,
-     60 fps, no MSAA, SDL's HIDAPI drivers off, the profiler on for the logs). The package has no
-     PC texture pack; the baseline is the 360's own textures.
+     uncapped up to 120 fps, no MSAA, SDL's HIDAPI drivers off, the profiler on for the logs).
+     The package has no PC texture pack; the baseline is the 360's own textures.
 
   4. Rename the entry (e.g. "F.E.A.R. Collection") and go back to Game Mode.
 
@@ -36,10 +36,11 @@ Deck's 1280x800 screen).
 
 Performance testing
   - The Deck's overlay: Quick Access (...) > Performance > Performance Overlay Level 3 or 4.
-  - The game paces itself to the display, up to its own limit: 60 fps in this package (PC
-    Settings > Frame rate). Leave the Deck's Framerate Limit off, or at the same value: the game
-    can't see the Deck's limit, and pacing to 120 while the Deck showed 60 doubled the work and
-    made frames uneven (first Deck test, #28).
+  - This package runs uncapped up to 120 fps: the game paces itself from a 240 Hz timer, not the
+    display, and on the Deck's screen the frames beyond its refresh are dropped (mailbox, no
+    tearing). The overlay's fps is the game's. Leave the Deck's Framerate Limit off: the game
+    can't see it, and a limit below the game's pace made frames uneven (first Deck test, #28).
+    For 60 again, see the comment in user/settings.toml.
   - The first run translates shaders as they appear (brief hitches the first time an effect is
     seen); each later run starts with them pre-built, so test the second run for smoothness.
   - Saving PC Settings in the game rewrites user/settings.toml with only the panel's settings:
