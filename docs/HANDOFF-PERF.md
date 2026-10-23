@@ -38,6 +38,24 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Deck run of `40af21a` (`fear_016.log`, 2026-10-23, Docks into the water treatment facility)
+- User: the last firefight was the best yet, close to 60 and smooth with no visual hiccups; an
+  earlier fight still dropped into the 40s (about midway, a tight room full of debris and
+  particles with three or four enemies: the benchmark scene). The autosave input drop is gone
+  (#36 closed).
+- 56 windows, mostly 60 fps. Slowest: 08:09:10 at 52.2 (1,470 draws a frame; 77 of 522 frames
+  took two or more refreshes, longest 41.8 ms) and the last window, 08:14:10, at 42.4 (132 of 423
+  frames late, longest 84.5 ms; engine sound 15% of the game thread there, as in fear_015's 44 fps
+  window).
+- **The syscall trio is Wine's `hid.dll`** (`system calls from:`): `ZwDeviceIoControlFile <
+  HID.DLL` 7.6-10.5%, `ZwCreateEvent` and `ZwClose < HID.DLL` 1-2% each: 10-13% of the game thread
+  in play, about 2.5 ms of a heavy frame. The translated function at the end of the chain varies
+  (stale stack words). Rumble is ruled out (#29, retitled). Next, no build: launch with
+  `SDL_JOYSTICK_HIDAPI=0` in front of the options; SDL then takes the controls from Steam Input's
+  virtual pad instead of its HIDAPI drivers.
+- Native `memcpy`/`memset`: the C runtime went from 7% to 6% of the game thread in heavy windows
+  (median of 16 each): about one point.
+
 ## Next build (2026-10-23): system-call callers (#30) and native memcpy/memset (#31)
 - Profiler: samples in ntdll, win32u, kernelbase or kernel32 get a `system calls from:` line,
   naming the first other DLL and the first translated function among the return addresses on
