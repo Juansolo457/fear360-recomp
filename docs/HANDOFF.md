@@ -110,6 +110,7 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |
 | `port-nx/fear_manifest.toml` | codegen manifest with fear-nx's 78 function hints (codegen rewrites its header; harmless) |
 | `docs/FINDINGS.md` | disc/XEX facts, bug history, what was tried on the stock renderer |
+| `docs/HANDOFF-PERF.md` | Steam Deck performance: goal, Deck evidence and profile, the unbuilt changes in db180a0 to review, open items, how to build/run/profile (written for a second-opinion review) |
 | `docs/REVIEW.md` | code review and optimisation pass (2026-10-22): hitch causes from the renderer's reports, findings by priority, EchoPatch mapped onto the 360 code, hook inventory |
 
 ## Next steps (the user's list)
