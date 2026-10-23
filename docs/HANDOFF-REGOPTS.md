@@ -348,6 +348,72 @@ controller and dock firmware updates today.
 `fear.exe` as `fear_021`, copied from `private/ab/A-stageA-555a235/`). A crash would mean today's
 updates broke something under every build. No crash pins it on stage B under Proton.
 
+**Result (`fear_028.log`): stage A, profiler off, 35 minutes (15:43-16:19), no crash.** Today's
+updates are ruled out: it's stage B under Proton. It's also the steadiest Deck run so far:
+
+| | `fear_021` (stage A, profiler on) | `fear_028` (stage A, profiler off) | `fear_027` (stage B, to the crash) |
+|---|---:|---:|---:|
+| gameplay windows | 54 | 204 | 33 |
+| fps median | 88.0 | 89.9 | 89.1 |
+| fps, lowest tenth | 71.8 | 86.3 | 83.9 |
+| fps min | 59.2 | 63.3 | 80.7 |
+| GPU per frame | 9.8 ms | 9.3 ms | 9.1 ms |
+
+## 7. The proposed fix for the stage B Deck crash (SDK patch 0013, for review, not built)
+**What's known.** These hold together:
+- On every run, stage B's XAudio voice loop (`sub_82ABD508`) gets `xmm6` back changed from one of its
+  calls under Proton.
+- It's the same function, compiled the same way, in master and stage A (zero kept in `xmm6`, one
+  `vmovaps` stores r6/r7). Those never crash, on the Deck or the PC.
+- Under stage B the loop's translated callees don't touch `xmm6`-`xmm15`, and the runtime DLL is
+  byte-identical (apart from its timestamp) to stage A's.
+- Stage B on native Windows ran 15 minutes clean.
+
+So the loop's own code doesn't change `xmm6`. The register changes while the thread is in a host
+call or a system call, under Proton, and that only matters in stage B. The working explanation: under
+Proton the thread sometimes gets `xmm6`-`xmm15` back with contents from elsewhere (other threads, or
+a stale save area). Until stage B those registers almost never held live values, so the swap went
+unnoticed. Stage B keeps f14-f31 and the vector registers there, so now it carries real data, and
+`{0, 0x60}` looks like two packed 64-bit locals. The loop is in a system call most of the time
+(`ZwWaitForSingleObject` 95-99% of its samples), which fits.
+
+**The fix** (`patches/rexglue-sdk-nx/0013`, SDK branch `register-options` at `490d264`):
+`REX_KEEP_CALLEE_SAVED_XMM()` in `include/rex/ppc/function.h`. It's an empty `asm volatile` that
+clobbers `xmm6`-`xmm15`, Windows x64 only. A function that contains it has to save those registers
+in its prologue and restore them in its epilogue, from its own stack frame, so whatever happens to
+them during the function's host call, the caller gets its own values back. It's placed in every host
+call the generated code makes that can block or enter the kernel:
+- `HostToGuestFunction` (every kernel export, `__imp__*`), after the host call;
+- MMIO accesses: `REX_MM_LOAD_*`/`REX_MM_STORE_*` now call `ppc_mmio_load_`/`ppc_mmio_store_`,
+  `noinline` helpers in `pch_h.inja`, 46 sites in F.E.A.R.;
+- the global lock: `REX_CHECK_GLOBAL_LOCK`/`REX_ENTER_GLOBAL_LOCK`/`REX_LEAVE_GLOBAL_LOCK` now call
+  `ppc_global_lock_check_`/`_enter_`/`_leave_`, 89-113 sites.
+
+The loop above reaches only these. Its kernel calls (waits, events, semaphores, spin locks, IRQL,
+two XAudio getters) go through `HostToGuestFunction`, and `sub_82AC1978` takes the global lock.
+Not covered, because they don't enter the kernel: `REX_QUERY_TIMEBASE` (`QueryPerformanceCounter`,
+a shared-memory read under Wine), `ppc_setjmp`/`ppc_longjmp` (host CRT), `REX_CALL_INDIRECT_FUNC`
+(a table lookup, then a translated function or a wrapped export) and our midasm hooks (no system
+calls).
+
+**Cost.** Each wrapped call saves and restores ten 16-byte registers (20 moves) next to a call that
+already costs far more. Native Windows never changes them, so there it's only that.
+
+**What it doesn't cover, and how we'd know.** If the register changes while the thread is running
+translated code (a signal at an arbitrary instruction), not during a host call, the patch won't
+stop the crash. A Deck run would show that: the same crash again means the change isn't confined to
+host calls. Then the options are a diagnostic build that records which call returns with `xmm6`
+changed, or keeping stage B off on Proton (stage A only on the Deck).
+
+**For the reviewer:**
+1. Is a clobber-only `asm` enough to force the prologue save and epilogue restore under clang-cl
+   (MS ABI), and could the compiler keep its own value in `xmm6` across the host call in these
+   small wrappers (which the change would then hit)? Disassemble `HostToGuestFunction<...>` after a
+   build to confirm the `movaps` saves.
+2. Are there other host calls from generated code that enter the kernel that this misses?
+3. Is the working explanation (Proton swapping in other XMM contents during system calls) plausible,
+   and is there a known Wine/Proton issue to cite? The Deck's Proton version isn't in our logs.
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first

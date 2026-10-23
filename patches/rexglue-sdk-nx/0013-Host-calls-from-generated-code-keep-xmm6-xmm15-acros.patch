@@ -1,0 +1,213 @@
+From 490d26438fec5fe19b10a7bf5ee613778057c80b Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 16:35:04 -0700
+Subject: [PATCH] Host calls from generated code keep xmm6-xmm15 across them
+
+The Windows x64 ABI makes xmm6-xmm15 callee-saved, and the generated code
+keeps values there across its host calls (under non_volatile_as_local,
+f14-f31 and the vector registers live in them). Under Proton, F.E.A.R.'s
+XAudio thread got xmm6 back changed from one of its loop's host calls
+({0, 0x60}, five times out of five with the option on, never on native
+Windows or without the option), and its next kernel wait read the
+timeout argument stored from it as a pointer.
+
+The kernel exports' wrapper (HostToGuestFunction), the MMIO accesses
+and the global-lock macros, the generated code's host calls that can
+block, now each clobber xmm6-xmm15 in an empty asm
+(REX_KEEP_CALLEE_SAVED_XMM), so the function saves them on entry and
+restores them on return. Windows x64 only; elsewhere it expands to
+nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/ppc/function.h             | 20 ++++++++
+ resources/templates/codegen/pch_h.inja | 67 ++++++++++++++++++--------
+ 2 files changed, 67 insertions(+), 20 deletions(-)
+
+diff --git a/include/rex/ppc/function.h b/include/rex/ppc/function.h
+index 611a52f..c9c60ec 100644
+--- a/include/rex/ppc/function.h
++++ b/include/rex/ppc/function.h
+@@ -397,6 +397,24 @@ void _translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs..
+   _translate_args_to_guest<I + 1>(ctx, base, tpl);
+ }
+ 
++//=============================================================================
++// Callee-saved vector registers across host calls
++//=============================================================================
++// The Windows x64 ABI makes xmm6-xmm15 callee-saved, and the generated code keeps values there
++// across its calls into the host (under non_volatile_as_local, f14-f31 and the vector registers
++// live in them). Under Proton a host call that blocks can come back with one of them changed:
++// F.E.A.R.'s XAudio thread got xmm6 back from a kernel wait as {0, 0x60}, and its next wait read
++// that as a pointer. An empty asm that clobbers them makes the function it is in save them on entry
++// and restore them on return, so the generated code gets its own values back whatever happened in
++// between. Native Windows never changes them; there it costs the saves and restores.
++#if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
++#define REX_KEEP_CALLEE_SAVED_XMM()                                                         \
++  asm volatile("" ::: "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", \
++               "xmm14", "xmm15")
++#else
++#define REX_KEEP_CALLEE_SAVED_XMM() ((void)0)
++#endif
++
+ //=============================================================================
+ // Host To PPC Function Wrapper
+ //=============================================================================
+@@ -411,8 +429,10 @@ __attribute__((noinline)) void HostToGuestFunction(PPCContext& ctx, uint8_t* bas
+ 
+   if constexpr (std::is_same_v<ret_t, void>) {
+     std::apply(Func, args);
++    REX_KEEP_CALLEE_SAVED_XMM();
+   } else {
+     auto v = std::apply(Func, args);
++    REX_KEEP_CALLEE_SAVED_XMM();
+ 
+     // Memory barrier to ensure compiler doesn't reorder
+     asm volatile("" ::: "memory");
+diff --git a/resources/templates/codegen/pch_h.inja b/resources/templates/codegen/pch_h.inja
+index 3f1f3cf..1c73976 100644
+--- a/resources/templates/codegen/pch_h.inja
++++ b/resources/templates/codegen/pch_h.inja
+@@ -162,11 +162,23 @@ extern PPCFuncMapping PPCFuncMappings[];
+ 
+ #define REX_IS_MMIO_ADDR(addr) ((addr) >= 0x7F000000u && (addr) < 0x80000000u)
+ 
++// MMIO accesses and the global lock below are host calls made from inside generated functions,
++// and they can block: they keep xmm6-xmm15 across the call as the kernel exports' wrapper does
++// (REX_KEEP_CALLEE_SAVED_XMM, rex/ppc/function.h).
++[[gnu::noinline]] inline void ppc_mmio_store_(u32 address, u32 value) {
++  rex::runtime::MMIOHandler::global_handler()->CheckStore(address, value);
++  REX_KEEP_CALLEE_SAVED_XMM();
++}
++[[gnu::noinline]] inline void ppc_mmio_load_(u32 address, u32* value) {
++  rex::runtime::MMIOHandler::global_handler()->CheckLoad(address, value);
++  REX_KEEP_CALLEE_SAVED_XMM();
++}
++
+ #define REX_MM_STORE_U8(addr, val)                                                         \
+   do {                                                                                     \
+     u32 _mmio_addr = (addr);                                                               \
+     if (REX_IS_MMIO_ADDR(_mmio_addr)) {                                                    \
+-      rex::runtime::MMIOHandler::global_handler()->CheckStore(_mmio_addr,                  \
++      ppc_mmio_store_(_mmio_addr,                  \
+                                                               static_cast<u32>(val));      \
+     } else {                                                                               \
+       *(volatile u8*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr)) = (val);       \
+@@ -177,7 +189,7 @@ extern PPCFuncMapping PPCFuncMappings[];
+   do {                                                                                     \
+     u32 _mmio_addr = (addr);                                                               \
+     if (REX_IS_MMIO_ADDR(_mmio_addr)) {                                                    \
+-      rex::runtime::MMIOHandler::global_handler()->CheckStore(_mmio_addr,                  \
++      ppc_mmio_store_(_mmio_addr,                  \
+                                                               static_cast<u32>(val));      \
+     } else {                                                                               \
+       *(volatile u16*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr)) =             \
+@@ -189,7 +201,7 @@ extern PPCFuncMapping PPCFuncMappings[];
+   do {                                                                                     \
+     u32 _mmio_addr = (addr);                                                               \
+     if (REX_IS_MMIO_ADDR(_mmio_addr)) {                                                    \
+-      rex::runtime::MMIOHandler::global_handler()->CheckStore(_mmio_addr,                  \
++      ppc_mmio_store_(_mmio_addr,                  \
+                                                               static_cast<u32>(val));      \
+     } else {                                                                               \
+       *(volatile u32*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr)) =             \
+@@ -202,9 +214,9 @@ extern PPCFuncMapping PPCFuncMappings[];
+     u32 _mmio_addr = (addr);                                                                      \
+     if (REX_IS_MMIO_ADDR(_mmio_addr)) {                                                           \
+       u64 _v64 = static_cast<u64>(val);                                                           \
+-      rex::runtime::MMIOHandler::global_handler()->CheckStore(_mmio_addr,                         \
++      ppc_mmio_store_(_mmio_addr,                         \
+                                                               static_cast<u32>(_v64 >> 32));      \
+-      rex::runtime::MMIOHandler::global_handler()->CheckStore(_mmio_addr + 4,                     \
++      ppc_mmio_store_(_mmio_addr + 4,                     \
+                                                               static_cast<u32>(_v64));            \
+     } else {                                                                                      \
+       *(volatile u64*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr)) =                    \
+@@ -215,7 +227,7 @@ extern PPCFuncMapping PPCFuncMappings[];
+ #define REX_MM_LOAD_U8(addr)                                           \
+   (REX_IS_MMIO_ADDR(addr) ? ({                                         \
+     u32 _v;                                                            \
+-    rex::runtime::MMIOHandler::global_handler()->CheckLoad(addr, &_v); \
++    ppc_mmio_load_(addr, &_v); \
+     static_cast<u8>(_v);                                               \
+   })                                                                   \
+                           : *(volatile u8*)(base + (addr) + REX_PHYS_HOST_OFFSET(addr)))
+@@ -224,7 +236,7 @@ extern PPCFuncMapping PPCFuncMappings[];
+   (REX_IS_MMIO_ADDR(addr)                                                     \
+        ? ({                                                                   \
+            u32 _v;                                                            \
+-           rex::runtime::MMIOHandler::global_handler()->CheckLoad(addr, &_v); \
++           ppc_mmio_load_(addr, &_v); \
+            static_cast<u16>(_v);                                              \
+          })                                                                   \
+        : __builtin_bswap16(*(volatile u16*)(base + (addr) + REX_PHYS_HOST_OFFSET(addr))))
+@@ -233,7 +245,7 @@ extern PPCFuncMapping PPCFuncMappings[];
+   (REX_IS_MMIO_ADDR(addr)                                                     \
+        ? ({                                                                   \
+            u32 _v;                                                            \
+-           rex::runtime::MMIOHandler::global_handler()->CheckLoad(addr, &_v); \
++           ppc_mmio_load_(addr, &_v); \
+            _v;                                                                \
+          })                                                                   \
+        : __builtin_bswap32(*(volatile u32*)(base + (addr) + REX_PHYS_HOST_OFFSET(addr))))
+@@ -242,8 +254,8 @@ extern PPCFuncMapping PPCFuncMappings[];
+   (REX_IS_MMIO_ADDR(addr)                                                            \
+        ? ({                                                                          \
+            u32 _hi, _lo;                                                             \
+-           rex::runtime::MMIOHandler::global_handler()->CheckLoad(addr, &_hi);       \
+-           rex::runtime::MMIOHandler::global_handler()->CheckLoad((addr) + 4, &_lo); \
++           ppc_mmio_load_(addr, &_hi);       \
++           ppc_mmio_load_((addr) + 4, &_lo); \
+            (static_cast<u64>(_hi) << 32) | _lo;                                      \
+          })                                                                          \
+        : __builtin_bswap64(*(volatile u64*)(base + (addr) + REX_PHYS_HOST_OFFSET(addr))))
+@@ -325,21 +337,36 @@ inline std::atomic<i32>& ppc_global_lock_count_() {
+   return count;
+ }
+ 
+-#define REX_CHECK_GLOBAL_LOCK()                                        \
+-  ([&]() -> u64 {                                                      \
+-    auto lock_ = rex::thread::global_critical_region::AcquireDirect(); \
+-    return ppc_global_lock_count_().load() ? 0 : 0x8000;               \
+-  }())
++// The lock can block: these keep xmm6-xmm15 across it, as the MMIO helpers above do.
++[[gnu::noinline]] inline u64 ppc_global_lock_check_() {
++  u64 result;
++  {
++    auto lock_ = rex::thread::global_critical_region::AcquireDirect();
++    result = ppc_global_lock_count_().load() ? 0 : 0x8000;
++  }
++  REX_KEEP_CALLEE_SAVED_XMM();
++  return result;
++}
++[[gnu::noinline]] inline void ppc_global_lock_enter_() {
++  rex::thread::global_critical_region::mutex().lock();
++  REX_KEEP_CALLEE_SAVED_XMM();
++}
++[[gnu::noinline]] inline void ppc_global_lock_leave_() {
++  rex::thread::global_critical_region::mutex().unlock();
++  REX_KEEP_CALLEE_SAVED_XMM();
++}
++
++#define REX_CHECK_GLOBAL_LOCK() (ppc_global_lock_check_())
+ 
+-#define REX_ENTER_GLOBAL_LOCK()                          \
+-  do {                                                   \
+-    rex::thread::global_critical_region::mutex().lock(); \
+-    ppc_global_lock_count_().fetch_add(1);               \
++#define REX_ENTER_GLOBAL_LOCK()            \
++  do {                                     \
++    ppc_global_lock_enter_();              \
++    ppc_global_lock_count_().fetch_add(1); \
+   } while (0)
+ 
+ #define REX_LEAVE_GLOBAL_LOCK()                                                           \
+   do {                                                                                    \
+     auto old_count_ = ppc_global_lock_count_().fetch_sub(1);                              \
+     assert(old_count_ >= 1 && "LeaveGlobalLock called without matching EnterGlobalLock"); \
+-    rex::thread::global_critical_region::mutex().unlock();                                \
++    ppc_global_lock_leave_();                                                             \
+   } while (0)
+-- 
+2.53.0.windows.1
+
