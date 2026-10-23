@@ -37,7 +37,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays at 4K and 80 fps with its own PC texture pack (7,607 textures) and F.E.A.R.'s right-stick fix: "running really well… ran better out of the box than Fear 1 did"; next, the smoke plumes and an optimisation pass. The plan for one collection: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
 
-Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md).
+Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md). How it all fits together, where the time goes, and how to help: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Build and run (Windows)
 
