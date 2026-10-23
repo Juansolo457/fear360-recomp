@@ -39,6 +39,29 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Deck result of fear_008 (same 7d3a36c build, 2026-10-23, Instant Action "Interval 2", docked to a capture card)
+- **Performance**, comparable with fear_007 and a little better: gameplay windows median 59.9 fps,
+  69% of them at 59.5+ (fear_007: 65%), slowest 49.2 (45.6). Windows over 1,000 draws a frame:
+  median 58.6 fps, GPU 11.9 ms median, 16.1 max, renderer thread 6.5 ms. The game still rendered
+  1280x720 into a 1920x1080 swapchain (the dock's output), like before.
+- **The `ZwDeviceIoControlFile`/`ZwCreateEvent`/`ZwClose` trio is constant**: about 11% of the game
+  thread in quiet scenes and menus too, not only in fights. Rumble alone can't do that: the engine
+  (`sub_821CFCD8`) reads all four pads every frame but sends vibration only when it changes. So
+  the overnight rumble theory is at most part of it; the profiler needs to name the caller (#30's
+  open item) before #29 is worth fixing.
+- **The corruption is on video** (`Desktop 2026.10.23 - 05.19.46.07.mp4`, user's PC; frames 300 and
+  306 saved in `private/captures/deck-008-impact-debris-frames300-306.jpg`): about 5 s in, the
+  debris and dust from bullet impacts on a wall become huge polygons stretched toward the camera
+  for a few frames; the tracer just before is fine. Particle geometry with some vertices far off.
+  Ruled out from the log: skipped draws (none in gameplay), the pipeline wait budget (0 skipped),
+  non-coherent stream memory (the renderer warns if so; it didn't), and the ring reporting its
+  read position before executing a command buffer (it writes it back after). The PC's logs show
+  the same stale-vertex counters, so they don't explain a Deck-only glitch either.
+- **Next to split it in two**: the same scene on PC at 60 fps (`fear_frame_rate_limit = 60`). If
+  the PC shows it too, it's frame-rate dependent (game logic or our per-frame vertex caching), not
+  the Deck's GPU driver; then switches to turn off the span reads (#27) and the per-frame cache on
+  the Deck.
+
 ## Deck result of 7d3a36c (`fear_007.log`, 2026-10-22)
 Fights at 1,000–2,500 draws went from 52.6 to **56.7 fps** (77% → 90% of frames on time); all
 gameplay 56.6 → 58.3 fps (92% → 95%); total CPU 2.1–3.5 → 1.5–2.1 cores. ucrtbase is gone from the
