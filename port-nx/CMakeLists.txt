@@ -33,6 +33,7 @@ set(FEAR_SOURCES
     src/main.cpp
     src/anim_timing.cpp
     src/high_fps.cpp
+    src/profiler.cpp
     src/texture_pack.cpp
     src/crash_report.cpp
     src/display_vblank.cpp

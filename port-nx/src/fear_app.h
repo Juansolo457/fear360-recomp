@@ -28,6 +28,7 @@
 #include "fear_settings.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
+#include "profiler.h"
 
 REXCVAR_DEFINE_STRING(fear_gpu_backend, "any", "F.E.A.R.",
                       "Backend of the stock Xenos plugin when nx_renderer is 'xenos': "
@@ -120,6 +121,7 @@ class FearApp : public rex::ReXApp {
 
   void OnPostSetup() override {
     if (runtime()) fear::look_tuning::Apply(*runtime());
+    fear::profiler::Start();
 
     // The game gets no input while a panel (or an SDK overlay under the mouse) has it.
     if (auto* input = runtime() ? static_cast<rex::input::InputSystem*>(runtime()->input_system())
