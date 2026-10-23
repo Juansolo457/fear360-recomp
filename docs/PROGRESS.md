@@ -280,3 +280,7 @@ ran in both. F.E.A.R.: 99.4% of frames on time. F.E.A.R. Files Instant Action di
 in big fights, but that was the renderer, not the AI: 7.8–12 ms of renderer CPU a frame with up to
 2,526 draws, from `fear_vertex_exact` hashing 25–30 GB/s (whole ranges per draw). GitHub issue #27
 tracks bringing that cost down (hash only the vertices a draw uses).
+**Spans played (2026-10-22, both games):** with per-draw reads over only the vertices a draw can
+reach (`AnalyzeVertexSpans`), renderer CPU fell to 1.0–1.1 ms a frame on average (worst 10 s:
+1.4 ms in Files, 2.1 in F.E.A.R., against 12 ms before), 99.8–99.9% of frames on time at 120 fps,
+and 6.0 / 2.3 GB of vertex data hashed where whole ranges would have been 2,300 / 1,368 GB.
