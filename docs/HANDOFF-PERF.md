@@ -57,10 +57,22 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
   non-coherent stream memory (the renderer warns if so; it didn't), and the ring reporting its
   read position before executing a command buffer (it writes it back after). The PC's logs show
   the same stale-vertex counters, so they don't explain a Deck-only glitch either.
-- **Next to split it in two**: the same scene on PC at 60 fps (`fear_frame_rate_limit = 60`). If
-  the PC shows it too, it's frame-rate dependent (game logic or our per-frame vertex caching), not
-  the Deck's GPU driver; then switches to turn off the span reads (#27) and the per-frame cache on
-  the Deck.
+- **PC at 60 fps is clean** (2026-10-23, same build, Interval 2, `--fear_frame_rate_limit 60`,
+  3x scale; recording `Videos\NVIDIA\F.E.A.R\F.E.A.R. 2026.10.23 - 05.43.58.08.mp4`): the user
+  saw no corruption, it held 60 fps up to 1,767 draws a frame, and a scan of every frame for
+  one-frame events (`transients.py`, scratchpad) found only muzzle flashes, sparks and blood
+  (0.16% of frames, against 0.41% on the Deck, where the top events include the impact debris at
+  0:05, the player's hands and weapon smeared over the screen at 1:40, and another at 4:09). So
+  it's the Deck, not the frame rate. Smeared skinned models (hands) and particles both look like
+  vertices with a far-off or near-zero w.
+- GPU-dependent paths checked and fine by reading: float constants (all 256 uploaded when a
+  shader indexes them dynamically), UBO offsets (aligned to the device's limit, 16 on RADV, 64 on
+  NVIDIA), vertex copies and span fetch addresses (16-byte aligned, same code on both),
+  one shared-memory binding on both (`maxStorageBufferRange` 4 GB).
+- **Next on the Deck**: `--nx_native_msaa false` (no build), then a diagnostic build with
+  switches that copy every draw's vertex data fresh (no reuse, no spans): if the corruption
+  survives that, it isn't stale vertex data but the GPU side (RADV/ACO compiling a translated
+  shader, or a robustness difference).
 
 ## Deck result of 7d3a36c (`fear_007.log`, 2026-10-22)
 Fights at 1,000–2,500 draws went from 52.6 to **56.7 fps** (77% → 90% of frames on time); all
