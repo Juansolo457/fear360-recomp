@@ -217,3 +217,10 @@ registers = ["r5"]
 name = "FearD3DWaitEnd"
 address = 0x82973678
 registers = []
+
+# Native C runtime (#31, docs/ARCHITECTURE.md): these guest functions are replaced by the SDK's
+# host versions (third_party/rexglue-sdk-nx/src/kernel/crt/memory.cpp), which take the same guest
+# pointers. Files' XDK memcpy has a 4-byte fast path F.E.A.R.'s lacks; same semantics.
+[entrypoint.rexcrt]
+memcpy = 0x828728A0
+memset = 0x82871980

@@ -22,6 +22,10 @@
 //   D3DBLOCKTYPE order, which matches what the call sites wait for (1: room in the ring buffer,
 //   2: the secondary ring, 3: the swap throttle, 6: a fence, the odd numbers 7-15: resources
 //   the GPU still uses). "untracked" is reason 0, which Direct3D doesn't count either.
+// - "system calls from": samples in ntdll, win32u, kernelbase or kernel32 by who made the call:
+//   "ntdll.dll!ZwDeviceIoControlFile < hid.dll!HidD_SetFeature < sub_821CFCD8 9%" (the first
+//   other DLL and the first translated function among the return addresses on the thread's stack;
+//   a scan of the stack, so now and then it can name a stale caller).
 //
 // Windows (and Proton on the Deck: Wine implements the thread calls); a no-op elsewhere.
 

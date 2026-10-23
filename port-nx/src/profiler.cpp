@@ -39,6 +39,7 @@ REXCVAR_DEFINE_UINT32(fear_profile_hz, 500, "F.E.A.R.",
 #include <span>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -279,6 +280,110 @@ uint64_t CpuTime100ns(HANDLE thread) {
   return value(kernel) + value(user);
 }
 
+// --- Who made a system call (#30) ---------------------------------------------------------------
+// A sample in a system DLL (ntdll, win32u, kernelbase, kernel32) is named after its callers: the
+// first DLL outside those (hid.dll, SDL3.dll, ws2_32.dll, rexruntimerd.dll, ...) and the first
+// translated game function, from the return addresses on the thread's stack. The top of the stack
+// is copied while the thread is suspended (ReadProcessMemory: a system call, no user-mode lock)
+// and scanned after it resumes; a word counts as a return address when it points into a module
+// just past a call instruction. A scan can pick up a stale return address left on the stack, so
+// it is an attribution for the profile, not a stack trace.
+
+// Loaded modules by base, with their ends; refreshed with the thread list.
+std::vector<std::pair<uintptr_t, uintptr_t>> g_module_ranges;
+uintptr_t g_system_modules[4] = {};
+
+void RefreshModules() {
+  g_module_ranges.clear();
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+  if (snapshot == INVALID_HANDLE_VALUE) return;
+  MODULEENTRY32W entry = {sizeof(entry)};
+  for (BOOL ok = Module32FirstW(snapshot, &entry); ok; ok = Module32NextW(snapshot, &entry)) {
+    const auto base = reinterpret_cast<uintptr_t>(entry.modBaseAddr);
+    g_module_ranges.emplace_back(base, base + entry.modBaseSize);
+  }
+  CloseHandle(snapshot);
+  std::sort(g_module_ranges.begin(), g_module_ranges.end());
+  const wchar_t* names[] = {L"ntdll.dll", L"win32u.dll", L"kernelbase.dll", L"kernel32.dll"};
+  for (size_t i = 0; i < std::size(names); ++i) {
+    g_system_modules[i] = reinterpret_cast<uintptr_t>(GetModuleHandleW(names[i]));
+  }
+}
+
+// The base of the module holding an address, or 0.
+uintptr_t ModuleOf(uintptr_t address) {
+  auto it = std::upper_bound(g_module_ranges.begin(), g_module_ranges.end(),
+                             std::make_pair(address, UINTPTR_MAX));
+  if (it == g_module_ranges.begin()) return 0;
+  --it;
+  return address < it->second ? it->first : 0;
+}
+
+bool IsSystemModule(uintptr_t module) {
+  return std::find(std::begin(g_system_modules), std::end(g_system_modules), module) !=
+         std::end(g_system_modules);
+}
+
+// Whether the bytes before an address in a module are a call: E8 rel32, or FF /2 (with or without
+// a REX prefix or a displacement).
+bool FollowsCall(uintptr_t address, uintptr_t module) {
+  if (address < module + 8) return false;
+  const auto* code = reinterpret_cast<const uint8_t*>(address);
+  if (code[-5] == 0xE8) return true;
+  for (int back = 2; back <= 7; ++back) {
+    if (code[-back] == 0xFF && ((code[-back + 1] >> 3) & 7) == 2) return true;
+  }
+  return false;
+}
+
+constexpr size_t kStackWords = 2048;  // 16 KB from the stack pointer
+
+// A thread's stack base, from its TEB (NT_TIB.StackBase), read now: fibers switch it.
+uintptr_t StackBase(uintptr_t teb) {
+  uintptr_t base = 0;
+  SIZE_T read = 0;
+  if (!teb || !ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(teb + 8),
+                                 &base, sizeof(base), &read) ||
+      read != sizeof(base)) {
+    return 0;
+  }
+  return base;
+}
+
+uintptr_t TebOf(HANDLE thread) {
+  struct BasicInformation {
+    LONG exit_status;
+    PVOID teb;
+    PVOID process, thread;
+    ULONG_PTR affinity;
+    LONG priority, base_priority;
+  } info = {};
+  using QueryThread = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+  static const auto query = reinterpret_cast<QueryThread>(
+      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
+  // 0: ThreadBasicInformation.
+  if (!query || query(thread, 0, &info, sizeof(info), nullptr) < 0) return 0;
+  return reinterpret_cast<uintptr_t>(info.teb);
+}
+
+// The callers of a system-DLL sample, from a copy of the stack: the first return address in a
+// non-system DLL (a bucket, or 0) and in a translated function (its guest address, or 0).
+std::pair<uint64_t, uint32_t> SystemCallers(const uint64_t* stack, size_t words) {
+  uint64_t via = 0;
+  for (size_t i = 0; i < words; ++i) {
+    const uintptr_t word = uintptr_t(stack[i]);
+    const uintptr_t module = ModuleOf(word);
+    if (!module || !FollowsCall(word, module)) continue;
+    if (module == g_exe_base) {
+      const uint64_t bucket = Bucket(word);
+      if (!(bucket & kModuleTag)) return {via, uint32_t(bucket)};
+      continue;  // the SDK's or our own host code in the exe
+    }
+    if (!via && !IsSystemModule(module)) via = Bucket(word);
+  }
+  return {via, 0};
+}
+
 struct Thread {
   HANDLE handle = nullptr;
   std::string name;
@@ -293,7 +398,26 @@ struct Thread {
   WaitSlot* wait_slot = nullptr;  // once the thread has waited in Direct3D
   uint64_t wait_samples = 0;
   std::array<uint32_t, std::size(kWaitReasons)> waits = {};
+  // System-DLL samples by (bucket, first non-system caller, first translated caller).
+  uintptr_t teb = 0;
+  std::map<std::tuple<uint64_t, uint64_t, uint32_t>, uint32_t> system_callers;
 };
+
+std::string SystemCallersText(const Thread& t) {
+  std::vector<std::pair<uint32_t, std::tuple<uint64_t, uint64_t, uint32_t>>> top;
+  for (const auto& [key, count] : t.system_callers) top.emplace_back(count, key);
+  std::sort(top.rbegin(), top.rend());
+  const uint64_t total = std::max<uint64_t>(t.samples, 1);
+  std::string text;
+  for (size_t i = 0; i < top.size() && i < 6 && top[i].first * 200 >= total; ++i) {
+    const auto& [bucket, via, guest] = top[i].second;
+    std::string chain = BucketName(bucket);
+    if (via) chain += " < " + BucketName(via);
+    if (guest) chain += fmt::format(" < sub_{:08X}", guest);
+    text += fmt::format("{}{} {:.1f}%", i ? ", " : "", chain, 100.0 * top[i].first / total);
+  }
+  return text;
+}
 
 uint64_t ModuleKey(uint64_t bucket) {
   return (bucket & kModuleTag) ? bucket & ~uint64_t(0xFFFF) : GuestModuleIndex(uint32_t(bucket));
@@ -341,6 +465,8 @@ std::string WaitsText(const Thread& t) {
 
 void Run() {
   BuildFunctionTable();
+  RefreshModules();
+  static uint64_t stack_copy[kStackWords];
   const DWORD self = GetCurrentThreadId();
   const DWORD pid = GetCurrentProcessId();
   const uint32_t hz = REXCVAR_GET(fear_profile_hz);
@@ -372,6 +498,7 @@ void Run() {
           t.handle = handle;
           t.name = ThreadName(handle, entry.th32ThreadID);
           t.cpu_at_refresh = t.cpu_at_report = CpuTime100ns(handle);
+          t.teb = TebOf(handle);
         }
         CloseHandle(snapshot);
         for (auto it = threads.begin(); it != threads.end();) {
@@ -402,6 +529,20 @@ void Run() {
       const bool sampled = GetThreadContext(t.handle, &context);
       // Whether it's waiting in Direct3D, while it's stopped (an atomic: no lock).
       const uint32_t waiting = t.wait_slot ? t.wait_slot->reason.load(std::memory_order_relaxed) : 0;
+      // Outside the exe: the top of its stack too, for the system call's callers (a system call
+      // reads it: no user-mode lock).
+      size_t stack_words = 0;
+      if (sampled && (context.Rip < g_exe_base || context.Rip >= g_exe_end)) {
+        const uintptr_t base = StackBase(t.teb);
+        if (base > context.Rsp && base - context.Rsp < (uintptr_t(64) << 20)) {
+          SIZE_T read = 0;
+          if (ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(context.Rsp),
+                                stack_copy,
+                                std::min<size_t>(base - context.Rsp, sizeof(stack_copy)), &read)) {
+            stack_words = read / sizeof(uint64_t);
+          }
+        }
+      }
       // Resumed before anything that can take a lock: naming the sample looks up its module
       // (the loader lock) and counting it allocates (the heap's), and the suspended thread may
       // hold either.
@@ -415,6 +556,11 @@ void Run() {
           ++t.waits[std::min(waiting - 1, kWaitOther)];
         } else {
           ++t.modules[ModuleKey(bucket)];
+        }
+        const uintptr_t module = uintptr_t(bucket & ~kModuleTag & ~uint64_t(0xFFFF));
+        if (stack_words && (bucket & kModuleTag) && module && IsSystemModule(module)) {
+          const auto [via, guest] = SystemCallers(stack_copy, stack_words);
+          ++t.system_callers[{bucket, via, guest}];
         }
       }
     }
@@ -462,6 +608,9 @@ void Run() {
         }
         REXLOG_INFO("[profile]   {:5.1f}% of a core  {}: {}", row.cpu * 100.0, row.t->name, text);
         REXLOG_INFO("[profile]       modules: {}", ModulesText(*row.t));
+        if (!row.t->system_callers.empty()) {
+          REXLOG_INFO("[profile]       system calls from: {}", SystemCallersText(*row.t));
+        }
         if (row.t->wait_samples) {
           REXLOG_INFO("[profile]       Direct3D waits: {}", WaitsText(*row.t));
         }
@@ -485,7 +634,9 @@ void Run() {
         t.modules.clear();
         t.wait_samples = 0;
         t.waits = {};
+        t.system_callers.clear();
       }
+      RefreshModules();
     }
     next += interval;
     const auto after = Clock::now();

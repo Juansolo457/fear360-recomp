@@ -319,3 +319,12 @@ registers = ["r5"]
 name = "FearD3DWaitEnd"
 address = 0x82973A80
 registers = []
+
+# Native C runtime (#31, docs/ARCHITECTURE.md): these guest functions are replaced by the SDK's
+# host versions (third_party/rexglue-sdk-nx/src/kernel/crt/memory.cpp), which take the same guest
+# pointers. memcpy alone was 1-4% of the game thread on the Steam Deck. Identified by disassembly:
+# the XDK's memcpy (alignment prologue, dcbt, 8/128-byte loops) and memset (byte fill to a word
+# boundary, then words). Byte copies and fills don't depend on byte order.
+[entrypoint.rexcrt]
+memcpy = 0x8287D240
+memset = 0x8287B540

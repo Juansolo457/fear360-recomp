@@ -39,6 +39,17 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Next build (2026-10-23): system-call callers (#30) and native memcpy/memset (#31)
+- Profiler: samples in ntdll, win32u, kernelbase or kernel32 get a `system calls from:` line,
+  naming the first other DLL and the first translated function among the return addresses on
+  the stack (16 KB of it copied with `ReadProcessMemory` while the thread is suspended, scanned
+  after; a word counts when it points just past a call instruction). Answers what makes the
+  constant `ZwDeviceIoControlFile`/`ZwCreateEvent`/`ZwClose` trio (11-14% of the game thread).
+- `[entrypoint.rexcrt]` in both manifests: `memcpy`/`memset` at `0x8287D240`/`0x8287B540`
+  (F.E.A.R.) and `0x828728A0`/`0x82871980` (Files, a newer XDK's memcpy with a 4-byte fast
+  path), replaced by the SDK's host versions. Expect a few percent of the game thread back.
+- Autosave input drop filed as #36.
+
 ## Deck story run with exact vertex checks by default (`fear_015.log`, build `54135f6`, 2026-10-23, Docks)
 - User: "the best run so far of the story content. It loaded the smoothest"; tracers fixed,
   frame rate "much more stable"; one decal looked briefly corrupted near the end ("like it had
