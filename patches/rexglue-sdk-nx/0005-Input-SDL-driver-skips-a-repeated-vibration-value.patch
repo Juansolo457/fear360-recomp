@@ -1,0 +1,74 @@
+From d1f69d714e3286f01c8767999c2c1fc936b13063 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 09:20:05 -0700
+Subject: [PATCH] Input: SDL driver skips a repeated vibration value
+
+The guest calls XInputSetState very often, mostly with the value the pad
+already has (fear-nx's Switch driver does the same skip for the same
+reason). SDL skips a repeat only when the previous send succeeded; under
+Proton the Steam Deck pad's rumble request fails, so every call reached the
+device again: a Wine hid.dll request on the game thread, 10% and more of it.
+A repeated value is now sent again only after 30 s, inside SDL's rumble
+duration.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/input/sdl/sdl_input_driver.h |  5 +++++
+ src/input/sdl/sdl_input_driver.cpp       | 18 ++++++++++++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+index cf0e3d1..3969d19 100644
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -67,6 +67,11 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+     DeviceId id;
+     // Per pad rather than per guest user, so it survives reassignment.
+     KeystrokeState keystroke;
++    // The last vibration sent to SDL, and when (SetDeviceVibration skips repeats).
++    bool vibration_sent = false;
++    uint16_t vibration_left = 0;
++    uint16_t vibration_right = 0;
++    uint64_t vibration_ticks = 0;
+   };
+ 
+   // WindowListener
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index 9d620b3..469ded7 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -33,6 +33,8 @@ namespace {
+ 
+ // SDL clamps to SDL_MAX_RUMBLE_DURATION_MS, which is not a public constant.
+ constexpr uint32_t kRumbleDurationMs = 0xFFFF;
++// A repeated vibration value is sent again after this long, well inside SDL's rumble duration.
++constexpr uint64_t kRumbleResendMs = 30000;
+ 
+ }  // namespace
+ 
+@@ -255,6 +257,22 @@ X_RESULT SDLInputDriver::SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibr
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
+ 
++  // The guest calls XInputSetState very often, mostly with the value the pad already has
++  // (fear-nx measured the same on Switch, switch_input_driver.cpp). SDL skips a repeat only
++  // when the last send succeeded; under Proton the Steam Deck pad's rumble request fails, so
++  // every call went to the device again: a Wine hid.dll request on the game thread, 10% and more
++  // of it (fear360-recomp #29). A repeat isn't sent, except now and then, as SDL rumble expires.
++  const uint64_t now = SDL_GetTicks();
++  if (controller->vibration_sent && controller->vibration_left == vibration->left_motor_speed &&
++      controller->vibration_right == vibration->right_motor_speed &&
++      now - controller->vibration_ticks < kRumbleResendMs) {
++    return X_ERROR_SUCCESS;
++  }
++  controller->vibration_sent = true;
++  controller->vibration_left = vibration->left_motor_speed;
++  controller->vibration_right = vibration->right_motor_speed;
++  controller->vibration_ticks = now;
++
+   // XInput vibration holds until the guest changes it, but SDL rumble expires,
+   // and a zero duration expires on the next SDL_UpdateJoysticks. Arm it for
+   // SDL's maximum instead; each call cancels the previous effect anyway.
+-- 
+2.53.0.windows.1
+

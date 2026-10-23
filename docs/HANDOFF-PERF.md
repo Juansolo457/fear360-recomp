@@ -38,6 +38,31 @@ secondary ring full, swap throttle, fence, resource release). Two manifest hooks
 `0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
 #30: naming the translated function that made each system call.
 
+## Deck run of `9bcea1e` with `--hid_sdl_hidapi off` (`fear_018.log`, 2026-10-23, Interval 2)
+- The switch took (`SDL: HIDAPI joystick drivers off ... SDL_JOYSTICK_HIDAPI in the environment:
+  0`: the launch-option variable of fear_017 *had* reached the game). The cost stayed, by another
+  road: `ZwDeviceIoControlFile < HID.DLL < xinput1_4.dll < rexruntimerd.dll < game`, 7-9% plus
+  `ZwCreateEvent`/`ZwClose`.
+- **Cause: the game's vibration calls.** fear-nx's Switch driver documents it
+  (`switch_input_driver.cpp`): the game calls `XInputSetState` very often, mostly with the same
+  value ("it kept sending zero over and over"; 5.8% of the frame thread on Switch). SDL skips a
+  repeat only when the last send succeeded, and on the Deck under Proton the pad's rumble
+  request apparently fails, so every call went to the device: a HID feature report with SDL's
+  HIDAPI drivers, `XInputSetState` through Wine's xinput without them. **Fixed in SDK patch 0005**
+  (`SDLInputDriver::SetDeviceVibration` skips a value the pad already has, re-sending after 30 s);
+  type-checked, not built.
+- **The benchmark room** (user: the tight room midway through Interval 2, debris, particles,
+  several enemies) is the 09:08:26 window: **41.5 fps, 1,938 draws a frame, GPU 18.6 ms**, game
+  thread with no slack (~24 ms a frame): engine 25%, ntdll 13% (the vibration calls), engine
+  renderer 11%, Havok 11%, C runtime 7%, ClientFX 7%, engine sound 6%, Direct3D 5%, game client
+  5%. Both the game thread and the GPU are over 16.7 ms there. Other slow windows: 51.9-55.5 fps
+  with GPU 14-16.4 ms.
+- Free GPU tests for that room: `--nx_native_msaa false` (the game's 2x/4x MSAA is honoured on the
+  host) and no `--fear_texture_pack texture_pack` (4x-pixel PC textures: memory bandwidth on the
+  Deck's shared memory).
+- Autosave input drop: "in and out", sometimes there. The vibration fix removes the per-frame
+  device requests that a slow save could hold up; watch #36 after it.
+
 ## Next build (2026-10-23): an SDK switch for SDL's HIDAPI drivers, the full caller chain
 - SDK patch `patches/rexglue-sdk-nx/0004-...`: cvar `hid_sdl_hidapi` (auto/on/off) sets
   `SDL_HINT_JOYSTICK_HIDAPI` with override priority before the gamepad subsystem starts, in
