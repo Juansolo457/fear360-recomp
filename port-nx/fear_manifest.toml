@@ -306,3 +306,16 @@ registers = ["r31", "f1"]
 name = "FearAiNextUpdate"
 address = 0x8263D2B8
 registers = ["f1"]
+
+# Profiler (src/profiler.h, #30): Direct3D's own bookkeeping of each wait for the GPU, at the
+# start of the function that records a wait's start (the reason in r5) and of the one that records
+# its end. Only noted while fear_profile is on.
+[[entrypoint.midasm_hook]]
+name = "FearD3DWaitBegin"
+address = 0x82973A50
+registers = ["r5"]
+
+[[entrypoint.midasm_hook]]
+name = "FearD3DWaitEnd"
+address = 0x82973A80
+registers = []

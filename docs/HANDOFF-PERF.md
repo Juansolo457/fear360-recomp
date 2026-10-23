@@ -25,8 +25,19 @@ main-thread function, `sub_82973C88`, is the 360 Direct3D's spin loop waiting fo
 ring space, swap throttle): 24% of the thread at 60 fps (idle time burnt as power), about 1% in the
 slow fights. Those are CPU-bound: 19 ms of game-thread work per frame (median), with the renderer
 thread at 4.6 ms and the GPU at 13 ms. The doc ranks the options (rumble thread, per-module profile,
-`[rexcrt]`, the translator's register options, a native Direct3D layer) and maps the executable. Filed as #29 (rumble), #30 (profiler), #31 (`[rexcrt]`), #32 (Direct3D spin), #33 (SDK
+`[rexcrt]`, the translator's register options, a native Direct3D layer) and maps the executable.
+Filed as #29 (rumble), #30 (profiler), #31 (`[rexcrt]`), #32 (Direct3D spin), #33 (SDK
 spinning), #34 (register options) and #35 (native Direct3D research).
+
+## Profiler: modules and Direct3D wait reasons (#30, built 2026-10-23, not run yet)
+With `--fear_profile true`, each thread's line in the report gets two more:
+`[profile]       modules: ...` (its samples by part of the game, from the module table in
+`port-nx/src/profiler.cpp`, one per game, and by DLL outside the translated code) and, for a thread
+that waited in Direct3D, `[profile]       Direct3D waits: ...` (by the XDK's reason: primary or
+secondary ring full, swap throttle, fence, resource release). Two manifest hooks feed the waits:
+`FearD3DWaitBegin` (r5) and `FearD3DWaitEnd`, at `0x82973A50`/`0x82973A80` (F.E.A.R.) and
+`0x82973648`/`0x82973678` (Files). Both ports built cleanly; nothing has run them yet. Still open on
+#30: naming the translated function that made each system call.
 
 ## Deck result of 7d3a36c (`fear_007.log`, 2026-10-22)
 Fights at 1,000–2,500 draws went from 52.6 to **56.7 fps** (77% → 90% of frames on time); all

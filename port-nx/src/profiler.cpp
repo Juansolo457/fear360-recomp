@@ -2,6 +2,8 @@
 
 #include "profiler.h"
 
+#include "fear_title.h"
+
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/thread.h>
@@ -27,12 +29,14 @@ REXCVAR_DEFINE_UINT32(fear_profile_hz, 500, "F.E.A.R.",
 #include <tlhelp32.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -46,6 +50,87 @@ namespace fear::profiler {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+// The parts of the executable by start address, each up to the next one's start
+// (docs/ARCHITECTURE.md, "Map of the 360 executable"; from class names, strings and calls with
+// tools/analysis/, to 64 KB except where a boundary was found exactly). Approximate at the edges.
+struct GuestModule {
+  uint32_t start;
+  const char* name;
+};
+constexpr GuestModule kFearModules[] = {
+    {0x82170000, "engine"},           {0x82280000, "engine renderer"},
+    {0x822D0000, "engine sound"},     {0x822F0000, "game client"},
+    {0x82510000, "game server"},      {0x826C0000, "AI planner"},
+    {0x82810000, "game shared"},      {0x82870000, "C runtime"},
+    {0x828A0000, "Havok"},            {0x82962328, "Direct3D"},
+    {0x829C0000, "D3DX and image libraries"},
+    {0x82AC0000, "ClientFX"},         {0x82BE0000, "shader compilers"},
+    {0x83040000, "startup, Bink, misc"},
+};
+// Files links them in another order: the engine renderer sits inside the game client, the shared
+// game code after the libraries.
+constexpr GuestModule kFilesModules[] = {
+    {0x82190000, "engine"},           {0x822B0000, "game client"},
+    {0x824E0000, "engine renderer"},  {0x82530000, "game client"},
+    {0x82560000, "game server"},      {0x82710000, "AI planner"},
+    {0x82870000, "C runtime"},        {0x828A0000, "Havok"},
+    {0x82958920, "Direct3D"},         {0x829A0000, "D3DX, XDK and image libraries"},
+    {0x82AE0000, "game shared"},      {0x82B50000, "ClientFX"},
+    {0x82BE0000, "shader compilers"}, {0x82F70000, "startup, Bink, misc"},
+};
+constexpr std::span<const GuestModule> kModules =
+    fear::title::kFiles ? std::span<const GuestModule>(kFilesModules)
+                        : std::span<const GuestModule>(kFearModules);
+
+// The module's index in kModules, or kModules.size() for an address before the map.
+size_t GuestModuleIndex(uint32_t address) {
+  auto it = std::upper_bound(kModules.begin(), kModules.end(), address,
+                             [](uint32_t a, const GuestModule& m) { return a < m.start; });
+  return it == kModules.begin() ? kModules.size() : size_t(std::prev(it) - kModules.begin());
+}
+
+// Direct3D's wait reasons (XDK D3DBLOCKTYPE order; see profiler.h).
+constexpr const char* kWaitReasons[] = {
+    "untracked",           "ring buffer full",     "secondary ring full",
+    "swap throttle",       "until idle",           "until not busy",
+    "on fence",            "vertex shader release", "pixel shader release",
+    "vertex buffer release", "vertex buffer lock", "index buffer release",
+    "index buffer lock",   "texture release",      "texture lock",
+    "command buffer release", "command buffer lock", "constant buffer release",
+    "constant buffer lock", "other",
+};
+constexpr uint32_t kWaitOther = std::size(kWaitReasons) - 1;
+
+// The reason each thread is waiting in Direct3D for, + 1 (0: not waiting), by thread id. Written by
+// the hooks on the waiting thread, read by the sampler while that thread is suspended (atomics
+// only: no locks). A slot belongs to one thread id for good; 64 is far more than the threads that
+// draw.
+struct WaitSlot {
+  std::atomic<uint32_t> thread{0};
+  std::atomic<uint32_t> reason{0};
+};
+WaitSlot g_wait_slots[64];
+std::atomic<bool> g_profiling{false};
+
+WaitSlot* FindWaitSlot(uint32_t thread) {
+  for (WaitSlot& slot : g_wait_slots) {
+    if (slot.thread.load(std::memory_order_relaxed) == thread) return &slot;
+  }
+  return nullptr;
+}
+
+WaitSlot* ThisThreadsWaitSlot() {
+  thread_local WaitSlot* slot = nullptr;
+  if (slot) return slot;
+  const uint32_t id = GetCurrentThreadId();
+  if ((slot = FindWaitSlot(id))) return slot;
+  for (WaitSlot& candidate : g_wait_slots) {
+    uint32_t free = 0;
+    if (candidate.thread.compare_exchange_strong(free, id)) return slot = &candidate;
+  }
+  return nullptr;  // all taken: this thread's waits count as its functions
+}
 
 // Translated functions by native address: (native start, guest address), sorted.
 std::vector<std::pair<uintptr_t, uint32_t>> g_functions;
@@ -202,7 +287,57 @@ struct Thread {
   bool busy = true;
   uint64_t samples = 0;
   std::unordered_map<uint64_t, uint32_t> buckets;
+  // The same samples by part of the game, except those taken in a Direct3D wait: a guest
+  // module's index in kModules, or the bucket's module (tag and base, no export).
+  std::unordered_map<uint64_t, uint32_t> modules;
+  WaitSlot* wait_slot = nullptr;  // once the thread has waited in Direct3D
+  uint64_t wait_samples = 0;
+  std::array<uint32_t, std::size(kWaitReasons)> waits = {};
 };
+
+uint64_t ModuleKey(uint64_t bucket) {
+  return (bucket & kModuleTag) ? bucket & ~uint64_t(0xFFFF) : GuestModuleIndex(uint32_t(bucket));
+}
+
+// A thread's samples by part of the game (see profiler.h), merged by name (Files' game client
+// comes in two pieces).
+std::string ModulesText(const Thread& t) {
+  std::map<std::string, uint64_t> by_name;
+  for (const auto& [key, count] : t.modules) {
+    std::string name;
+    if (key & kModuleTag) {
+      name = ModuleName(uintptr_t(key & ~kModuleTag));
+    } else {
+      name = key < kModules.size() ? kModules[key].name : "(before the map)";
+    }
+    by_name[name] += count;
+  }
+  if (t.wait_samples) by_name["Direct3D wait"] += t.wait_samples;
+  std::vector<std::pair<uint64_t, std::string>> top;
+  for (auto& [name, count] : by_name) top.emplace_back(count, name);
+  std::sort(top.rbegin(), top.rend());
+  const uint64_t total = std::max<uint64_t>(t.samples, 1);
+  std::string text;
+  for (size_t i = 0; i < top.size() && i < 12 && top[i].first * 200 >= total; ++i) {
+    text += fmt::format("{}{} {:.0f}%", i ? ", " : "", top[i].second, 100.0 * top[i].first / total);
+  }
+  return text;
+}
+
+std::string WaitsText(const Thread& t) {
+  std::vector<std::pair<uint32_t, size_t>> top;
+  for (size_t reason = 0; reason < t.waits.size(); ++reason) {
+    if (t.waits[reason]) top.emplace_back(t.waits[reason], reason);
+  }
+  std::sort(top.rbegin(), top.rend());
+  const uint64_t total = std::max<uint64_t>(t.samples, 1);
+  std::string text;
+  for (size_t i = 0; i < top.size(); ++i) {
+    text += fmt::format("{}{} {:.1f}%", i ? ", " : "", kWaitReasons[top[i].second],
+                        100.0 * top[i].first / total);
+  }
+  return text;
+}
 
 void Run() {
   BuildFunctionTable();
@@ -253,6 +388,7 @@ void Run() {
           if (it->second.name.rfind("thread ", 0) == 0) {
             it->second.name = ThreadName(it->second.handle, it->first);
           }
+          if (!it->second.wait_slot) it->second.wait_slot = FindWaitSlot(it->first);
           ++it;
         }
       }
@@ -264,13 +400,22 @@ void Run() {
       CONTEXT context = {};
       context.ContextFlags = CONTEXT_CONTROL;
       const bool sampled = GetThreadContext(t.handle, &context);
+      // Whether it's waiting in Direct3D, while it's stopped (an atomic: no lock).
+      const uint32_t waiting = t.wait_slot ? t.wait_slot->reason.load(std::memory_order_relaxed) : 0;
       // Resumed before anything that can take a lock: naming the sample looks up its module
       // (the loader lock) and counting it allocates (the heap's), and the suspended thread may
       // hold either.
       ResumeThread(t.handle);
       if (sampled) {
         ++t.samples;
-        ++t.buckets[Bucket(uintptr_t(context.Rip))];
+        const uint64_t bucket = Bucket(uintptr_t(context.Rip));
+        ++t.buckets[bucket];
+        if (waiting) {
+          ++t.wait_samples;
+          ++t.waits[std::min(waiting - 1, kWaitOther)];
+        } else {
+          ++t.modules[ModuleKey(bucket)];
+        }
       }
     }
     // Every 10 s: the report.
@@ -316,6 +461,10 @@ void Run() {
                               100.0 * top[i].first / std::max<uint64_t>(row.t->samples, 1));
         }
         REXLOG_INFO("[profile]   {:5.1f}% of a core  {}: {}", row.cpu * 100.0, row.t->name, text);
+        REXLOG_INFO("[profile]       modules: {}", ModulesText(*row.t));
+        if (row.t->wait_samples) {
+          REXLOG_INFO("[profile]       Direct3D waits: {}", WaitsText(*row.t));
+        }
       }
       std::vector<std::pair<uint64_t, uint64_t>> top_all;
       uint64_t total = 0;
@@ -333,6 +482,9 @@ void Run() {
       for (auto& [id, t] : threads) {
         t.samples = 0;
         t.buckets.clear();
+        t.modules.clear();
+        t.wait_samples = 0;
+        t.waits = {};
       }
     }
     next += interval;
@@ -348,6 +500,7 @@ void Start() {
   if (!REXCVAR_GET(fear_profile)) return;
   static std::atomic<bool> started{false};
   if (started.exchange(true)) return;
+  g_profiling = true;
   std::thread([] {
     SetThreadDescription(GetCurrentThread(), L"F.E.A.R. profiler");
     Run();
@@ -356,10 +509,27 @@ void Start() {
 
 }  // namespace fear::profiler
 
+void FearD3DWaitBegin(PPCRegister& r5) {
+  using namespace fear::profiler;
+  if (!g_profiling.load(std::memory_order_relaxed)) return;
+  if (WaitSlot* slot = ThisThreadsWaitSlot()) {
+    slot->reason.store(std::min(r5.u32, kWaitOther) + 1, std::memory_order_relaxed);
+  }
+}
+
+void FearD3DWaitEnd() {
+  using namespace fear::profiler;
+  if (!g_profiling.load(std::memory_order_relaxed)) return;
+  if (WaitSlot* slot = ThisThreadsWaitSlot()) slot->reason.store(0, std::memory_order_relaxed);
+}
+
 #else
 
 namespace fear::profiler {
 void Start() {}
 }  // namespace fear::profiler
+
+void FearD3DWaitBegin(PPCRegister&) {}
+void FearD3DWaitEnd() {}
 
 #endif

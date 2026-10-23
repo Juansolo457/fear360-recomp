@@ -76,12 +76,14 @@ So the big fights are **CPU-bound on the game thread**, with the GPU close behin
 
 **Read** (disassembly), **measured** (share). The hottest main-thread function across all windows, `sub_82973C88` (13.5% average), is the body of a spin loop in the 360 Direct3D. Four iterations of eight `or r31,r31,r31` (a Xenon hardware-thread priority hint, a no-op once translated), then a 5000-tick timeout check against a timer read through `r13+0x100`. It's called in a loop by the waits:
 
-| Function | Waits until | Reason code passed to `sub_82973A50` | Inferred meaning |
+| Function | Waits until | Reason code passed to `sub_82973A50` | Meaning (XDK `D3DBLOCKTYPE`) |
 |---|---|---|---|
-| `sub_82989490` | ring read pointer (`*(device+0x2A10)+0x3C`) passes the space needed | 1 | command ring full |
-| `sub_829893B8` | swap counter (`*(device+0x2A10)+4`, low 2 bits) | 2 | frame throttle at present |
-| `sub_8298A208` | fence (`*(device+0x2A10)+0`) reaches a value | 6 | block on fence (global device) |
-| `sub_8298A2F0` | same fence check; kicks the ring first if the fence isn't submitted (`sub_8298A988`) | caller's | block on fence |
+| `sub_82989490` | ring read pointer (`*(device+0x2A10)+0x3C`) passes the space needed | 1 | primary ring full |
+| `sub_829893B8` | a second read pointer with a 2-bit wrap count (`*(device+0x2A10)+4`) passes an address | 2 | secondary ring full |
+| `sub_8298A208` | fence (`*(device+0x2A10)+0`) reaches a value | 6 | block on fence |
+| `sub_8298A2F0` | same fence check; kicks the ring first if the fence isn't submitted (`sub_8298A988`) | the caller's: 3 from the present path (swap throttle), 4 (until idle), 7, 9, 11, 13, 15 from one resource-release function (vertex shader, vertex buffer, index buffer, texture, command buffer), 16 (command buffer lock), 0 from the ring kick | |
+
+`sub_82973A50` records the wait's start (device, reason, timer, time base) and `sub_82973A80` its end, adding the time to a device counter (swap throttle, reason 3, in its own counter at `device+0x4E40`, the rest at `+0x4E38`; reason 0 isn't counted). The names come from the order of the XDK's `D3DBLOCKTYPE` enum, which matches what each call site waits for (**inferred**). F.E.A.R. Files has the same two functions at `sub_82973648` and `sub_82973678` (the device offsets moved by 0x80). Since #30 the profiler hooks both and splits the wait by reason.
 
 `device+0x2A10` points at the block of values the GPU writes back. Here our ring thread writes them. In 60 fps windows the wait is the frame limiter's idle time (24% median), spent spinning at full clock. On the Deck that's power the GPU could use, and an SMT sibling slowed down. In the first loading window it's about 70% of the thread. In the big fights it's near 0: the game thread is the bottleneck there, so removing the spin saves power and helps the other threads, but doesn't shorten a slow frame by itself.
 
@@ -142,7 +144,7 @@ Effort is for one person working with Claude; every build and Deck run is the us
 
 ### Tier 1: small changes, days
 1. **Rumble off the game thread** ([#29](https://github.com/Juansolo457/fear360-recomp/issues/29)) (SDK SDL driver: a latest-value mailbox and a worker thread). Recovers 2-3 ms per heavy frame if Finding 2 holds.
-2. **Profiler: per-module totals** ([#30](https://github.com/Juansolo457/fear360-recomp/issues/30)) (the table above, per thread), **Direct3D wait reasons** (hook `sub_82973A50`/`sub_82973A80`), and **caller attribution for system calls** (walk the host stack to the first translated function). The next Deck run then says where the 19 ms goes.
+2. **Profiler: per-module totals** ([#30](https://github.com/Juansolo457/fear360-recomp/issues/30)) (the table above, per thread), **Direct3D wait reasons** (hook `sub_82973A50`/`sub_82973A80`), and **caller attribution for system calls** (walk the host stack to the first translated function). The next Deck run then says where the 19 ms goes. *Per-module totals and wait reasons are built (2026-10-23), not yet run; the caller attribution is still open.*
 3. **`[rexcrt]` memory and string functions** ([#31](https://github.com/Juansolo457/fear360-recomp/issues/31)). The SDK strips each guest original it replaces, so every address must be exactly that function. Identified so far from disassembly (**read**; check each against the SDK hook's semantics before use): `memcpy` `8287D240`, `memset` `8287B540`, `_stricmp` `82881970`, `strncpy` `8287CAA0`, `wcslen` `8287C3C0`, `wcscmp` `8287F2B0`, `wcsncpy` `8287C3E8`. Others seen but not in the SDK's list: `strncat` `8287CB00`, `free` `8287D1E0`, `rand` `8287DAD0`, `atoi` `8287DB38`, `isdigit` `8287CCA8`, `_getptd` `8287BB20`, the stack-cookie check `8287C878`, `sin`/`cos`-shaped math at `8287F578`/`8287F650`, a `sprintf`-family function at `8287E558`. Low risk; `memcpy` alone is 1-4% of the game thread.
 4. **Wait instead of spin** ([#32](https://github.com/Juansolo457/fear360-recomp/issues/32)) in the Direct3D wait loop: the ring thread signals a host event when it writes the fence, read pointer or swap counter; a hook on `sub_82973C88` waits on it with a short timeout. Saves power and an SMT sibling at 60 fps; the game's behaviour is unchanged.
 5. **SDK timer queue** ([#33](https://github.com/Juansolo457/fear360-recomp/issues/33)): replace the disruptor spin (13% of a core) with a blocking wait. **UI thread**: pump SDL at a fixed rate instead of once per poll.
@@ -176,5 +178,5 @@ The project is public, and contributions are welcome. You need your own copy of 
 
 - **Start here:** `docs/PROGRESS.md` for state, `docs/HANDOFF.md` to build and run, `docs/HANDOFF-PERF.md` for the Deck work, this file for the map.
 - **Analysis scripts** (`tools/analysis/`, Python; run with `-I` except where noted): `x360img.py` (strings, pointers, PowerPC disassembly; needs `capstone`, run with `-P`), `rtti_map.py` (class names for functions from vtables), `regions.py` (what each 64 KB of code is), `xcalls.py` (who calls into a range), `mostcalled.py`, `containing.py` (which function holds an address), `genscan.py` (sizes, strings, callees, PM4 builders), `waitshare.py` (Deck profile windows).
-- **Good first tasks:** Tier 1 items 2, 3 and 5; identifying more CRT functions for `[rexcrt]`; checking the 17 direct PM4 writers; naming hot functions with RTTI and PC SDK knowledge.
+- **Good first tasks:** the system-call callers in Tier 1 item 2; items 3 and 5; identifying more CRT functions for `[rexcrt]`; checking the 17 direct PM4 writers; naming hot functions with RTTI and PC SDK knowledge.
 - **Testing:** Steam Deck results with the profiler on are as valuable as code. `tools/steamdeck/README-SteamDeck.txt` has the launch options.
