@@ -30,8 +30,11 @@ ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root
         '--fear_texture_pack', 'texture_pack']
 DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
-                 "# Steam Deck: 1x (1280x720 for the Deck's 1280x800 screen).\n"
-                 'nx_native_resolution_scale = 1\n')
+                 "# Steam Deck: 1x (1280x720 for the Deck's 1280x800 screen), and 60 fps:\n"
+                 '# the Deck reported 120 Hz through gamescope when docked, and the game\n'
+                 "# paced to 120 while the Deck's own limit showed 60 (play-test, #28).\n"
+                 'nx_native_resolution_scale = 1\n'
+                 'fear_frame_rate_limit = 60\n')
 GAMES = [
     # (folder in the zip, project, program, texture pack, id, name, subtitle)
     ('fear', 'port-nx', 'fear.exe', os.path.join('private', 'texture_pack'),
