@@ -61,5 +61,10 @@ Local changes (see `git log -p -- port-nx/src/native`):
   r0.x and nothing writes r0.x before, no loops, calls or jumps). The fetch address is the copy's
   stream offset minus the span's offset (`AllocateFrom` keeps that non-negative). Otherwise the
   whole range, as before.
+- Diagnosis switches for the Steam Deck's corrupted particles and hands (#28), both read every
+  frame: `fear_vertex_spans` (on) turns the span reads off; `fear_vertex_fresh` (off) makes
+  every draw hash its vertex and index data exactly as guest memory holds it (whatever the
+  range's history), reusing a copy only for identical content. The log names the setting
+  (`[native] vertex reads: ...`).
 
 The `*_test.cpp` files are kept for reference but are not built here.

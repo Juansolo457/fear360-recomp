@@ -125,6 +125,17 @@ REXCVAR_DEFINE_BOOL(fear_vertex_audit, false, "F.E.A.R.",
                     "Compare every vertex and index copy a draw uses with guest memory and report "
                     "the draws that used data the game had changed since (diagnosis; costs a lot "
                     "of CPU)");
+// F.E.A.R. (#28, the Steam Deck's corrupted particles and hands): switches to take the vertex
+// shortcuts out one at a time. Without spans every per-draw read covers the whole range (as
+// before #27). With fresh, every draw hashes its vertex and index data as guest memory holds it
+// now, whatever the range's history (no once-a-frame check, sampling or "changed lately" rule),
+// and a copy is reused only for byte-identical content: no draw can use stale data.
+REXCVAR_DEFINE_BOOL(fear_vertex_spans, true, "F.E.A.R.",
+                    "Read only the vertices a draw can reach where the shader allows it (#27); off "
+                    "= read whole ranges (diagnosis)");
+REXCVAR_DEFINE_BOOL(fear_vertex_fresh, false, "F.E.A.R.",
+                    "Check every draw's vertex and index data against guest memory exactly, "
+                    "reusing a copy only when it is identical (diagnosis; costs CPU)");
 REXCVAR_DEFINE_BOOL(fear_shader_prewarm, true, "F.E.A.R.",
                     "Translate the shaders seen in earlier runs in the background at startup "
                     "(kept per title in the cache folder), so new effects don't stall a frame")
@@ -827,7 +838,7 @@ struct Renderer::Impl {
     const bool first_this_frame = known.frame != frame;
     const uint64_t hash = RangeHash(known, data, bytes, address);
     const bool recent = known.changed_frame && frame - known.changed_frame <= kVertexRecentFrames;
-    if (!vertex_exact || !(recent || bytes <= kVertexAlwaysBytes)) {
+    if (!vertex_fresh && (!vertex_exact || !(recent || bytes <= kVertexAlwaysBytes))) {
       return hash;
     }
     const uint64_t fresh = XXH3_64bits(data, bytes);
@@ -844,6 +855,8 @@ struct Renderer::Impl {
     return fresh;
   }
   bool vertex_exact = false;
+  bool vertex_spans_on = true;  // fear_vertex_spans
+  bool vertex_fresh = false;    // fear_vertex_fresh
   // F.E.A.R. (#27): AnalyzeVertexSpans per vertex shader.
   std::unordered_map<const Shader*, VertexSpanInfo> vertex_spans;
   const VertexSpanInfo& VertexSpans(const Shader& shader) {
@@ -3954,7 +3967,8 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
   const Shader::ConstantRegisterMap& vs_constants = vs->constant_register_map();
   // F.E.A.R. (#27): the vertex indices the draw can reach: its guest indices plus the base index,
   // masked and clamped as the translated shader does (no span if they would wrap).
-  const VertexSpanInfo* spans = vertex_exact ? &VertexSpans(*vs) : nullptr;
+  const VertexSpanInfo* spans =
+      (vertex_exact || vertex_fresh) && vertex_spans_on ? &VertexSpans(*vs) : nullptr;
   int span_state = 0;  // 0 not yet, 1 known, 2 none
   uint32_t vertex_lo = 0, vertex_hi = 0;
   auto draw_vertex_range = [&]() -> bool {
@@ -4001,7 +4015,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     while (rex::bit_scan_forward(bits, &bit)) {
       bits &= ~(1u << bit);
       uint32_t fetch_index = word * 32 + bit;
-      if (fetch_resolved_frame[fetch_index] == frame && !vertex_exact) {
+      if (fetch_resolved_frame[fetch_index] == frame && !vertex_exact && !vertex_fresh) {
         continue;
       }
       fetch_resolved_frame[fetch_index] = frame;
@@ -4032,7 +4046,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
             std::min<uint64_t>(uint64_t(vertex_hi) * stride + spans->extent_bytes[fetch_index], bytes);
         const bool recent = known.changed_frame &&
                             frame - known.changed_frame <= kVertexRecentFrames;
-        if (recent && lo < hi && hi - lo < bytes && lo <= kStreamSize / 4) {
+        if ((recent || vertex_fresh) && lo < hi && hi - lo < bytes && lo <= kStreamSize / 4) {
           const uint32_t span_lo = uint32_t(lo), span_bytes = uint32_t(hi - lo);
           const uint8_t* span = source + span_lo;
           const VertexRangeKey span_key = {address + span_lo, span_bytes,
@@ -6019,6 +6033,13 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   ++frame;
   vertex_exact = REXCVAR_GET(fear_vertex_exact);
   vertex_audit = REXCVAR_GET(fear_vertex_audit);
+  if (vertex_spans_on != REXCVAR_GET(fear_vertex_spans) ||
+      vertex_fresh != REXCVAR_GET(fear_vertex_fresh) || frame == 1) {
+    vertex_spans_on = REXCVAR_GET(fear_vertex_spans);
+    vertex_fresh = REXCVAR_GET(fear_vertex_fresh);
+    REXLOG_INFO("[native] vertex reads: exact {}, spans {}, fresh {}", vertex_exact, vertex_spans_on,
+                vertex_fresh);
+  }
   profile_frame = profile_pool && frame % 16 == 0;
   PollCompleted();
   ProfileReport();

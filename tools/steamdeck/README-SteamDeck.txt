@@ -44,6 +44,14 @@ Performance testing
     they give frame pacing, renderer CPU/GPU time per frame and slow frames. Copy them back to
     the PC for a read.
 
+Diagnosis (add to the end of the launch options, one run at a time)
+  - Profiler (where the CPU time goes, in the log every 10 s):
+      --fear_profile true --fear_profile_hz 200
+  - The corrupted particles/hands (#28): no MSAA:          --nx_native_msaa false
+    every draw's vertex data checked exactly:               --fear_vertex_fresh true
+    no partial vertex reads (#27):                          --fear_vertex_spans false
+    The log's "[native] vertex reads:" line confirms the setting took.
+
 If it doesn't start
   - Make sure START IN is the fear folder (the paths in the launch options are relative to it).
   - Try another Proton version.
