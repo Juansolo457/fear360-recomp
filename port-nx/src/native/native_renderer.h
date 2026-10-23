@@ -63,6 +63,10 @@ struct RendererStats {
   uint64_t vertex_exact_bytes = 0;
   uint64_t vertex_stale_midframe = 0;
   uint64_t vertex_stale_missed = 0;
+  // F.E.A.R.: fear_vertex_audit. Vertex/index copies used by draws, and those whose guest data had
+  // changed since the copy was made (drawn stale).
+  uint64_t vertex_audit_uses = 0;
+  uint64_t vertex_audit_stale = 0;
   uint64_t render_passes = 0;
   uint64_t submissions = 0;
   // Renderer CPU time on the ring thread (draws, resolves, swaps), and GPU

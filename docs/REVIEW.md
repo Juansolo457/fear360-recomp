@@ -117,7 +117,16 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   `fear_vertex_exact` (now on by default) every range that has ever changed is read again for
   each draw; the 11-minute 120 fps run counted ~408,000 draws the old check would have drawn
   stale and the tracers were clean. Cost: +1.9 ms renderer CPU a frame (hashing ~8 GB/s of whole
-  ranges). Next: hash only the vertex span each draw uses.
+  ranges).
+- **Made cheaper (same day, not yet built):** the cost came from the rule "re-read every range
+  that has ever changed (or is under 64 KB) on every draw": a range that changed once, such as
+  memory reused at a level load, stayed on per-draw reads for good. Now a range is re-read per
+  draw only while it changed in the last 120 frames (~1 s), or if it is 4 KB or less (a
+  tracer's quad: right from its first rewrite). `fear_vertex_audit` (off) checks the rule: every
+  copy's content is kept when it is made, and each draw that uses a copy compares it with guest
+  memory; the 10-second report gives the draws that used changed data. *To verify:* one run with
+  `--fear_vertex_audit true` (stale count near 0, tracers clean), then renderer CPU per frame
+  without it (expected back near 1 ms).
 - *Where:* `native_renderer.cpp`, `RangeHash` (~line 628) and the fetch-constant resolve
   (~line 3578: `fetch_resolved_frame`, `vertex_hashes`).
 - *How:* a vertex range is hashed (or, once it changes every frame, given a per-frame hash
@@ -150,9 +159,9 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
   particle emission/render/update hooks, fire and impact). Off, each is one call and one
   load from a static; the particle ones run a few thousand times a frame: a few
   microseconds. Could move to a debug manifest section if the codegen ever supports it.
-- **Pipeline cache save** copies the cache (tens of MB) with `vkGetPipelineCacheData` on the
+- **Pipeline cache save** copied the cache (tens of MB) with `vkGetPipelineCacheData` on the
   render thread before handing it to a writer thread: a one-off few-ms hitch after new
-  pipelines settle.
+  pipelines settle. **Changed:** the copy is made on the writer thread (`SaveDriverCache`).
 - **GPU ring waits** spin-yield up to 64 times before sleeping 50 us (`native_system.cpp`,
   WAIT_REG_MEM): keeps a core busy while the GPU idles. Upstream design (fear-nx).
 - **Settings file written in place** (`fear_settings.cpp`, `WriteSettings`): a crash mid-write

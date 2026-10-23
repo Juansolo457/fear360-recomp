@@ -731,6 +731,11 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
                     s.vertex_stale_midframe - reported_render_.vertex_stale_midframe,
                     s.vertex_stale_missed - reported_render_.vertex_stale_missed);
       }
+      if (const uint64_t uses = s.vertex_audit_uses - reported_render_.vertex_audit_uses) {
+        REXLOG_INFO("[native] vertex audit (fear_vertex_audit): {} copies used by draws, {} of "
+                    "them with guest data changed since the copy (drawn stale)",
+                    uses, s.vertex_audit_stale - reported_render_.vertex_audit_stale);
+      }
       REXLOG_INFO("[native] shader translations and pipelines: {} waited for ({:.1f} ms), {} "
                   "draws skipped (over the frame's wait budget)",
                   s.compile_waits - reported_render_.compile_waits,

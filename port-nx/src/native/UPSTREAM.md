@@ -48,8 +48,11 @@ Local changes (see `git log -p -- port-nx/src/native`):
   behind any draw is waiting for. Pipelines too: each one's key is recorded, and at the next
   start created on the pipeline worker once its shaders are translated. See `docs/REVIEW.md`.
 
-- `fear_vertex_exact` (diagnosis, off): vertex and index ranges that have ever changed are read
-  again for every draw (no once-a-frame reuse, no sampled/trusted shortcut), and the 10-second
-  report counts the draws the usual checks would have drawn from old data.
+- `fear_vertex_exact` (on): vertex and index ranges that changed in about the last second, and
+  any of 4 KB or less, are read again for every draw (no once-a-frame reuse, no sampled/trusted
+  shortcut); the 10-second report counts the draws the usual checks would have drawn from old
+  data. Fixes bullet tracers sticking mid-air above ~90 fps. `fear_vertex_audit` (off) compares
+  every copy a draw uses with guest memory.
+- The driver pipeline cache's data is copied out on its writer thread, not the ring thread.
 
 The `*_test.cpp` files are kept for reference but are not built here.

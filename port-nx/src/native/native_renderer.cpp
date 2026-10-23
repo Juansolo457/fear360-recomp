@@ -110,14 +110,20 @@ REXCVAR_DEFINE_UINT32(fear_shader_wait_ms, 100, "F.E.A.R.",
 // F.E.A.R.: vertex data is checked once a frame per range, and a range unchanged for a while is
 // only sampled or trusted (ChangeDetector), so a range the game rewrites after its first draw in a
 // frame, or changes while trusted, was drawn from the old copy: the bullet tracers that twitched
-// and stuck mid-air above ~90 fps. With this, every range that has ever changed (or is small) is
-// read again for each draw, and the 10-second report counts the draws the usual checks would have
-// drawn stale (120 fps play-test: ~408,000 in 11 minutes, up to ~13 a frame in firefights; tracers
-// clean; renderer CPU 0.7 -> 2.5 ms a frame on the ring thread).
+// and stuck mid-air above ~90 fps. With this, a range seen changing in about the last second is
+// read again for each draw (DrawRangeHash), and the 10-second report counts the draws the usual
+// checks would have drawn stale (120 fps play-test: ~408,000 in 11 minutes, up to ~13 a frame in
+// firefights; tracers clean). Re-reading every range that had ever changed cost 2 ms a frame.
 REXCVAR_DEFINE_BOOL(fear_vertex_exact, true, "F.E.A.R.",
-                    "Read vertex and index data that has ever changed again for every draw, so "
-                    "geometry the game rewrites within a frame (bullet tracers) is never drawn "
-                    "stale (costs ~2 ms of renderer CPU a frame)");
+                    "Read vertex and index data that changed in about the last second again for "
+                    "every draw, so geometry the game rewrites within a frame (bullet tracers) is "
+                    "never drawn stale");
+// F.E.A.R.: the check on fear_vertex_exact's rule: every copy's content is kept when it is made,
+// and each draw that uses one compares it with guest memory.
+REXCVAR_DEFINE_BOOL(fear_vertex_audit, false, "F.E.A.R.",
+                    "Compare every vertex and index copy a draw uses with guest memory and report "
+                    "the draws that used data the game had changed since (diagnosis; costs a lot "
+                    "of CPU)");
 REXCVAR_DEFINE_BOOL(fear_shader_prewarm, true, "F.E.A.R.",
                     "Translate the shaders seen in earlier runs in the background at startup "
                     "(kept per title in the cache folder), so new effects don't stall a frame")
@@ -638,10 +644,11 @@ struct Renderer::Impl {
     uint64_t content = 0;
     uint32_t changes = 0;
     ChangeDetector detector;
-    // F.E.A.R. (fear_vertex_exact): seen changing at least once; this frame's hash is unique to
-    // the frame rather than the content's; the content at its last exact read.
+    // F.E.A.R. (fear_vertex_exact): checked before; the frame it was last seen changing (0:
+    // never); this frame's hash is unique to the frame rather than the content's; the content
+    // at its last exact read.
     bool checked = false;
-    bool dynamic = false;
+    uint64_t changed_frame = 0;
     bool unique = false;
     uint64_t exact = 0;
   };
@@ -661,7 +668,7 @@ struct Renderer::Impl {
     }
     known.unique = false;
     uint64_t content = known.detector.Check(data, bytes, frame, address >> 4, vertex_hash_bytes);
-    if (known.checked && content != known.content) known.dynamic = true;
+    if (known.checked && content != known.content) known.changed_frame = frame;
     known.checked = true;
     known.changes = content != known.content ? std::min(known.changes + 1, 8u) : 0;
     known.content = content;
@@ -670,13 +677,21 @@ struct Renderer::Impl {
   }
   uint64_t vertex_hash_bytes = 0;
   FlatMap64<VertexHash> vertex_hashes;
-  // F.E.A.R.: RangeHash, then with fear_vertex_exact the content as it is now for a range that has
-  // ever changed (or is small), counting the draws the usual hash would have drawn stale.
+  // F.E.A.R.: RangeHash, then with fear_vertex_exact the content as it is now for a range seen
+  // changing in the last kVertexRecentFrames (the game rewrites those within a frame: tracers,
+  // particles), counting the draws the usual hash would have drawn stale. A range that changed
+  // once and settled (memory reused when a level loads) goes back to the once-a-frame check: kept
+  // on per-draw reads for good, those were most of the 2 ms a frame the reads first cost.
+  // Small ranges (a tracer's quad) are read for every draw anyway: a few KB cost well under a
+  // microsecond, and a range is then right from its first rewrite.
+  static constexpr uint64_t kVertexRecentFrames = 120;
+  static constexpr uint32_t kVertexAlwaysBytes = 4096;
   uint64_t DrawRangeHash(VertexHash& known, const uint8_t* data, uint32_t bytes,
                          uint32_t address) {
     const bool first_this_frame = known.frame != frame;
     const uint64_t hash = RangeHash(known, data, bytes, address);
-    if (!vertex_exact || !(known.dynamic || bytes <= 65536)) {
+    const bool recent = known.changed_frame && frame - known.changed_frame <= kVertexRecentFrames;
+    if (!vertex_exact || !(recent || bytes <= kVertexAlwaysBytes)) {
       return hash;
     }
     const uint64_t fresh = XXH3_64bits(data, bytes);
@@ -688,10 +703,22 @@ struct Renderer::Impl {
     } else if (fresh != known.exact) {
       ++stats().vertex_stale_midframe;
     }
+    if (fresh != known.exact) known.changed_frame = frame;
     known.exact = fresh;
     return fresh;
   }
   bool vertex_exact = false;
+  // F.E.A.R. (fear_vertex_audit): each copy's content when it was made, by stream position.
+  FlatMap64<uint64_t> audit_content;
+  bool vertex_audit = false;
+  void AuditCopy(uint64_t position, const uint8_t* data, uint32_t bytes) {
+    audit_content[position] = XXH3_64bits(data, bytes);
+  }
+  void AuditUse(uint64_t position, const uint8_t* data, uint32_t bytes) {
+    ++stats().vertex_audit_uses;
+    const uint64_t* content = audit_content.find(position);
+    if (content && *content != XXH3_64bits(data, bytes)) ++stats().vertex_audit_stale;
+  }
 
   // Swap.
   VkDescriptorSetLayout swap_layout_ramp = VK_NULL_HANDLE;
@@ -3662,8 +3689,10 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
     // copy while the guest data is the same (checked once per frame).
     bool reused = false;
     VertexRangeKey index_key = {};
+    uint32_t index_guest_bytes = 0;
     if (dma_base && !convert_fan && !convert_loop) {
       uint32_t bytes = guest_count * (index32 ? 4 : 2);
+      index_guest_bytes = bytes;
       VertexHash& known = vertex_hashes[(uint64_t(dma_base) << 32) | bytes];
       const uint64_t index_hash = DrawRangeHash(known, guest_indices, bytes, dma_base);
       // The conversion also depends on the byte order and the reset index.
@@ -3675,6 +3704,7 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
         index_offset = VkDeviceSize(found % kStreamSize);
         current().stream_oldest = std::min(current().stream_oldest, found);
         reused = true;
+        if (vertex_audit) AuditUse(found, guest_indices, bytes);
       }
     }
     if (!reused) {
@@ -3684,6 +3714,10 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       }
       if (index_key.address) {
         AddRange(index_key, stream_head - VkDeviceSize(draw_count) * index_size);
+        if (vertex_audit) {
+          AuditCopy(stream_head - VkDeviceSize(draw_count) * index_size, guest_indices,
+                    index_guest_bytes);
+        }
       }
       uint32_t host_reset = index_size == 4 ? 0xFFFFFFFFu : 0xFFFFu;
       auto put = [&](uint32_t i, uint32_t v) {
@@ -3776,18 +3810,23 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       if (found != UINT64_MAX && stream_head - found < kStreamSize / 2) {
         range_offset = VkDeviceSize(found % kStreamSize);
         current().stream_oldest = std::min(current().stream_oldest, found);
+        if (vertex_audit) AuditUse(found, source, bytes);
       } else {
         uint8_t* out = Allocate(bytes, 16, range_offset);
         if (!out) continue;
         std::memcpy(out, source, bytes);
         stats().vertex_bytes_copied += bytes;
         AddRange(range_key, stream_head - bytes);
+        if (vertex_audit) AuditCopy(stream_head - bytes, source, bytes);
       }
       dword0 = (guest_dword0 & 0x3) | uint32_t(range_offset);
     }
   }
   if (vertex_ranges.size() > 65536) {
     vertex_ranges.clear();
+  }
+  if (audit_content.size() > 65536) {
+    audit_content.clear();
   }
   if (vertex_hashes.size() > 65536) {
     vertex_hashes.clear();
@@ -5721,6 +5760,7 @@ void Renderer::Impl::Swap(rex::ui::Presenter* presenter, uint32_t frontbuffer, u
   trace_frame_draw = 0;
   ++frame;
   vertex_exact = REXCVAR_GET(fear_vertex_exact);
+  vertex_audit = REXCVAR_GET(fear_vertex_audit);
   profile_frame = profile_pool && frame % 16 == 0;
   PollCompleted();
   ProfileReport();
@@ -5818,24 +5858,30 @@ void Renderer::InitializeDriverCache(const std::filesystem::path& cache_root,
 
 void Renderer::Impl::SaveDriverCache() {
   pipelines_at_last_save = stats().pipelines_created;
-  size_t size = 0;
-  if (dfn().vkGetPipelineCacheData(vk, driver_cache, &size, nullptr) != VK_SUCCESS ||
-      size < 32 || size == driver_cache_saved_size) {
-    return;
-  }
-  auto data = std::make_shared<std::vector<uint8_t>>(size);
-  if (dfn().vkGetPipelineCacheData(vk, driver_cache, &size, data->data()) != VK_SUCCESS) {
-    return;
-  }
-  data->resize(size);
-  driver_cache_saved_size = size;
   driver_cache_writing = true;
   std::filesystem::path path = driver_cache_path;
   // Joined, never detached: detaching throws on Horizon, which ended the game.
   if (driver_cache_writer.joinable()) {
     driver_cache_writer.join();
   }
-  driver_cache_writer = std::thread([this, data, path]() {
+  // F.E.A.R.: the cache's data is copied out on the writer thread too: tens of MB, a few ms of
+  // the ring thread's frame once new pipelines settled. Pipeline caches are internally
+  // synchronized, so the pipeline worker goes on using it meanwhile (as it did before). One save
+  // at a time (joined above), so driver_cache_saved_size is the writer's alone.
+  driver_cache_writer = std::thread([this, path]() {
+    size_t size = 0;
+    if (dfn().vkGetPipelineCacheData(vk, driver_cache, &size, nullptr) != VK_SUCCESS ||
+        size < 32 || size == driver_cache_saved_size) {
+      driver_cache_writing = false;
+      return;
+    }
+    auto data = std::make_shared<std::vector<uint8_t>>(size);
+    if (dfn().vkGetPipelineCacheData(vk, driver_cache, &size, data->data()) != VK_SUCCESS) {
+      driver_cache_writing = false;
+      return;
+    }
+    data->resize(size);
+    driver_cache_saved_size = size;
     auto temporary = path;
     temporary += ".tmp";
     if (FILE* file = rex::filesystem::OpenFile(temporary, "wb")) {
