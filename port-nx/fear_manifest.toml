@@ -13,7 +13,7 @@ includes = []
 
 # The translator's register options (#34, docs/HANDOFF-REGOPTS.md): these registers become each
 # generated function's C++ locals instead of fields of the shared context, so the host compiler
-# can keep them in host registers. Needs the SDK's patches 0007-0010. skip_msr stays off: it drops
+# can keep them in host registers. Needs the SDK's patches 0007-0012. skip_msr stays off: it drops
 # the global lock that the 202 mtmsrd sites take.
 skip_lr = true
 ctr_as_local = true
@@ -114,6 +114,15 @@ longjmp_address = 0x82BBA200
 # mtlr r3; blrl): under the register options it keeps r12 and the non-volatiles in the context,
 # as the funclets themselves do.
 0x82BC0B70 = { share_registers = true }
+# Havok's constraint solver (sub_828F0DA0, sub_828F2840, sub_828F4FC8, sub_828F7018) computes a
+# constant into v92 and calls sub_828F0790, whose three callees read v92 without ever writing
+# it (docs/HANDOFF-REGOPTS.md, review finding 2). These four keep every register in the context
+# so the value reaches them; the solver hands its v92 over at the call (SDK patch 0012) and the
+# save/restore helpers they call work through the context (patch 0011).
+0x828F0790 = { share_registers = true }
+0x828FD958 = { share_registers = true }
+0x828FE008 = { share_registers = true }
+0x828FE588 = { share_registers = true }
 
 # F.E.A.R.: model animations step by the exact time that passed, not whole milliseconds a frame
 # (src/anim_timing.h). Each hook runs just before the fctidz that drops the fraction.

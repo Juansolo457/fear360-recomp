@@ -131,6 +131,8 @@ def gpr_defs_uses(op, args):
     if op in ('stmw', 'lmw'):
         return defs, uses
     dest, srcs = regs[0], regs[1:]
+    if op in ('xor', 'subf', 'sub') and len(regs) == 3 and regs[1] == regs[2]:
+        return {dest}, set()  # xor r30,r30,r30: the zeroing idiom reads nothing
     # Read-modify-write: inserts, multiply-adds into the target, update forms read the base.
     if op.startswith(('rlwimi', 'rldimi', 'vperm128', 'vmaddfp128', 'vnmsubfp128')) or \
             op.startswith('vrlimi'):
@@ -143,10 +145,11 @@ def gpr_defs_uses(op, args):
 
 
 def is_frame_save(op, args):
-    """std r31,-8(r1), stfd f31,-16(r1), stvx v127,r11,r1: a non-volatile saved into the frame."""
+    """std r31,-8(r1), stfd f31,-16(r1), stvx v127,r11,r1, stvlx128 v64,r1,r6: a non-volatile
+    saved into the frame."""
     if not op.startswith('st') or not args:
         return False
-    return args[0] in NONVOL and args[-1] in ('r1', 'r12', 'r11') and op != 'stwu'
+    return args[0] in NONVOL and op != 'stwu' and         (args[-1] in ('r1', 'r12', 'r11') or (len(args) == 3 and args[1] == 'r1'))
 
 
 def analyse(name, body):

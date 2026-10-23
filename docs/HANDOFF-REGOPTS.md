@@ -11,9 +11,9 @@ first ranked), issue #34.
 ## What's proposed (branch `register-options`)
 | Where | What |
 |---|---|
-| `port-nx/fear_manifest.toml`, `port-files/fear_manifest.toml` | Seven options on (`skip_lr`, `ctr_as_local`, `xer_as_local`, `reserved_as_local`, `cr_as_local`, `non_argument_as_local`, `non_volatile_as_local`), `skip_msr` left off; `setjmp_address`/`longjmp_address`; `share_registers` on the C runtime's `_CallSettingFrame`; the two menu hooks take more registers |
+| `port-nx/fear_manifest.toml`, `port-files/fear_manifest.toml` | Seven options on (`skip_lr`, `ctr_as_local`, `xer_as_local`, `reserved_as_local`, `cr_as_local`, `non_argument_as_local`, `non_volatile_as_local`), `skip_msr` left off; `setjmp_address`/`longjmp_address`; `share_registers` on the C runtime's `_CallSettingFrame`, on Havok's v92 chain and (Files) on six split-off `__finally` blocks (section 6); the two menu hooks take more registers |
 | `port-nx/src/fear_menu.cpp`, `fear_menu.h` | The menu hooks take r1 and r23-r29 as arguments instead of reading them from the thread's context |
-| `patches/rexglue-sdk-nx/0007-0010` | Four translator fixes. They are also commits on the SDK branch `register-options` in `third_party/rexglue-sdk-nx`; the SDK checkout itself is back at master's `b29317c`. Each one changes the output only when its option is on, so master's translation is unchanged |
+| `patches/rexglue-sdk-nx/0007-0012` | Six translator fixes (0011 and 0012 from the review, section 6). They are also commits on the SDK branch `register-options` in `third_party/rexglue-sdk-nx` (`3dcdcd3`, then `047c9f7`, `e42a98c`); the SDK checkout itself is back at master's `b29317c`. Each one changes the output only when its option is on, so master's translation is unchanged |
 | `tools/analysis/regflow.py` | The scan in section 3 |
 
 Addresses (both games' executables, from disassembly):
@@ -196,3 +196,135 @@ again because the manifest changed.
    in the worst case, though a function has few `mtlr`. Fine?
 5. Anything else that reads the context's registers from host code, or depends on a register
    crossing a call outside the ABI, that the scan can't see (indirect calls, jump tables)?
+
+## 6. Review (2026-10-23, second pass, nothing built)
+Checked against the code, today's translations (`port-nx/generated/default`,
+`port-files/generated/default`) and a fresh scratch run of master's translator (`b29317c`,
+`rexgluerd.exe codegen`, 2:00 and 2:17) on the branch's manifests. Two findings are blockers for
+`non_volatile_as_local` and are fixed on the branch; the rest are answers and smaller corrections.
+The checks below are small Python over the generated code (classify a function as
+`share_registers` by `ctx.r14`-`ctx.r31` **with a field access**, since a localized function's
+hand-off lines also mention `ctx.r31`; walk `sub_X(ctx, base)` calls for the call graph).
+
+### 6.1 Havok passes a constant in v92 (question 2): real, fixed
+`sub_828FD958`, `sub_828FE008` and `sub_828FE588` read v92 and never write it. Every call path
+into them runs through `sub_828F0790`, whose only callers are the four big solver functions
+`sub_828F0DA0`, `sub_828F2840`, `sub_828F4FC8` and `sub_828F7018` (1,700-2,550 instructions
+each). Each of those **computes** v92 before the call, with the same idiom:
+`vspltisw v0,1; vspltisw128 v94,0; vcuxwfp128 v93,v0,0; vor128 v0,v93,v93; vsubfp128 v0,v94,v0;
+vrlimi128 v0,v93,1,0; vor128 v92,v0,v0` (v93 = 1.0, v94 = 0, v92 a lane mask of +-1). No other
+function in the image writes v92 except the `__savevmx` helpers and `sub_828ED5E8` (the
+unreferenced fragment routine below, which sets v92-v94 the same way). So on the 360 the three
+callees always see the solver's constant through the callee-saved register, and with the option on
+they read 0: the dot products `vmsum4fp128 v12,v92,v12` (stored with `stvewx`) go wrong in the
+constraint solver. Files: the same with `sub_828E6D88` and its callees `sub_828F3F50`,
+`sub_828F4600` (writers `sub_828E3BE0`, `sub_828E7398`, `sub_828E8E38`, `sub_828EB5C0`).
+
+Not a decode problem: v92 is the 8th most common `vA` of `vmsum4fp128` image-wide (73 sites) and
+never appears as an operand of `vmsum3fp128` or `vmulfp128`; the other 70 sites are inside the
+writers. The three readers also leave v88/v91 (v86/v89 too in two of them) loaded but unread: the
+usual sign of code compiled as one unit and split by the compiler's outlining, not of a bad field.
+
+**Fix:** `sub_828F0790` and the three readers are `share_registers` in the manifest (Files: its
+three), so they keep every register in the context, and two translator changes make that work:
+- **Patch 0012:** the hand-off at a call into a `share_registers` function copies **every**
+  non-volatile (r14-r31, f14-f31, v14-v31, v64-v127) into the context and takes them all back,
+  instead of the r14-r31 referenced earlier in the caller. That also answers question 1 (yes:
+  a register first written at a higher address is live at the call through a loop, and a funclet
+  may write one the owner reads later). 118 copies each way, at 49 sites in F.E.A.R. and 50 in
+  Files, all `bl` (Files: plus the six conditional branches of 6.3).
+- **Patch 0011:** see 6.2. Without it the four functions' prologues (`bl __savegprlr_N`,
+  `__savevmx_N`) would be dropped and their callers would take back changed non-volatiles.
+
+### 6.2 A `share_registers` function's save/restore helpers were dropped: fixed
+Under `non_volatile_as_local` the translator dropped every call to `__savegprlr_N`,
+`__restgprlr_N` and the fpr/vmx helpers, whatever the caller, and emitted the helper bodies with
+locals of their own. For a localized caller that is right. A `share_registers` function keeps its
+non-volatiles in the context, so without its prologue and epilogue it returned with r14-r31
+changed, and its localized caller took those back. In today's images no SEH funclet uses the
+helpers (F.E.A.R.: 0 of the 92 share functions; Files: 13 of 122 end in `b __restgprlr_N`, but
+all 13 are unwind-entry copies with no callers), so this only bit the functions marked in the
+manifest: the v92 chain (6.1), whose members all start with `mflr r12; bl __savegprlr_N`.
+**Patch 0011:** the helper nodes share registers, so their bodies save and restore the context's
+registers, and a call to them is dropped only in a function whose non-volatiles are locals.
+
+### 6.3 Files: six split-off `__finally` blocks, not three, and the translator does not mark them
+Section 3 says the translator marks `sub_821A989C`, `sub_82893D88` and `sub_8288CB54`
+`share_registers`. The scratch run says otherwise: all three come out **localized**
+(`PPCRegister r31{}` declared, `lwz r3,88(r31)` and `addi r1,r31,160` on a zero r31), and so do
+three more of the same shape found by the scan: `sub_82876988`, `sub_82891440`, `sub_82B983F0`
+(`mr r8,r8; addi r12,r31,N; bl funclet; ...; b __restgprlr_N`, each reached once by a conditional
+branch, e.g. `cmplwi cr6,r27,64; bge cr6,0x821a989c`: a loop's exit, an ordinary path, not an
+exception). All six were already in Files' manifest as plain tail-call targets (`= {}`, from the
+first translation), which is why they are functions at all and why the funclet sweep, which only
+covers a funclet's own extent, never marks them. **Fix:** those six entries are now `share_registers`; with patch 0010
+the owner hands its registers over at the branch, and with patch 0011 their `b __restgprlr_N`
+restores the context from the owner's frame (harmless either way: nothing is taken back after a
+tail call). F.E.A.R. has none: its only entry-reads without a frame are setjmp, the v92 readers,
+the fragments and `sub_82BC0D34` (dead `r28`, no callers).
+
+### 6.4 Answers to section 5
+1. **Copy all 18:** done, and f/v too (patch 0012, above).
+2. **v92:** real, a solver constant passed through a callee-saved register (6.1).
+3. **`skip_lr`:** keep it. Host code that reads `ctx.lr`: the function dispatcher's return
+   sentinel (`0xBCBCBCBC`, nothing checks it), `xboxkrnl_modules.cpp`'s caller address in a log
+   line, and the Switch-only crash report, thread dump and perf overlay (`exception_handler_switch`,
+   `threading_switch`, `switch_perf`), plus `XThread::Save`. On Windows and Linux nothing
+   functional reads it, and a host backtrace already names the generated functions.
+4. **Patch 0008's scan:** fine. 27,554 `mtlr r12` + 10 others in F.E.A.R., each scanning its own
+   function once: a few million word reads in a two-minute run. The pointer arithmetic is valid
+   (`data` is the section's memory, a function never spans sections, `fn.end()` exists).
+5. **Other readers of the context, blind spots:** none in host code. `port-nx/src` reads no
+   register beyond the hook arguments (grep of `ctx`/`ctx->` for r0, r2, r11-r12, r14-r31, lr,
+   ctr, xer, cr, f0, v32-v63 is empty; `fear_menu.cpp` is the only user of
+   `current_ppc_context`). Every other midasm hook takes `PPCRegister&` and so gets the local
+   (the anim hooks write `f0` through it: still right). The SDK runtime reads r0, r2, r11, r12,
+   ctr, cr, xer only in `XThread::Save/Restore` (save states, unused) and the POSIX fault
+   handler (host registers, unrelated). `generate_exception_handlers` is off, so the generated
+   SEH catch-all (which reads `ctx.r31`) is never emitted. Indirect calls and jump tables need
+   nothing extra: the scan is per callee, and a `bctr` table entry outside the function is
+   emitted as a call. Blind spots that remain: the scan's instruction model (two false positives
+   fixed below; read-modify-write VMX128 forms it does not list, such as `vmaddcfp128`, would
+   show up as reads of a destination, i.e. more findings, not fewer), and code reached only by
+   computed addresses (6.5).
+
+### 6.5 Other checks and corrections
+- **Section 3's counts** of functions that keep r14-r31 in the context (157 / 191) are inflated:
+  the check matched the hand-off lines (`ctx.r31 = r31;`) of localized callers. Real: **92 / 122**
+  (85 / 95 r12-funclets, `_CallSettingFrame`, and swept pieces), called from localized functions at
+  49 / 50 sites, every one with a hand-off.
+- **The unreferenced fragments** `sub_828ED650`-`sub_828EEDC8` start at `sub_828ED5E8`, the
+  constants setup (v92-v94, no prologue, no callers), i.e. one hand-written VMX routine the
+  analyser cut at its branch targets. If anything reaches it (a computed address the image scan
+  cannot see), every fragment loses the v78-v94 it inherits from the previous one. A cheap
+  precaution would be `share_registers` on all 33 (Files: 46, `sub_828E3C48`-`sub_828E4D28`);
+  not done, since nothing shows it is reached. Watch for a physics crash with these addresses.
+- **`regflow.py` false positives fixed:** `xor r30,r30,r30` (the zeroing idiom reads nothing) and
+  `stvlx128 v64,r1,r6` (a frame save with r1 as the first operand). They accounted for Files'
+  `sub_821A8464`, `sub_821A8930`, `sub_821A8CC0`.
+- **Reads before writes in framed functions** (28 / 39, "nonvol, own frame"): uninitialized
+  variables (`mr r23,r26` and the like). On the 360 they read whatever was left; now 0. Neither is
+  defined behaviour; accepted.
+- **setjmp:** the 360's `jmp_buf` holds no VMX registers (neither game's `setjmp` has a vector
+  store), so the guest cannot rely on v14-v31 across a longjmp and patch 0009 is complete. `setjmp`
+  stores 0 at offset 312 (the frame field `longjmp` tests), so the guest `longjmp` never unwinds and
+  a plain host `longjmp` matches it. The host side: the recomp sources are built with `/EHa`
+  (`generated/rexglue.cmake`), the generated frames hold only trivial locals; the MSVC CRT's
+  `longjmp` unwinds only when its own `_setjmpex` recorded a frame. Unverified until built.
+- **Already broken today, not new:** `mtlr r5; blr` at the end of the guest `longjmp` and
+  `mtlr r3; blr` in the CRT's context restore are plain returns in every translation.
+- **`__chkstk`** with r12 = 0: `neg; addi 4095; srawi. 12` gives 0 and `blelr` returns. Harmless,
+  as stated.
+- **No second copy of the save/restore helpers** in either image (searched for their store
+  patterns): the elision covers every call.
+- **Menu hooks:** the scratch run emits `FearMenuAddItems(ctx.r1, r23, ..., r30)` and
+  `FearMenuShowItems(ctx.r1, r31)`; the `static_assert` holds for both layouts; the owner's
+  locals are untouched by the guest calls the hook makes.
+- **Patches 0007-0010** read correctly (fmt strings, const-ness, `byte_swap` in namespace
+  `rex`); none has been compiled, nor have 0011-0012.
+
+### 6.6 What changed on the branch in this pass
+`patches/rexglue-sdk-nx/0011`, `0012` (SDK branch `register-options` at `e42a98c`, made in a
+temporary worktree; the checkout is still `b29317c`); `share_registers` entries in both manifests
+(6.1, 6.3); `tools/analysis/regflow.py` (6.5); this section. The stage plan (section 4) stands,
+with patches 0011-0012 and the new manifest entries belonging to stage B.

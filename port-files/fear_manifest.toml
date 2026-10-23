@@ -35,7 +35,6 @@ longjmp_address = 0x82B94EC0
 # Method- and callback-table entries the analyser missed (tools/find_missed_functions.py over the
 # loaded image, 2026-10-22).
 0x821A4880 = {}
-0x821A989C = {}
 0x821A98AC = {}
 0x821AB3E8 = {}
 0x821ACAE8 = {}
@@ -67,17 +66,13 @@ longjmp_address = 0x82B94EC0
 0x824E49F0 = {}
 0x825598E0 = {}
 0x825F4788 = {}
-0x82876988 = {}
 0x828792C0 = {}
 0x8287982C = {}
 0x82880110 = {}
-0x8288CB54 = {}
-0x82891440 = {}
 0x82891598 = {}
 0x82891E94 = {}
 0x82891FD4 = {}
 0x8289287C = {}
-0x82893D88 = {}
 0x829BB698 = {}
 0x829FAC90 = {}
 0x829FB3B0 = {}
@@ -111,7 +106,6 @@ longjmp_address = 0x82B94EC0
 0x82A9E578 = {}
 0x82AA0E18 = {}
 0x82AC8190 = {}
-0x82B983F0 = {}
 0x82BF0598 = {}
 0x82C4CAE0 = {}
 0x82C4CAF0 = {}
@@ -163,6 +157,23 @@ longjmp_address = 0x82B94EC0
 0x82C4D4C8 = {}
 # The C runtime's _CallSettingFrame (port-nx's manifest has why).
 0x828A0000 = { share_registers = true }
+# Havok's constraint solver passes a constant in v92 to sub_828E6D88's two callees
+# (port-nx's manifest has why; this build's addresses).
+0x828E6D88 = { share_registers = true }
+0x828F3F50 = { share_registers = true }
+0x828F4600 = { share_registers = true }
+# Inline __finally blocks that their owner reaches by a conditional branch (bge cr6,block)
+# and that go on using the owner's r31 (mr r8,r8; addi r12,r31,N; bl funclet; ...;
+# b __restgprlr_N). They were already entries here (tail-call targets from the first
+# translation), which is why the funclet sweep never marks them; with the register options they
+# would read r31 as 0 on an ordinary path (a loop's exit).
+# The owner hands its registers over at the branch (SDK patch 0010). None in F.E.A.R.
+0x821A989C = { share_registers = true }
+0x82876988 = { share_registers = true }
+0x8288CB54 = { share_registers = true }
+0x82891440 = { share_registers = true }
+0x82893D88 = { share_registers = true }
+0x82B983F0 = { share_registers = true }
 
 # Model animations step by the exact time that passed (port-nx/src/anim_timing.h); the
 # addresses are this build's, found by tools/find_anim_sites.py.

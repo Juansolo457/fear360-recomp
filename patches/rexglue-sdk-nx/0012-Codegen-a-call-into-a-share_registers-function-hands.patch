@@ -1,0 +1,95 @@
+From e42a98c169b2b927b01947c8ceee2922ca6ae675 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 12:17:06 -0700
+Subject: [PATCH 12/12] Codegen: a call into a share_registers function hands
+ over every non-volatile
+
+The hand-off at a call from a localized function into a share_registers
+one copied only the r14-r31 already referenced earlier in the caller, and
+took the same set back. A register first written at a higher address can
+be live at the call through a loop, a funclet may write one the owner reads
+later, and a function marked share_registers in the manifest may take a
+value in any non-volatile: F.E.A.R.'s Havok solver computes a constant into
+v92 and its callees read it without writing it. Every r14-r31, f14-f31,
+v14-v31 and v64-v127 now goes over and comes back. Only at calls into
+share_registers functions (F.E.A.R.: 49), unchanged without the options.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ src/codegen/builders/context.cpp | 45 +++++++++++++++++++++++---------
+ 1 file changed, 33 insertions(+), 12 deletions(-)
+
+diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
+index 5d7cf2c..2b8ca27 100644
+--- a/src/codegen/builders/context.cpp
++++ b/src/codegen/builders/context.cpp
+@@ -28,22 +28,46 @@ static constexpr uint32_t kEieioEncoding = 0xAC06007C;
+ 
+ // An SEH funclet runs on its owner's frame and reads whatever non-volatiles the owner
+ // left live, so a call to one hands it the localized copies through ctx (and takes them
+-// back afterwards). Only registers already localized here can be live at this point, so
+-// that set is the whole live-in the funclet can see. The frame itself comes in r12
+-// (addi r12,r31,N just before the bl). The owner also reaches a split-off inline
+-// __finally block by a conditional tail call (bge cr6,block), which needs the same.
++// back afterwards). Every non-volatile goes over, not only those referenced earlier in
++// the function: a register first written at a higher address can be live at the call
++// through a loop, the funclet may write one the owner reads later, and a function marked
++// share_registers in the manifest may take a value in any of them (F.E.A.R.'s Havok
++// solver passes a constant in v92). The frame itself comes in r12 (addi r12,r31,N just
++// before the bl). The owner also reaches a split-off inline __finally block by a
++// conditional tail call (bge cr6,block), which needs the same.
+ static bool HandsRegistersTo(const BuilderContext& ctx, const FunctionNode& target) {
+   return target.sharesRegisters() && (ctx.localizeNonVolatiles() ||
+                                       ctx.config().nonArgumentRegistersAsLocalVariables);
+ }
+ 
++template <class Emit>
++static void ForEachNonVolatile(BuilderContext& ctx, Emit emit) {
++  for (size_t i = 14; i < 32; ++i)
++    emit(fmt::format("r{}", i), ctx.r(i));
++  for (size_t i = 14; i < 32; ++i)
++    emit(fmt::format("f{}", i), ctx.f(i));
++  for (size_t i = 14; i < 32; ++i)
++    emit(fmt::format("v{}", i), ctx.v(i));
++  for (size_t i = 64; i < 128; ++i)
++    emit(fmt::format("v{}", i), ctx.v(i));
++}
++
+ static void HandRegistersOver(BuilderContext& ctx, const char* indent) {
+   if (ctx.config().nonArgumentRegistersAsLocalVariables && !ctx.fn.sharesRegisters())
+     ctx.println("{}ctx.r12 = {};", indent, ctx.r(12));
+-  for (size_t i = 14; i < 32; ++i) {
+-    if (ctx.locals.r[i])
+-      ctx.println("{}ctx.r{} = r{};", indent, i, i);
+-  }
++  if (!ctx.localizeNonVolatiles())
++    return;
++  ForEachNonVolatile(ctx, [&](const std::string& field, const std::string& local) {
++    ctx.println("{}ctx.{} = {};", indent, field, local);
++  });
++}
++
++static void TakeRegistersBack(BuilderContext& ctx, const char* indent) {
++  if (!ctx.localizeNonVolatiles())
++    return;
++  ForEachNonVolatile(ctx, [&](const std::string& field, const std::string& local) {
++    ctx.println("{}{} = ctx.{};", indent, local, field);
++  });
+ }
+ 
+ //=============================================================================
+@@ -267,10 +291,7 @@ void BuilderContext::emit_function_call(uint32_t address) {
+         HandRegistersOver(*this, "\t");
+         emitCtx.reference(name);
+         println("\t{}(ctx, base);", name);
+-        for (size_t i = 14; i < 32; ++i) {
+-          if (locals.r[i])
+-            println("\tr{} = ctx.r{};", i, i);
+-        }
++        TakeRegistersBack(*this, "\t");
+         return;
+       }
+ 
+-- 
+2.53.0.windows.1
+

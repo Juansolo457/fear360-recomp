@@ -1,0 +1,101 @@
+From 047c9f78ef09c1f81aaa66177960915441fde576 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 12:16:26 -0700
+Subject: [PATCH 11/12] Codegen: the save/restore helpers share registers; only
+ a localized caller drops them
+
+Under non_volatile_as_local every call to __savegprlr_N, __restgprlr_N and
+the fpr/vmx helpers was dropped, whatever the caller, and the helper bodies
+were emitted with locals of their own. A share_registers function (an SEH
+funclet, or one marked in the manifest) keeps its non-volatiles in ctx, so
+with its prologue and epilogue gone it returned with ctx's r14-r31 changed,
+and its localized caller took those back after the call.
+
+The helper nodes now share registers too, so their bodies save and restore
+ctx's registers, and a call to them is dropped only in a function whose
+non-volatiles are locals. Unchanged without the option.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ src/codegen/builders/context.cpp | 13 +++++++------
+ src/codegen/phase_register.cpp   | 20 +++++++++++++-------
+ 2 files changed, 20 insertions(+), 13 deletions(-)
+
+diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
+index 6345456..5d7cf2c 100644
+--- a/src/codegen/builders/context.cpp
++++ b/src/codegen/builders/context.cpp
+@@ -252,12 +252,13 @@ void BuilderContext::emit_function_call(uint32_t address) {
+       auto* targetFn = target->asFunction();
+       const auto& name = targetFn->name();
+ 
+-      // Handle save/restore helpers. Gated on the global setting, not this
+-      // function's: the helper bodies are emitted under it too, so once they
+-      // spill to locals they are no-ops that scribble zeros on the caller's
+-      // frame. A share_registers function still has to elide them.
+-      if (cfg.nonVolatileRegistersAsLocalVariables &&
+-          (name.find("__rest") == 0 || name.find("__save") == 0)) {
++      // The save/restore helpers: a function whose non-volatiles are locals
++      // has nothing to save or restore, so its calls to them are dropped. A
++      // share_registers function keeps its non-volatiles in ctx, and the helper
++      // bodies share registers too (phase_register), so its calls stay: without
++      // them it would return with ctx's r14-r31 changed, and a localized caller
++      // takes those back after the call.
++      if (localizeNonVolatiles() && (name.find("__rest") == 0 || name.find("__save") == 0)) {
+         // print nothing - these are handled by local variable tracking
+         return;
+       }
+diff --git a/src/codegen/phase_register.cpp b/src/codegen/phase_register.cpp
+index 7d1fa44..4374999 100644
+--- a/src/codegen/phase_register.cpp
++++ b/src/codegen/phase_register.cpp
+@@ -507,7 +507,16 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+         importCount, resolvedCount, unresolvedCount, variableCount);
+   }
+ 
+-  // Register save/restore helpers
++  // Register save/restore helpers. They share registers: under non_volatile_as_local a
++  // localized function elides its calls to them, and a share_registers function (an SEH
++  // funclet, or one marked in the manifest) keeps its non-volatiles in ctx, so the helper
++  // bodies have to save and restore ctx's, not locals of their own.
++  auto addHelper = [&](uint32_t addr, uint32_t size, std::string name) {
++    auto* node = graph.addFunction(addr, size, FunctionAuthority::HELPER, true);
++    if (node)
++      node->setSharesRegisters(true);
++    graph.setFunctionName(addr, std::move(name));
++  };
+   auto registerHelpers = [&](uint32_t base14, const char* prefix, size_t stride, size_t endReg,
+                              size_t extraSize) {
+     if (base14 == 0)
+@@ -515,8 +524,7 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+     for (size_t i = 14; i <= endReg; i++) {
+       uint32_t addr = base14 + static_cast<uint32_t>((i - 14) * stride);
+       uint32_t size = static_cast<uint32_t>((endReg + 1 - i) * stride + extraSize);
+-      graph.addFunction(addr, size, FunctionAuthority::HELPER, true);
+-      graph.setFunctionName(addr, fmt::format("{}{}", prefix, i));
++      addHelper(addr, size, fmt::format("{}{}", prefix, i));
+     }
+   };
+ 
+@@ -532,16 +540,14 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+     for (size_t i = 64; i < 128; i++) {
+       uint32_t addr = state.restVmx64Address + static_cast<uint32_t>((i - 64) * 8);
+       uint32_t size = static_cast<uint32_t>((128 - i) * 8 + 4);
+-      graph.addFunction(addr, size, FunctionAuthority::HELPER, true);
+-      graph.setFunctionName(addr, fmt::format("__restvmx_{}", i));
++      addHelper(addr, size, fmt::format("__restvmx_{}", i));
+     }
+   }
+   if (state.saveVmx64Address != 0) {
+     for (size_t i = 64; i < 128; i++) {
+       uint32_t addr = state.saveVmx64Address + static_cast<uint32_t>((i - 64) * 8);
+       uint32_t size = static_cast<uint32_t>((128 - i) * 8 + 4);
+-      graph.addFunction(addr, size, FunctionAuthority::HELPER, true);
+-      graph.setFunctionName(addr, fmt::format("__savevmx_{}", i));
++      addHelper(addr, size, fmt::format("__savevmx_{}", i));
+     }
+   }
+ 
+-- 
+2.53.0.windows.1
+
