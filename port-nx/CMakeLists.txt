@@ -66,6 +66,7 @@ set(FEAR_SOURCES
     src/fear_settings.cpp
     src/fx_debug.cpp
     src/look_tuning.cpp
+    src/difficulty.cpp
     src/shader_warmup.cpp
     ${FEAR_NATIVE_SOURCES}
 )

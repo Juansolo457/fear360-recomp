@@ -47,6 +47,8 @@ Local changes (see `git log -p -- port-nx/src/native`):
   device next to the driver cache; at the next start they are queued for the translation worker,
   behind any draw is waiting for. Pipelines too: each one's key is recorded, and at the next
   start created on the pipeline worker once its shaders are translated. See `docs/REVIEW.md`.
+- Texture sharpness (`fear_mip_bias`, #50, `native_textures.cpp`): every sampler gets a host
+  mipmap LOD bias on top of the guest's own (which the translated shaders apply); -0.5 by default.
 - Shader warm-up (`fear_shader_warmup`, #53, `src/shader_warmup.*`): the pre-warm also loads this
   build's list of the shaders and pipelines seen in play, the shaders rebuilt from the game's own
   `uberCatalog.cat` and checked against their hashes. Before the game's first GPU command the

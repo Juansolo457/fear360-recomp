@@ -512,6 +512,16 @@ REXCVAR_DEFINE_UINT32(nx_native_max_anisotropy, 16, "F.E.A.R. NX",
                       "Most anisotropic filtering any texture gets (1 turns it off); the "
                       "game asks for it on floors, where it costs the GPU the most");
 
+// F.E.A.R. (#50): sharper distant textures, EchoPatch's "Improved Mipmap Bias" on PC. The guest's
+// own LOD bias (the fetch constant's) is applied in the translated shaders; this adds a host bias
+// on top in every sampler. EchoPatch biases by texture class; here one value for all, a moderate
+// one by default. It shows most at 1x and 2x render scale (the Deck, laptops): at 3x the larger
+// render already picks finer mips.
+REXCVAR_DEFINE_DOUBLE(fear_mip_bias, -0.5, "F.E.A.R.",
+                      "Mipmap LOD bias added to every texture: below 0 = sharper distant textures "
+                      "(at some cost in shimmer), 0 = as shipped")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 // New textures made on the spot each frame, up to this many: drawn the first
 // time, not a frame or more later. Beyond it they stream in, so a new screen
 // loading hundreds at once does not stall a frame on their allocations (each
@@ -3567,6 +3577,8 @@ VkSampler TextureCache::GetSampler(const xenos::xe_gpu_texture_fetch_t& fetch,
   }
   info.minLod = float(mip_min_level);
   info.maxLod = mip_base_map ? info.minLod + 0.25f : VK_LOD_CLAMP_NONE;
+  // F.E.A.R. (#50): fear_mip_bias, on top of the guest's own bias (applied in the shaders).
+  info.mipLodBias = float(std::clamp(REXCVAR_GET(fear_mip_bias), -4.0, 4.0));
   info.borderColor = border == xenos::BorderColor::k_ABGR_White
                          ? VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
                          : (border == xenos::BorderColor::k_ABGR_Black

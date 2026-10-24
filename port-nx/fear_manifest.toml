@@ -357,6 +357,18 @@ name = "FearAiNextUpdate"
 address = 0x8263D2B8
 registers = ["r3", "f1"]
 
+# Normal difficulty as on PC (src/difficulty.h, #3): CServerDB::GetDifficultyFactor (sub_825DB5B0)
+# and ::GetDamageAdjustment (sub_825DB620), right after the database lookup, the value in f1.
+[[entrypoint.midasm_hook]]
+name = "FearDifficultyFactor"
+address = 0x825DB60C
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearDamageAdjustment"
+address = 0x825DB67C
+registers = ["f1"]
+
 # Screen bloom strength and threshold (src/bloom.h, #38): after both are read (threshold in f1,
 # strength in f31), before they go to the bloom material.
 [[entrypoint.midasm_hook]]

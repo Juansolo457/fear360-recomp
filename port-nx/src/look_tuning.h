@@ -42,6 +42,9 @@
 // Instant Action, the server refills their health instead. The server then tells the client, which
 // would play a death (a red overlay, a sound and "I was killed") and carry on;
 // FearHealthTestNotice skips that.
+//
+// fear_body_marks (#47, on by default) starts ModelDecalPerformanceLevel at 3, the PC's Maximum, so
+// bullet hits leave blood and armour marks on characters; the 360 starts it at 1, which allows none.
 
 #pragma once
 

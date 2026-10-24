@@ -154,6 +154,25 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "The 360 version adds a screen bloom the PC version doesn't have. Near "
                       "bright lights it spreads a grey haze over the scene."});
+  settings.push_back({"Texture sharpness",
+                      "fear_mip_bias",
+                      {{"0", "As shipped"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
+                      false,
+                      "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
+                      "sharpest setting can shimmer on fine patterns."});
+  settings.push_back({"Enemy AI",
+                      "fear_ai",
+                      {{"sharp", "Sharp"}, {"pc", "As on PC"}, {"360", "As on 360"}},
+                      false,
+                      "Sharp: enemies fight like Very Hard's at every difficulty (aim, grenades, "
+                      "dodging); how hard they hit still follows the difficulty. As on PC: the "
+                      "PC's difficulties. As on 360: its easier Normal."});
+  settings.push_back({"Blood and armour marks",
+                      "fear_body_marks",
+                      {{"true", "On (as on PC)"}, {"false", "Off (as on 360)"}},
+                      false,
+                      "Bullet hits leave blood and armour marks on enemies. The 360 version "
+                      "starts with them off."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
                       {{"true", "Exact"}, {"false", "As shipped"}},

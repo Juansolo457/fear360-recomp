@@ -49,6 +49,10 @@ REXCVAR_DEFINE_STRING(fear_console_vars, "", "F.E.A.R.",
 REXCVAR_DEFINE_BOOL(fear_console_vars_log, false, "F.E.A.R.",
                     "Log each console variable the game creates, with its starting value")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_body_marks, true, "F.E.A.R.",
+                    "Blood and armour marks on characters where bullets hit (the PC's detail at "
+                    "Maximum); off = none, as the 360 starts (#47)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_BOOL(fear_invulnerable, false, "F.E.A.R.",
                     "For testing (the smoke test, #55): the player can't die in single player and "
                     "Instant Action; where a hit would kill, health refills, with no death effect")
@@ -115,6 +119,12 @@ std::vector<std::pair<std::string, float>> TestChanges() {
   // FearHealthTestNotice keeps from playing a death.
   if (REXCVAR_GET(fear_invulnerable)) {
     changes.emplace_back("HealthTest", 1.0f);
+  }
+  // fear_body_marks (#47): the model decals' detail level starts at 1, whose record
+  // (FX/ModelDecal/Settings) allows none, and nothing on the 360 raises it; the PC's detail menu
+  // sets 3 at Maximum (10 per character, 200 in all). Played 2026-10-24: the marks show up.
+  if (REXCVAR_GET(fear_body_marks)) {
+    changes.emplace_back("ModelDecalPerformanceLevel", 3.0f);
   }
   return changes;
 }
