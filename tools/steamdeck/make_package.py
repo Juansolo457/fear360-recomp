@@ -71,6 +71,18 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
                  'fear_profile_hz = 200\n')
+# Windows: the Deck's settings without hid_sdl_hidapi = "off". That one is for Proton, where Steam
+# Input's virtual pad stands in; on Windows SDL then found no usable pad in the game (the
+# collection menu, which asks XInput itself, still worked: a work laptop, 2026-10-23).
+WINDOWS_SETTINGS = DECK_SETTINGS.replace(
+    "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
+    "# the GPU), SDL's HIDAPI drivers off (the controls come through Steam Input's\n"
+    '# pad, the usual Proton path; #29) and the profiler on for the logs (about 6%\n'
+    '# of a core).',
+    "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
+    '# the GPU) and the profiler on for the logs (about 6% of a core).\n#').replace(
+    'hid_sdl_hidapi = "off"\n', '')
+assert WINDOWS_SETTINGS != DECK_SETTINGS and 'hid_sdl_hidapi' not in WINDOWS_SETTINGS
 WINDOWS_LAUNCHER = ('@echo off\r\n'
                     'rem F.E.A.R. 360 recomp, private test copy: the collection menu.\r\n'
                     'cd /d "%~dp0fear"\r\n'
@@ -87,9 +99,10 @@ a current Vulkan driver, and an Xbox controller.
 Play: extract the zip anywhere, then double-click "Play F.E.A.R..cmd". It opens the collection
 menu; pick a game. If the controller doesn't react there, click the game window once.
 
-Settings (each game's user/settings.toml, as on the Deck): 1x render scale (1280x720), up to 120
-fps, no MSAA, no PC texture pack, the profiler on for the logs. PC Settings in each game's main
-menu changes them (it then rewrites the file without MSAA, HIDAPI and profiler lines).
+Settings (each game's user/settings.toml, as on the Deck except SDL's HID drivers): 1x render
+scale (1280x720), up to 120 fps, no MSAA, no PC texture pack, the profiler on for the logs. PC
+Settings in each game's main menu changes them (it then rewrites the file without the MSAA and
+profiler lines).
 
 Logs: fear/logs and fearfiles/logs, one file per run; copy the newest back for a read.
 """
@@ -164,7 +177,8 @@ def main():
                 continue
             add_tree(os.path.join(REPO, project, 'assets'), f'{folder}/assets')
             add_tree(os.path.join(REPO, project, 'user'), f'{folder}/user', skip={'settings.toml'})
-            z.writestr(f'{TOP}/{folder}/user/settings.toml', DECK_SETTINGS)
+            z.writestr(f'{TOP}/{folder}/user/settings.toml',
+                       WINDOWS_SETTINGS if WINDOWS else DECK_SETTINGS)
             if SHIP_TEXTURE_PACKS and os.path.exists(os.path.join(REPO, pack, 'index.tsv')):
                 add_tree(os.path.join(REPO, pack), f'{folder}/texture_pack')
             print(f'{folder}: {count} files, {total / 2**30:.1f} GB so far', flush=True)
