@@ -19,13 +19,19 @@
 //   0.01 callers (bl)   0x826480C0,     0x8267B480,      0x10013382 (update),
 //                       0x826481B8      0x8267B578       0x1001347E (initial update)
 //   0.0 caller (bl)     0x82647760      0x8267AA40
-// Not ported yet: EchoPatch also sets a character back to 0.01 when a limb is severed
-// (CheckForSever, PC 0x100EB600), because a dismembered body updated every frame moves
-// erratically. Watch for that in play (issue #4).
+// EchoPatch also leaves a character at 0.01 once a limb is severed, because a dismembered body
+// updated every frame moves erratically. The hook reads CCharacter's m_bSevered for that: the
+// death code (CCharacter's, as in the PC SDK) sets it to 1 when DamageTracker::CheckForSever
+// returns true, just before PrepareToSever and the sever-frequency counter.
+//                       F.E.A.R.        F.E.A.R. Files   PC GameServer.dll (1.08)
+//   CheckForSever       sub_826E4418    sub_8273E2D0     0x100EB600
+//     called at         0x825B4138      0x825FF604
+//   m_bSevered          +0x680          +0x714
+// At the hook, r3 is still the character (SetNextServerUpdate's this; mr r31,r3 comes next).
 
 #pragma once
 
 #include <rex/ppc/context.h>
 
-// At the start of SetNextServerUpdate, with the delay still in f1.
-void FearAiNextUpdate(PPCRegister& f1);
+// At the start of SetNextServerUpdate: the character in r3, the delay still in f1.
+void FearAiNextUpdate(PPCRegister& r3, PPCRegister& f1);

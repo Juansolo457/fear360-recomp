@@ -136,6 +136,18 @@ std::vector<Setting> BuildSettings() {
                       {{"true", "On"}, {"false", "Off"}},
                       false,
                       "Turning slows when your aim crosses an enemy (the 360's soft lock)."});
+  settings.push_back({"Field of view",
+                      "fear_fov",
+                      {{"65", "65"},
+                       {"70", "70 (the 360's and the PC's)"},
+                       {"75", "75"},
+                       {"80", "80"},
+                       {"85", "85"},
+                       {"90", "90"},
+                       {"95", "95"}},
+                      false,
+                      "Vertical, in degrees. The gun isn't corrected for wide angles yet (EchoPatch "
+                      "does that on PC), so it can look stretched at the higher settings."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
                       {{"true", "Exact"}, {"false", "As shipped"}},

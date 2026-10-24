@@ -2,8 +2,10 @@
 
 #include "look_tuning.h"
 
+#include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -34,6 +36,10 @@ REXCVAR_DEFINE_STRING(fear_look_ramp, "off", "F.E.A.R.",
 REXCVAR_DEFINE_BOOL(fear_aim_softlock, true, "F.E.A.R.",
                     "Soft-lock aim assist: turning slows near enemies (to 30% yaw, 50% pitch)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_DOUBLE(fear_fov, 70.0, "F.E.A.R.",
+                      "Vertical field of view in degrees (the console variables FovY and "
+                      "FovYWidescreen; 70 as shipped, the PC's too)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace fear::look_tuning {
 namespace {
@@ -62,6 +68,15 @@ std::vector<std::pair<std::string, float>> Changes() {
     changes.emplace_back("TurningSoftLockPitchFactor", 1.0f);
   }
   return changes;
+}
+
+// The field of view (fear_fov), applied only as the console variables are created: unlike the
+// stick's values, FovY's 70 is in the code, not the database. The camera uses FovYWidescreen on a
+// widescreen display in F.E.A.R. Files; F.E.A.R. has only FovY.
+std::vector<std::pair<std::string, float>> FovChanges() {
+  const double fov = std::clamp(REXCVAR_GET(fear_fov), 40.0, 130.0);
+  if (std::abs(fov - 70.0) < 0.01) return {};
+  return {{"FovY", float(fov)}, {"FovYWidescreen", float(fov)}};
 }
 
 // The database path of each attribute.
@@ -207,7 +222,12 @@ void Apply(rex::Runtime& runtime) {
 }  // namespace fear::look_tuning
 
 void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
-  static const auto changes = fear::look_tuning::Changes();  // the cvars are final by now
+  static const auto changes = [] {  // the cvars are final by now
+    auto all = fear::look_tuning::Changes();
+    const auto fov = fear::look_tuning::FovChanges();
+    all.insert(all.end(), fov.begin(), fov.end());
+    return all;
+  }();
   if (changes.empty() || !r5.u32) return;
   const auto* name = reinterpret_cast<const char*>(
       rex::system::kernel_memory()->virtual_membase() + r5.u32);
@@ -219,7 +239,7 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (logged.insert(wanted).second) {
-        REXLOG_INFO("F.E.A.R.: look tuning: {} = {} (the game's {})", wanted, value, f1.f64);
+        REXLOG_INFO("F.E.A.R.: console variable {} = {} (the game's {})", wanted, value, f1.f64);
       }
     }
     f1.f64 = value;

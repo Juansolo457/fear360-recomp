@@ -2,7 +2,8 @@
 // menu (fear_menu.h).
 //
 // The panel lists the port's own settings (resolution, window, frame-rate limit, texture
-// filtering, PC textures, right stick, aim assist, animation timing), each a cvar. They are saved
+// filtering, PC textures, right stick, aim assist, field of view, animation timing), each a cvar.
+// They are saved
 // to <user data>/settings.toml, which is loaded at startup before the cvars are finalised, below
 // the command line: a flag the launcher passes still wins for that run. "Save and restart" starts
 // the game again without those flags (and waits for this run to exit first), so what was saved

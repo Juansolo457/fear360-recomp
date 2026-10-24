@@ -12,13 +12,14 @@ file_path = "assets/default.xex"
 out_directory_path = "generated/default"
 includes = []
 
-# The translator's register options (#34, docs/HANDOFF-REGOPTS.md), as in port-nx's manifest.
+# The translator's register options (#34, docs/HANDOFF-REGOPTS.md), as in port-nx's manifest:
+# stage B (non_argument_as_local, stage C, isn't tested yet).
 skip_lr = true
 ctr_as_local = true
 xer_as_local = true
 reserved_as_local = true
 cr_as_local = true
-non_argument_as_local = true
+# non_argument_as_local = true
 non_volatile_as_local = true
 setjmp_address = 0x82B95310
 longjmp_address = 0x82B94EC0
@@ -223,11 +224,12 @@ registers = ["r3", "r4"]
 return_on_true = true
 
 # High-FPS fixes (src/high_fps.h): the AI's update delay (0.01 s) made shorter than a frame, so
-# enemies update every frame above 100 fps. SetNextServerUpdate, at its fmr f31,f1 (delay in f1).
+# enemies update every frame above 100 fps (a severed body keeps it). SetNextServerUpdate, at its
+# fmr f31,f1: the character in r3, the delay in f1.
 [[entrypoint.midasm_hook]]
 name = "FearAiNextUpdate"
 address = 0x8266F638
-registers = ["f1"]
+registers = ["r3", "f1"]
 
 # Profiler (src/profiler.h, #30): Direct3D's own bookkeeping of each wait for the GPU, at the
 # start of the function that records a wait's start (the reason in r5) and of the one that records

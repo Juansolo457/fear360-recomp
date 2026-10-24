@@ -25,6 +25,12 @@
 // same name (VarTrack::Init, which applies the value only when it creates the variable), and
 // FearConsoleVarDefault, a [[entrypoint.midasm_hook]] at that function's entry in
 // port-files/fear_manifest.toml, swaps in ours by name.
+//
+// The field of view goes the same way in both games (fear_fov, #1): FovY's default (70, the PC's
+// too) is in the code, so FearConsoleVarDefault swaps it as the camera creates the variable, and
+// FovYWidescreen with it in F.E.A.R. Files, whose camera uses that one on a widescreen display.
+// F.E.A.R. has the hook too (port-nx/fear_manifest.toml, VarTrack::Init at 0x822FC710), where it
+// also sees the stick's variables, already patched in the database, and sets the same values.
 
 #pragma once
 
