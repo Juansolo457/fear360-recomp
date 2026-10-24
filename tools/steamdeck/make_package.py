@@ -4,6 +4,9 @@
     python -I tools/steamdeck/make_package.py --programs [out.zip]
         just the programs and DLLs (default private/steamdeck/FEAR360-SteamDeck-update.zip), to
         unpack over an existing install: no data, saves or settings
+    python -I tools/steamdeck/make_package.py --windows [out.zip]
+        the whole package for another Windows PC (default private/windows/FEAR360-Windows.zip),
+        with a Play F.E.A.R..cmd instead of the Deck's Steam setup: a private test copy
     python -I tools/steamdeck/make_package.py --settings [out.zip]
         just both games' user/settings.toml (default private/steamdeck/FEAR360-SteamDeck-settings.zip),
         to unpack over an existing install: the Deck settings below, saves untouched
@@ -28,14 +31,18 @@ import sys
 import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-ARGV = [a for a in sys.argv[1:] if a not in ('--programs', '--settings')]
+ARGV = [a for a in sys.argv[1:] if a not in ('--programs', '--settings', '--windows')]
 PROGRAMS_ONLY = '--programs' in sys.argv[1:]
 SETTINGS_ONLY = '--settings' in sys.argv[1:]
+# --windows: the same package for another Windows PC (a private test copy): a Play F.E.A.R..cmd
+# with the launch options below instead of the Deck's Steam setup.
+WINDOWS = '--windows' in sys.argv[1:]
 OUT = ARGV[0] if ARGV else os.path.join(
-    REPO, 'private', 'steamdeck',
+    REPO, 'private', 'windows' if WINDOWS else 'steamdeck',
+    'FEAR360-Windows.zip' if WINDOWS else
     'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else
     'FEAR360-SteamDeck-settings.zip' if SETTINGS_ONLY else 'FEAR360-SteamDeck.zip')
-TOP = 'FEAR360-SteamDeck'
+TOP = 'FEAR360-Windows' if WINDOWS else 'FEAR360-SteamDeck'
 CRT_DLLS = ['msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
 ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root', 'assets',
         '--user_data_root', 'user', '--cache_root', 'cache', '--nx_renderer', 'native']
@@ -64,6 +71,28 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
                  'fear_profile_hz = 200\n')
+WINDOWS_LAUNCHER = ('@echo off\r\n'
+                    'rem F.E.A.R. 360 recomp, private test copy: the collection menu.\r\n'
+                    'cd /d "%~dp0fear"\r\n'
+                    'start "" fear.exe ' + ' '.join(ARGS) + ' --fear_collection ../collection.toml\r\n')
+WINDOWS_README = """F.E.A.R. 360 recomp (F.E.A.R. + F.E.A.R. Files): private Windows test copy
+=========================================================================
+
+The same builds and settings as the Steam Deck package, for another Windows PC. It contains your
+own game data and programs made from your discs: keep it to yourself.
+
+Needs: Windows 10/11 64-bit, a CPU with AVX2 (Intel Haswell / AMD Excavator or newer), a GPU with
+a current Vulkan driver, and an Xbox controller.
+
+Play: extract the zip anywhere, then double-click "Play F.E.A.R..cmd". It opens the collection
+menu; pick a game. If the controller doesn't react there, click the game window once.
+
+Settings (each game's user/settings.toml, as on the Deck): 1x render scale (1280x720), up to 120
+fps, no MSAA, no PC texture pack, the profiler on for the logs. PC Settings in each game's main
+menu changes them (it then rewrites the file without MSAA, HIDAPI and profiler lines).
+
+Logs: fear/logs and fearfiles/logs, one file per run; copy the newest back for a read.
+"""
 GAMES = [
     # (folder in the zip, project, program, texture pack, id, name, subtitle)
     ('fear', 'port-nx', 'fear.exe', os.path.join('private', 'texture_pack'),
@@ -117,7 +146,12 @@ def main():
                     if rel not in skip:
                         add(src, f'{arc_root}/{rel}')
 
-        add(os.path.join(REPO, 'tools', 'steamdeck', 'README-SteamDeck.txt'), 'README-SteamDeck.txt')
+        if WINDOWS:
+            z.writestr(f'{TOP}/README-Windows.txt', WINDOWS_README.replace('\n', '\r\n'))
+            z.writestr(f'{TOP}/Play F.E.A.R..cmd', WINDOWS_LAUNCHER)
+        else:
+            add(os.path.join(REPO, 'tools', 'steamdeck', 'README-SteamDeck.txt'),
+                'README-SteamDeck.txt')
         if not PROGRAMS_ONLY:
             z.writestr(f'{TOP}/collection.toml', '\n'.join(collection) + '\n')
         for folder, project, exe, pack, *_ in GAMES:
