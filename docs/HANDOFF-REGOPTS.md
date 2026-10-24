@@ -506,6 +506,25 @@ the counts and the cost statement hold. None of patches 0007-0013 has been compi
 Wine, `wine_get_version`/`wine_get_build_id`, so the next Deck crash shows the register and the
 Proton build without the dump. Patch 0013 and the manifests are unchanged.
 
+### 7.3 Built (2026-10-23 17:43): stage B with patch 0013, F.E.A.R. only
+- **The crash report didn't compile.** Its `"\n"` escapes had become real line breaks, the same
+  backslash mangling seen in this repo's tooling before. Fixed in `605b1f5`, which also moves the
+  register lines above the `Stack:` heading.
+- **Forcing the translation.** The translator step depends only on the executable and the manifest
+  (`generated/default/codegen.d`), not on the translator, so patch 0013's template change needed
+  the stamp deleted (`generated/default/codegen.build.stamp`). Then one file was regenerated,
+  `fear_pch.h`, with the MMIO and lock helpers. Worth fixing in the SDK's CMake: the rule should
+  depend on the `rexglue` binary.
+- **Result:** no other errors. `fear.exe` 65,228,800 bytes, `rexruntimerd.dll` 12,870,144 (about
+  100 KB larger, from the saves in every wrapper).
+- **Checked in the disassembly:**
+  - `HostToGuestFunction<KeWaitForSingleObject_entry>` saves `xmm6`-`xmm15` (`vmovaps` to
+    `0x30`-`0xc0(%rsp)`) before calling `xeKeWaitForSingleObject` and restores all ten before
+    `ret`.
+  - `ppc_global_lock_enter_` in `fear.exe` has the ten saves too.
+- The Deck update zip (`private/steamdeck/FEAR360-SteamDeck-update.zip`) has this build. F.E.A.R.
+  Files is unchanged (09:53).
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
