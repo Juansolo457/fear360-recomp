@@ -8,6 +8,8 @@ game without asking the user**. Tracking issue: GitHub
 comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `docs/REVIEW.md`.
 
 ## Where it stands (read this first)
+- **2026-10-23: the next step is a combined CPU and GPU pass, `docs/HANDOFF-DECK-OPT.md` (#40)**,
+  starting with a Fable pass (no builds).
 - **2026-10-23: a second review is asked for: `docs/HANDOFF-REVIEW.md`** (the Deck corruption
   fix, the profiler's modules/waits/system-call callers, native `memcpy`/`memset`). The sections
   below are the history, newest first.
