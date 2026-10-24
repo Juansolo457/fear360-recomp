@@ -4,6 +4,8 @@ The Xbox 360 F.E.A.R., running natively on PC. 4K, evenly paced high frame rates
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
+▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
+
 ## Why
 
 The 360 version came out about a year after the PC original and is the more complete one: **Instant Action** mode, a dual-wieldable machine pistol and an extra bonus level that the PC never got. It has been stuck on the console ever since, at 720p and 30 fps. The plan is to free it, then add *F.E.A.R. Files* (Extraction Point + Perseus Mandate, 360) so the whole F.E.A.R. 1 package lives in one place.
@@ -38,7 +40,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ No first-run stutter | "no issues in any of the loads of any of the levels": the first start on a new PC or driver builds every shader and pipeline seen in play before the main menu, the shaders rebuilt from your own disc's files (#53, `port-nx/src/shader_warmup.h`) |
 | ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu before either game loads, *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays at 4K and 80 fps with its own PC texture pack (7,607 textures) and F.E.A.R.'s right-stick fix: "running really well… ran better out of the box than Fear 1 did"; next, the smoke plumes and an optimisation pass. The plan for one collection: [docs/FILES.md](docs/FILES.md) |
-| ⏳ Steam Deck (Proton), experimental | median 89 fps on a Deck OLED, heaviest scenes about 74 (#28, #40); `tools/steamdeck/README-SteamDeck.txt` |
+| ⏳ Steam Deck (Proton), experimental | median 89 fps on a Deck OLED, heaviest scenes about 74 (#28, #40; [video](https://youtu.be/6rP_icfY-sM)); `tools/steamdeck/README-SteamDeck.txt` |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
 
 Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md). How it all fits together, where the time goes, and how to help: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
