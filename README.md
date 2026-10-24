@@ -1,14 +1,16 @@
 # F.E.A.R. 360 Recompiled
 
-The Xbox 360 F.E.A.R., running natively on PC. 4K, evenly paced high frame rates, a controller in your hands.
+The Xbox 360 F.E.A.R. and *F.E.A.R. Files*, running natively on PC. 4K, evenly paced high frame rates, a controller in your hands.
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
+**Latest release: [v0.1.0](https://github.com/Juansolo457/fear360-recomp/releases/tag/v0.1.0)**, source only and early: both games boot and play, with a lot of optimization left. **Next: 1.0**, once every level of both games has been played to the end without a crash ([Road to 1.0](#road-to-10)).
+
 ## Why
 
-The 360 version came out about a year after the PC original and is the more complete one: **Instant Action** mode, a dual-wieldable machine pistol and an extra bonus level that the PC never got. It has been stuck on the console ever since, at 720p and 30 fps. The plan is to free it, then add *F.E.A.R. Files* (Extraction Point + Perseus Mandate, 360) so the whole F.E.A.R. 1 package lives in one place.
+The 360 version came out about a year after the PC original and is the more complete one: **Instant Action** mode, a dual-wieldable machine pistol and an extra bonus level that the PC never got. It has been stuck on the console ever since, at 720p and 30 fps. This project frees it, and *F.E.A.R. Files* (Extraction Point + Perseus Mandate, 360) comes along too, so the whole F.E.A.R. 1 package lives in one place.
 
 ## What it is
 
@@ -28,26 +30,42 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Frame pacing locked to the display, up to 120 fps | the game's vblank follows the display's real one (DXGI, any GPU vendor), each frame held to the fewest refreshes that keep it at or under 120 fps (120 on 240 Hz, 72 on 144 Hz, 60 on 60 Hz); `-FrameRate <n>` sets the limit ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ The console code's high-frame-rate bugs fixed so far | enemies update every frame above 100 fps (#3); bullet tracers no longer stick in mid-air (#27); animations at exactly the time that passed |
 | ✅ No white flash as a new area comes into view | textures still streaming in are waited for instead of drawn as the empty texture (to confirm hands-on) |
-| ✅ Logic, gunplay, physics intact | 10-minute play-test |
+| ✅ Logic, gunplay, physics intact | play-tests so far; the full play-through is the 1.0 smoke test ([#56](https://github.com/Juansolo457/fear360-recomp/issues/56), [#57](https://github.com/Juansolo457/fear360-recomp/issues/57)) |
 | ✅ Impact smoke and bullet holes at 80 fps | the dust thins out as it should, and model animations run at exactly the time that passed (the engine dropped a fraction of a millisecond every frame); the big "rock" craters are the game's own bullet-hole decals, the same size at 30 fps ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ No haze near bright lights | it was the 360 version's screen bloom, which the PC version doesn't have: off by default, *PC Settings → Bloom* turns it back on (#38) |
 | ✅ Chapter cards, intro text and credits drawn once and centred; no half frames at cuts | a clear the game does through an aliased surface now reaches the real one ([PROGRESS](docs/PROGRESS.md#two-tile-frames-doubled-cards-and-half-frames)) |
 | ✅ Right stick without the 360's turn ramp (default) | "feels significantly better": the 360's stick tuning patched on the fly from your own data; `-LookRamp console` restores it ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
-| ✅ Saving with any controller (to confirm at a checkpoint) | every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
+| ✅ Saving and *Continue game* | checkpoints save and *Continue game* picks them up: "was able to jump into a saved game no issues"; every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": two entries added to the game's own menu (under Options) open a settings panel (resolution, window, frame rate, texture filtering, PC textures, field of view, right stick, aim assist, animation timing, bloom; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
 | ✅ Shaders built before play | every start builds the shaders and pipelines your PC has seen before the main menu, on all cores, so driver updates don't bring the stutter back; a locally generated list (`tools/make_warmup.py`, never committed) carries them to another PC, where the test went "no issues in any of the loads of any of the levels" (#53, `port-nx/src/shader_warmup.h`) |
 | ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu before either game loads, *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
-| ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays at 4K and 80 fps with its own PC texture pack (7,607 textures) and F.E.A.R.'s right-stick fix: "running really well… ran better out of the box than Fear 1 did"; next, the smoke plumes and an optimisation pass. The plan for one collection: [docs/FILES.md](docs/FILES.md) |
+| ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays at 4K and 80 fps with its own PC texture pack (7,607 textures) and F.E.A.R.'s right-stick fix: "running really well… ran better out of the box than Fear 1 did"; still to do: the smoke plumes, its own effects ([#51](https://github.com/Juansolo457/fear360-recomp/issues/51)), an optimisation pass and the full play-through ([#57](https://github.com/Juansolo457/fear360-recomp/issues/57)). The collection: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Steam Deck (Proton), experimental | median 89 fps on a Deck OLED, heaviest scenes about 74 (#28, #40; [video](https://youtu.be/6rP_icfY-sM)); `tools/steamdeck/README-SteamDeck.txt` |
 | ⏳ Linux | the renderer is Vulkan already; build untested |
+| ⏳ Android (ARM64) | scoped, not started: what the SDK already has and what's missing ([#44](https://github.com/Juansolo457/fear360-recomp/issues/44)) |
+
+## Road to 1.0
+
+**1.0 is the goal:** every level of both games played to the end with no crashes, and the bugs found on the way fixed. Roughly one to two weeks out, at the pace of testing. The checklist and results sheet: [docs/SMOKE-1.0.md](docs/SMOKE-1.0.md); what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md).
+
+| | |
+|---|---|
+| ⏳ Test setup [#55](https://github.com/Juansolo457/fear360-recomp/issues/55) | the no-death switch (`tools/launch.ps1 -Collection -Invulnerable`), saves per level and the results sheet |
+| ⏳ F.E.A.R. [#56](https://github.com/Juansolo457/fear360-recomp/issues/56) | the campaign (24 levels) and Instant Action (4 maps), each to the end |
+| ⏳ *F.E.A.R. Files* [#57](https://github.com/Juansolo457/fear360-recomp/issues/57) | both campaigns (37 levels) and Instant Action (8 maps), each to the end |
+| ⏳ Crashes and bugs found on the way | each one its own issue, fixed before 1.0 |
+
+**Known issues** in v0.1.0: a GPU load spike in Interval 2's closing sequence ([#41](https://github.com/Juansolo457/fear360-recomp/issues/41)); soft text at high resolution scales, from the 360's 720p fonts ([#42](https://github.com/Juansolo457/fear360-recomp/issues/42)); a plain collection menu ([#43](https://github.com/Juansolo457/fear360-recomp/issues/43)); the 360-only Holiday bonus mission not checked yet ([#39](https://github.com/Juansolo457/fear360-recomp/issues/39)); on the Steam Deck, the controller drops for about a second at story autosaves ([#36](https://github.com/Juansolo457/fear360-recomp/issues/36)).
+
+**Other open work:** performance (the Steam Deck [#40](https://github.com/Juansolo457/fear360-recomp/issues/40), the renderer's GPU cost [#37](https://github.com/Juansolo457/fear360-recomp/issues/37), lower-end PCs [#58](https://github.com/Juansolo457/fear360-recomp/issues/58)); PC parity with EchoPatch ([#2](https://github.com/Juansolo457/fear360-recomp/issues/2)); keyboard and mouse ([#59](https://github.com/Juansolo457/fear360-recomp/issues/59)); rumble and gyro aiming ([#26](https://github.com/Juansolo457/fear360-recomp/issues/26)); Instant Action extras ([#60](https://github.com/Juansolo457/fear360-recomp/issues/60), [#61](https://github.com/Juansolo457/fear360-recomp/issues/61)); visual checks against the 360 ([#45](https://github.com/Juansolo457/fear360-recomp/issues/45) to [#52](https://github.com/Juansolo457/fear360-recomp/issues/52)); Android ([#44](https://github.com/Juansolo457/fear360-recomp/issues/44)). [All open issues](https://github.com/Juansolo457/fear360-recomp/issues).
 
 Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md). How it all fits together, where the time goes, and how to help: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Build and run (Windows)
 
-Releases are source only: you build the game from your own discs. **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what's in 1.0: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
+Releases are source only: you build the game from your own discs ([v0.1.0](https://github.com/Juansolo457/fear360-recomp/releases/tag/v0.1.0) is the latest). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
 
 ```powershell
 pwsh -NoProfile -File tools/setup-sdk.ps1                      # the patched ReXGlue SDK
