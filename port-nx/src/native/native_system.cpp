@@ -229,7 +229,9 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       return X_STATUS_SUCCESS;
     }
     display_pacing_ = fear::display_vblank::GetPlan().active;
-    if (!display_pacing_) {
+    // F.E.A.R.: not under Proton, where DXGI's WaitForVBlank is a sleep-and-poll loop: half a
+    // Steam Deck core for the pacing report's refresh counts (#40).
+    if (!display_pacing_ && !fear::display_vblank::UnderWine()) {
       display_watch_ = std::thread([this]() { WatchDisplay(); });
     }
     vblank_thread_ = rex::system::object_ref<rex::system::XHostThread>(
@@ -856,11 +858,16 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       for (uint32_t i = 0; i < 8; ++i) {
         refreshes += fmt::format("{}{}", i ? "/" : "", pacing_refreshes_[i]);
       }
+      // With the timer driving the game under Proton, nothing counts the display's refreshes.
+      const std::string shown =
+          display_pacing_ || display_watched_
+              ? fmt::format("{} refreshes between presents 0/1/2/3/4/5/6/7+: {}",
+                            display_watched_ ? "display" : "timer's", refreshes)
+              : std::string("display refreshes not counted under Proton");
       REXLOG_INFO(
-          "[native] pacing ({}): {} frames {:.2f} ms apart (deviation {:.2f}, longest {:.1f}); "
-          "{} refreshes between presents 0/1/2/3/4/5/6/7+: {}",
+          "[native] pacing ({}): {} frames {:.2f} ms apart (deviation {:.2f}, longest {:.1f}); {}",
           display_pacing_ ? "display vblank" : "timer", pacing_frames_, mean, deviation,
-          pacing_ms_max_, display_watched_ ? "display" : "timer's", refreshes);
+          pacing_ms_max_, shown);
       pacing_frames_ = 0;
       pacing_ms_sum_ = pacing_ms_squares_ = pacing_ms_max_ = 0;
       std::fill(std::begin(pacing_refreshes_), std::end(pacing_refreshes_), 0);
@@ -1011,12 +1018,12 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           // F.E.A.R.: then a real sleep. rex::thread::Sleep turns anything under 100 us into
           // a yield, so the 50 us "sleep" here was a yield too and the thread spun for the
           // whole wait (2-12 ms a frame): under Proton a syscall each, ~half a core on the
-          // Steam Deck next to the game's thread (#28 profile). SleepUntil waits on a
-          // high-resolution timer.
+          // Steam Deck next to the game's thread (#28 profile). ShortSleep: a high-resolution
+          // timer, or under Proton a sleep with no wineserver round trip (#40).
           if (attempt < 16) {
             std::this_thread::yield();
           } else {
-            rex::thread::SleepUntil(Clock::now() + std::chrono::microseconds(200));
+            fear::display_vblank::ShortSleep(std::chrono::microseconds(200));
           }
         }
         if (waited) {

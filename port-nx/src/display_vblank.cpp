@@ -8,6 +8,7 @@
 
 #include <rex/cvar.h>
 #include <rex/logging.h>
+#include <rex/thread.h>
 
 REXCVAR_DECLARE(double, video_mode_refresh_rate);
 REXCVAR_DECLARE(bool, vulkan_allow_present_mode_immediate);
@@ -82,6 +83,21 @@ bool UnderWine() {
   return wine;
 }
 
+void ShortSleep(std::chrono::microseconds duration) {
+  using DelayExecution = LONG(NTAPI*)(BOOLEAN alertable, PLARGE_INTEGER interval);
+  static const DelayExecution delay =
+      UnderWine() ? reinterpret_cast<DelayExecution>(reinterpret_cast<void*>(
+                        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtDelayExecution")))
+                  : nullptr;
+  if (delay) {
+    LARGE_INTEGER interval;
+    interval.QuadPart = -std::max<LONGLONG>(1, duration.count() * 10);  // relative, 100 ns units
+    delay(FALSE, &interval);
+    return;
+  }
+  rex::thread::SleepUntil(std::chrono::steady_clock::now() + duration);
+}
+
 }  // namespace fear::display_vblank
 
 #else
@@ -91,6 +107,9 @@ Waiter::~Waiter() = default;
 bool Waiter::Open() { return false; }
 bool Waiter::Wait() { return false; }
 bool UnderWine() { return false; }
+void ShortSleep(std::chrono::microseconds duration) {
+  rex::thread::SleepUntil(std::chrono::steady_clock::now() + duration);
+}
 }  // namespace fear::display_vblank
 
 #endif

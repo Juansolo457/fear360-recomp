@@ -1,0 +1,106 @@
+From 11c330cf92ed6b69eb713bbc401d75629b253913 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 19:48:23 -0700
+Subject: [PATCH 15/15] Input: SDL driver pumps events at most every
+ hid_sdl_pump_interval_ms
+
+Every controller poll from the guest (state, keystrokes, capabilities,
+vibration) queued an SDL_PumpEvents on the UI thread whenever none was
+in flight. The guest polls several times a frame, and each pump wakes
+the UI thread: under Proton a PeekMessage sweep and a message wait, both
+wineserver round trips. On the Steam Deck at 90 fps that thread took
+half a core (fear360-recomp #40), on a 4-core APU that shares its power
+with the GPU.
+
+A poll now queues a pump only if the last one ran at least
+hid_sdl_pump_interval_ms ago (4 by default; 0 is one per poll, as
+before). A poll reads the state of the last pump either way, and at
+frame rates up to 250 every frame's first poll still pumps. The driver
+logs the polls and pumps per second every 10 s ("[hid] SDL: ...").
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/input/sdl/sdl_input_driver.h |  6 +++++
+ src/input/sdl/sdl_input_driver.cpp       | 30 ++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+index 10871f5..009bb0a 100644
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -104,6 +104,12 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+   bool SDL_Gamepad_initialized_;
+   std::atomic<int> sdl_events_unflushed_;
+   std::atomic<bool> sdl_pumpevents_queued_;
++  // When SDL_PumpEvents last ran (steady clock, ns), for hid_sdl_pump_interval_ms; the guest's
++  // polls and the pumps they queued, for a report every 10 s (fear360-recomp #40).
++  std::atomic<int64_t> sdl_last_pump_ns_{0};
++  std::atomic<int64_t> sdl_report_ns_{0};
++  std::atomic<uint32_t> sdl_polls_{0};
++  std::atomic<uint32_t> sdl_pumps_{0};
+   // Appended in connection order, never re-sorted, and unbounded: the
+   // assignment decides how many the guest sees.
+   std::vector<ControllerState> controllers_;
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index 77b79ca..c269757 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <array>
++#include <chrono>
+ #include <filesystem>
+ 
+ #include <rex/assert.h>
+@@ -26,6 +27,9 @@ REXCVAR_DEFINE_STRING(hid_sdl_hidapi, "auto", "Input",
+                       "SDL's HIDAPI joystick drivers (talking to some pads directly, e.g. the Steam "
+                       "Deck's own controls): auto (SDL's default; the SDL_JOYSTICK_HIDAPI "
+                       "environment variable can change it), on, off (over the environment)");
++REXCVAR_DEFINE_INT32(hid_sdl_pump_interval_ms, 4, "Input",
++                     "Shortest time between two SDL event pumps queued by the guest's controller "
++                     "polls, in ms (0: one per poll). Each pump wakes the UI thread");
+ 
+ namespace rex::input::sdl {
+ 
+@@ -714,11 +718,37 @@ void SDLInputDriver::UpdateXCapabilities(ControllerState& state) {
+ 
+ void SDLInputDriver::QueueControllerUpdate() {
+   // Pump SDL events to ensure controller state is up to date.
++  // At most one pump per hid_sdl_pump_interval_ms (fear360-recomp #40). The guest polls several
++  // times a frame (state, keystrokes, capabilities, vibration), and each pump wakes the UI thread:
++  // under Proton a PeekMessage sweep and a message wait, both wineserver round trips, which came to
++  // half a Steam Deck core at 90 fps. A poll reads the state of the last pump either way.
++  using namespace std::chrono;
++  const int64_t now = duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
++  sdl_polls_.fetch_add(1, std::memory_order_relaxed);
++  int64_t reported = sdl_report_ns_.load(std::memory_order_relaxed);
++  if (!reported) {
++    sdl_report_ns_.compare_exchange_strong(reported, now, std::memory_order_relaxed);
++  } else if (now - reported >= 10'000'000'000 &&
++             sdl_report_ns_.compare_exchange_strong(reported, now, std::memory_order_relaxed)) {
++    const double seconds = double(now - reported) / 1e9;
++    REXLOG_INFO("[hid] SDL: {:.0f} controller polls/s, {:.0f} event pumps/s (interval {} ms)",
++                sdl_polls_.exchange(0, std::memory_order_relaxed) / seconds,
++                sdl_pumps_.exchange(0, std::memory_order_relaxed) / seconds,
++                REXCVAR_GET(hid_sdl_pump_interval_ms));
++  }
++  const int64_t interval = int64_t(REXCVAR_GET(hid_sdl_pump_interval_ms)) * 1'000'000;
++  if (interval > 0 && now - sdl_last_pump_ns_.load(std::memory_order_relaxed) < interval) {
++    return;
++  }
+   bool is_queued = false;
+   sdl_pumpevents_queued_.compare_exchange_strong(is_queued, true);
+   if (!is_queued) {
++    sdl_pumps_.fetch_add(1, std::memory_order_relaxed);
+     attached_window_->app_context().CallInUIThread([this]() {
+       SDL_PumpEvents();
++      sdl_last_pump_ns_.store(
++          duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count(),
++          std::memory_order_relaxed);
+       sdl_pumpevents_queued_ = false;
+     });
+   }
+-- 
+2.53.0.windows.1
+

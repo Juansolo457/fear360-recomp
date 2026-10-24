@@ -400,3 +400,52 @@ by name. The "modules" line then separates our renderer from the translated code
 `tools/analysis/regflow.py`: `vperm128` is no longer taken to read its destination (its fourth
 operand is the permute control), which removes two false positives from stage C's risk list.
 This section. Nothing built.
+
+## Batch 1 (2026-10-23): items 1, 3, 4, 5, 6 and 11 coded, type-checked, not built
+Every changed file type-checks with the build's own flags (both games); the CMake change was
+checked in CMake's script mode. Nothing is built or run yet.
+
+| Item | Change | Where |
+|---|---|---|
+| 1 | No `WatchDisplay` thread under Proton; the pacing line says "display refreshes not counted under Proton" instead of an empty histogram | `native_system.cpp` `SetupGuestGpu`, `Report` |
+| 3 | `-fasync-exceptions` dropped from the generated code (sources and the PCH), both games; configure fails if a manifest ever turns `generate_exception_handlers` on | `port-nx/CMakeLists.txt`, `port-files/CMakeLists.txt` |
+| 4 | SDL pumps at most every `hid_sdl_pump_interval_ms` (4; 0 = one per poll, as before); a `[hid] SDL: N controller polls/s, M event pumps/s` line every 10 s | SDK patch 0015, `sdl_input_driver.cpp` |
+| 5 | `WAIT_REG_MEM`'s 200 µs sleep is `fear::display_vblank::ShortSleep`: under Proton ntdll's `NtDelayExecution` (not alertable), elsewhere the high-resolution timer as before | `display_vblank.{h,cpp}`, `native_system.cpp` |
+| 6 | `REX_HOOK_LEAF` (`HostToGuestFunction<Func, false>`) for the ten hooks in `crt/memory.cpp`: no xmm6-15 saves around `memcpy`/`memset` | SDK patch 0014 |
+| 11 | Host code in the exe goes under the function holding it, `fear.exe+0x<RVA>`, by the exe's unwind table; the translated code ends at the last translated function's end. "modules" shows it as "fear.exe (host code)". `tools/analysis/symbolize_profile.py LOG EXE` names them from the PDB (tested on the current build) | `profiler.{h,cpp}`, new script |
+
+Item 2 needs no code: `--timer_queue_blocking_wait` in the launch options for the Deck run.
+
+**Where this differs from Fable's details, and why:**
+- **Item 3: there are no Tracy zones in the generated functions.** `REX_FUNC_PROLOGUE` adds a zone
+  only with `REXGLUE_PROFILE_GUEST_FUNCTIONS`, which nothing defines (`build.ninja`: 0
+  occurrences). So the change is the EH flag alone, and its gain is unknown until the A/B.
+- **Item 5: not a condition variable.** MSVC's `condition_variable::wait_for` rounds the timeout
+  up to whole milliseconds, so a 200 µs wait would become 1 ms whenever no WPTR write wakes it, and
+  a wait the game releases with a plain memory store gets no WPTR write. Under Wine,
+  `NtDelayExecution` without alerts sleeps inside the process (`select`/`nanosleep` for the time
+  left, no wineserver call) at 100 ns resolution, so the bound stays 200 µs. On Windows it would
+  round to the system timer, so the waitable timer stays there. Check in the Deck profile: the ring
+  thread's `ZwSetTimer`/`ZwWaitForSingleObject` give way to `ZwDelayExecution`, and its
+  `per frame: ... ms waiting` doesn't grow.
+- **Item 6: the hooks are `REX_HOOK`s in `crt/memory.cpp`**, not `REXCRT_EXPORT` (which nothing
+  uses), so they switch to the new `REX_HOOK_LEAF`. Safe for the reason Fable gives: none of them
+  reaches the kernel, and a page fault in them (the write watch) returns through a full context
+  restore, like the translated code's own stores.
+- **Item 11: the unwind table, not a 64 KB guess.** `RtlLookupFunctionEntry` gives each host
+  function's start (Wine implements it), and the last translated function's end bounds the
+  translated code. Leaf functions without an entry fall back to their 16-byte line.
+
+**SDK:** patches 0014 and 0015 are commits `e322091` and `11c330c` on the SDK's branch
+`register-options`, after 0013's `490d264`.
+
+**How to test (ask the user first).**
+1. Keep the current `fear.exe` and `fearfiles.exe` (stage B with 0013) as the A side
+   (`private/ab/`), then build both games: a full recompile of the translated code, since its
+   flags changed.
+2. PC A/B, profiler on, same scene: `abcompare.py` for game-thread ms per frame and per module;
+   the `[hid]` line; `symbolize_profile.py` on the B log for the ring thread's functions.
+3. Deck: the programs update zip; launch options as before plus `--timer_queue_blocking_wait` and
+   MangoHud's logging (section 4). Same three scenes. Against `fear_029`: thread 504 gone,
+   thread 332 and TimerQueue down, the ring thread's waits, MangoHud's GPU clock and power in the
+   barrel scene, and nothing different in feel or sound.

@@ -1,0 +1,126 @@
+From e322091acbb805e46c121291bdda0ca6db9f3fc1 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 19:48:23 -0700
+Subject: [PATCH 14/15] C runtime memory hooks don't save xmm6-xmm15 around
+ their call
+
+REX_HOOK_LEAF is REX_HOOK for a host function that makes no system
+call and never blocks: HostToGuestFunction<Func, false> skips
+REX_KEEP_CALLEE_SAVED_XMM (patch 0013), which made every host call
+save and restore the ten registers. Under Proton only a host call that
+reaches the kernel can come back with them changed, and memcpy, memset
+and the rest of crt/memory.cpp never do. In F.E.A.R. on the Steam Deck
+patch 0013 raised the runtime DLL's share of a frame from 0.23 to 0.33
+ms, these hooks included (fear360-recomp #40).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/hook.h         | 12 ++++++++++++
+ include/rex/ppc/function.h | 10 ++++++----
+ src/kernel/crt/memory.cpp  | 21 +++++++++++----------
+ 3 files changed, 29 insertions(+), 14 deletions(-)
+
+diff --git a/include/rex/hook.h b/include/rex/hook.h
+index 4ce4f9b..a9f81b1 100644
+--- a/include/rex/hook.h
++++ b/include/rex/hook.h
+@@ -31,6 +31,9 @@
+ // Hook a recompiled function with an auto-marshaled native C++ function.
+ // The native function uses plain types (u32, mapped_u32, etc.) and
+ // HostToGuestFunction handles register translation automatically.
++// REX_HOOK_LEAF is the same for a function that makes no system call and never blocks (the C
++// runtime's memory operations): it skips saving xmm6-xmm15 around the call
++// (REX_KEEP_CALLEE_SAVED_XMM in rex/ppc/function.h).
+ #ifdef REXGLUE_ENABLE_PROFILING
+ #include <tracy/Tracy.hpp>
+ #define REX_HOOK(subroutine, function)                           \
+@@ -38,11 +41,20 @@
+     ZoneNamedN(___tracy_hook_zone, #subroutine, TracyIsStarted); \
+     rex::ppc::HostToGuestFunction<function>(ctx, base);          \
+   }
++#define REX_HOOK_LEAF(subroutine, function)                      \
++  extern "C" REX_FUNC(subroutine) {                              \
++    ZoneNamedN(___tracy_hook_zone, #subroutine, TracyIsStarted); \
++    rex::ppc::HostToGuestFunction<function, false>(ctx, base);   \
++  }
+ #else
+ #define REX_HOOK(subroutine, function)                  \
+   extern "C" REX_FUNC(subroutine) {                     \
+     rex::ppc::HostToGuestFunction<function>(ctx, base); \
+   }
++#define REX_HOOK_LEAF(subroutine, function)                    \
++  extern "C" REX_FUNC(subroutine) {                            \
++    rex::ppc::HostToGuestFunction<function, false>(ctx, base); \
++  }
+ #endif
+ 
+ // Define a raw hook with direct ctx/base access.
+diff --git a/include/rex/ppc/function.h b/include/rex/ppc/function.h
+index c9c60ec..a13c4ce 100644
+--- a/include/rex/ppc/function.h
++++ b/include/rex/ppc/function.h
+@@ -406,7 +406,9 @@ void _translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs..
+ // F.E.A.R.'s XAudio thread got xmm6 back from a kernel wait as {0, 0x60}, and its next wait read
+ // that as a pointer. An empty asm that clobbers them makes the function it is in save them on entry
+ // and restore them on return, so the generated code gets its own values back whatever happened in
+-// between. Native Windows never changes them; there it costs the saves and restores.
++// between. Native Windows never changes them; there it costs the saves and restores. A host
++// function that makes no system call and never blocks (the C runtime's memory operations) can't
++// see them changed, so its wrapper skips this (KeepXmm false, REX_HOOK_LEAF).
+ #if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
+ #define REX_KEEP_CALLEE_SAVED_XMM()                                                         \
+   asm volatile("" ::: "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", \
+@@ -420,7 +422,7 @@ void _translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs..
+ //=============================================================================
+ // Calls a native C++ function with arguments extracted from PPC context
+ 
+-template <auto Func>
++template <auto Func, bool KeepXmm = true>
+ __attribute__((noinline)) void HostToGuestFunction(PPCContext& ctx, uint8_t* base) {
+   using ret_t = decltype(std::apply(Func, function_args(Func)));
+ 
+@@ -429,10 +431,10 @@ __attribute__((noinline)) void HostToGuestFunction(PPCContext& ctx, uint8_t* bas
+ 
+   if constexpr (std::is_same_v<ret_t, void>) {
+     std::apply(Func, args);
+-    REX_KEEP_CALLEE_SAVED_XMM();
++    if constexpr (KeepXmm) REX_KEEP_CALLEE_SAVED_XMM();
+   } else {
+     auto v = std::apply(Func, args);
+-    REX_KEEP_CALLEE_SAVED_XMM();
++    if constexpr (KeepXmm) REX_KEEP_CALLEE_SAVED_XMM();
+ 
+     // Memory barrier to ensure compiler doesn't reorder
+     asm volatile("" ::: "memory");
+diff --git a/src/kernel/crt/memory.cpp b/src/kernel/crt/memory.cpp
+index 31c5384..3d34dcf 100644
+--- a/src/kernel/crt/memory.cpp
++++ b/src/kernel/crt/memory.cpp
+@@ -73,13 +73,14 @@ static int native_memmove_s(void* dst, size_t dstsz, const void* src, size_t cou
+ 
+ }  // namespace rex::kernel::crt
+ 
+-REX_HOOK(rexcrt_memcpy, rex::kernel::crt::native_memcpy)
+-REX_HOOK(rexcrt_memmove, rex::kernel::crt::native_memmove)
+-REX_HOOK(rexcrt_memset, rex::kernel::crt::native_memset)
+-REX_HOOK(rexcrt_memchr, rex::kernel::crt::native_memchr)
+-REX_HOOK(rexcrt_XMemCpy, rex::kernel::crt::native_XMemCpy)
+-REX_HOOK(rexcrt_XMemSet, rex::kernel::crt::native_XMemSet)
+-REX_HOOK(rexcrt_XMemSet128, rex::kernel::crt::native_XMemSet128)
+-REX_HOOK(rexcrt_memset_vmx, rex::kernel::crt::native_memset_vmx)
+-REX_HOOK(rexcrt_memcpy_s, rex::kernel::crt::native_memcpy_s)
+-REX_HOOK(rexcrt_memmove_s, rex::kernel::crt::native_memmove_s)
++// Leaf hooks: none of these makes a system call or blocks (REX_HOOK_LEAF in rex/hook.h).
++REX_HOOK_LEAF(rexcrt_memcpy, rex::kernel::crt::native_memcpy)
++REX_HOOK_LEAF(rexcrt_memmove, rex::kernel::crt::native_memmove)
++REX_HOOK_LEAF(rexcrt_memset, rex::kernel::crt::native_memset)
++REX_HOOK_LEAF(rexcrt_memchr, rex::kernel::crt::native_memchr)
++REX_HOOK_LEAF(rexcrt_XMemCpy, rex::kernel::crt::native_XMemCpy)
++REX_HOOK_LEAF(rexcrt_XMemSet, rex::kernel::crt::native_XMemSet)
++REX_HOOK_LEAF(rexcrt_XMemSet128, rex::kernel::crt::native_XMemSet128)
++REX_HOOK_LEAF(rexcrt_memset_vmx, rex::kernel::crt::native_memset_vmx)
++REX_HOOK_LEAF(rexcrt_memcpy_s, rex::kernel::crt::native_memcpy_s)
++REX_HOOK_LEAF(rexcrt_memmove_s, rex::kernel::crt::native_memmove_s)
+-- 
+2.53.0.windows.1
+

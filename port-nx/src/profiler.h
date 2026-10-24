@@ -9,14 +9,17 @@
 // and the like are waits and the OS). Every 10 s the log gets, per busy thread (by the name the
 // SDK gives guest threads), its CPU use (GetThreadTimes) and its top functions, and the top
 // functions over all threads: "[profile] ..." lines. The guest functions name the code to look up
-// in the PC version (private/pc_ref/bin) and to rewrite natively if they are the cost.
+// in the PC version (private/pc_ref/bin) and to rewrite natively if they are the cost. A sample in
+// the exe's own host code (our renderer, the SDK's static code) is put under the function holding
+// it, from the exe's unwind table: "fear.exe+0x<RVA>" (#40), which
+// tools/analysis/symbolize_profile.py names from the build's PDB on the PC.
 //
 // Under each thread's top functions (#30), two more lines:
 // - "modules": its samples by part of the game, from the map of the executable in
 //   docs/ARCHITECTURE.md (engine, engine renderer, game client, game server, AI planner, Havok,
 //   Direct3D, ClientFX, C runtime, ...; one table per game), and outside the translated code by
-//   DLL ("ntdll.dll") or the exe (the SDK's and our host code). A sample taken while the game's
-//   Direct3D waits for the GPU counts as "Direct3D wait" instead.
+//   DLL ("ntdll.dll") or as "fear.exe (host code)" (the SDK's and ours). A sample taken while
+//   the game's Direct3D waits for the GPU counts as "Direct3D wait" instead.
 // - "Direct3D waits": those samples by what Direct3D waited for. Direct3D marks the start and end
 //   of every wait (FearD3DWaitBegin/End below) with a reason code; the names follow the XDK's
 //   D3DBLOCKTYPE order, which matches what the call sites wait for (1: room in the ring buffer,

@@ -24,7 +24,18 @@ add_compile_options($<$<CXX_COMPILER_ID:Clang,AppleClang>:-ffp-contract=off>)
 
 include(generated/rexglue.cmake)
 
-set(HOST "${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/src")
+# The translated code without asynchronous exception handling, as in port-nx/CMakeLists.txt (#40).
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/fear_manifest.toml" FEAR_MANIFEST)
+if(FEAR_MANIFEST MATCHES "\ngenerate_exception_handlers *= *true")
+    message(FATAL_ERROR "fear_manifest.toml generates guest SEH scopes: keep -fasync-exceptions.")
+endif()
+list(REMOVE_ITEM REXGLUE_RECOMP_OPTIONS /EHa -fasync-exceptions)
+if(REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
+    set_source_files_properties(${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+        PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
+endif()
+
+set(HOST"${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/src")
 set(FEAR_SOURCES
     ${HOST}/main.cpp
     ${HOST}/anim_timing.cpp

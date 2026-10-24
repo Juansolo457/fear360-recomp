@@ -136,6 +136,9 @@ WaitSlot* ThisThreadsWaitSlot() {
 // Translated functions by native address: (native start, guest address), sorted.
 std::vector<std::pair<uintptr_t, uint32_t>> g_functions;
 uintptr_t g_exe_base = 0, g_exe_end = 0;
+// Where the translated code ends: the end of the last translated function (#40). Host code linked
+// after it (our renderer, the SDK) used to count as that function, sub_8307D8A8 in F.E.A.R.
+uintptr_t g_recomp_end = 0;
 
 void BuildFunctionTable() {
   for (const PPCFuncMapping* m = PPCFuncMappings; m->guest || m->host; ++m) {
@@ -147,6 +150,13 @@ void BuildFunctionTable() {
   const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
   g_exe_base = reinterpret_cast<uintptr_t>(base);
   g_exe_end = g_exe_base + nt->OptionalHeader.SizeOfImage;
+  if (!g_functions.empty()) {
+    // Its end from the exe's unwind table; 64 KB on if it has no entry (a leaf function).
+    const uintptr_t last = g_functions.back().first;
+    DWORD64 image = 0;
+    const RUNTIME_FUNCTION* entry = RtlLookupFunctionEntry(DWORD64(last), &image, nullptr);
+    g_recomp_end = entry && image == g_exe_base ? g_exe_base + entry->EndAddress : last + 0x10000;
+  }
 }
 
 // A module's named exports by address (RVA), sorted: a sample outside the translated code is named
@@ -193,18 +203,26 @@ std::string ModuleName(uintptr_t module) {
 
 // A sample's bucket: a guest function (its address), or a module and export (the top bit set,
 // the module's base, which is 64 KB aligned, and in the low 16 bits the export's index + 1, or 0
-// for none or "(unknown)": code outside any module, e.g. Wine's Unix side).
+// for none or "(unknown)": code outside any module, e.g. Wine's Unix side). The exe's host code
+// has the next bit set too, and the RVA of the function holding it in the low 32 bits.
 constexpr uint64_t kModuleTag = 1ull << 63;
+constexpr uint64_t kHostCodeTag = 1ull << 62;
 
 uint64_t Bucket(uintptr_t ip) {
   if (ip >= g_exe_base && ip < g_exe_end && !g_functions.empty()) {
-    auto it = std::upper_bound(g_functions.begin(), g_functions.end(),
-                               std::make_pair(ip, UINT32_MAX));
-    // Within 1 MB of a translated function's start: that function (functions of the generated
-    // code sit together; the host's own code in the exe ends up as "fear.exe").
-    if (it != g_functions.begin() && ip - std::prev(it)->first < (1u << 20)) {
+    // In the translated code: the translated function at or before it.
+    if (ip >= g_functions.front().first && ip < g_recomp_end) {
+      auto it = std::upper_bound(g_functions.begin(), g_functions.end(),
+                                 std::make_pair(ip, UINT32_MAX));
       return std::prev(it)->second;
     }
+    // The exe's host code: the function holding it, from the unwind table (a leaf function has no
+    // entry: its 16-byte line instead).
+    DWORD64 image = 0;
+    const RUNTIME_FUNCTION* entry = RtlLookupFunctionEntry(DWORD64(ip), &image, nullptr);
+    const uint32_t rva = entry && image == g_exe_base ? uint32_t(entry->BeginAddress)
+                                                      : uint32_t(ip - g_exe_base) & ~0xFu;
+    return kModuleTag | kHostCodeTag | rva;
   }
   HMODULE handle = nullptr;
   GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -229,6 +247,9 @@ std::string BucketName(uint64_t bucket) {
   if (!(bucket & kModuleTag)) {
     std::snprintf(text, sizeof(text), "sub_%08X", uint32_t(bucket));
     return text;
+  }
+  if (bucket & kHostCodeTag) {
+    return fmt::format("{}+0x{:X}", ModuleName(g_exe_base), uint32_t(bucket));
   }
   const uintptr_t module = uintptr_t(bucket & ~kModuleTag & ~uint64_t(0xFFFF));
   const uint64_t index = bucket & 0xFFFF;
@@ -445,6 +466,7 @@ std::string SystemCallersText(const Thread& t) {
 }
 
 uint64_t ModuleKey(uint64_t bucket) {
+  if (bucket & kHostCodeTag) return kModuleTag | kHostCodeTag;
   return (bucket & kModuleTag) ? bucket & ~uint64_t(0xFFFF) : GuestModuleIndex(uint32_t(bucket));
 }
 
@@ -454,7 +476,9 @@ std::string ModulesText(const Thread& t) {
   std::map<std::string, uint64_t> by_name;
   for (const auto& [key, count] : t.modules) {
     std::string name;
-    if (key & kModuleTag) {
+    if (key & kHostCodeTag) {
+      name = ModuleName(g_exe_base) + " (host code)";
+    } else if (key & kModuleTag) {
       name = ModuleName(uintptr_t(key & ~kModuleTag));
     } else {
       name = key < kModules.size() ? kModules[key].name : "(before the map)";
@@ -586,7 +610,8 @@ void Run() {
           ++t.modules[ModuleKey(bucket)];
         }
         const uintptr_t module = uintptr_t(bucket & ~kModuleTag & ~uint64_t(0xFFFF));
-        if (stack_words && (bucket & kModuleTag) && module && IsSystemModule(module)) {
+        if (stack_words && (bucket & kModuleTag) && !(bucket & kHostCodeTag) && module &&
+            IsSystemModule(module)) {
           ++t.system_callers[{bucket, SystemCallers(stack_copy, stack_words)}];
         }
       }

@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 namespace fear::display_vblank {
@@ -41,6 +42,13 @@ const Plan& GetPlan();
 
 // Running under Wine (Proton): its ntdll exports wine_get_version.
 bool UnderWine();
+
+// A sleep of under a millisecond, for the renderer's short waits. Under Wine it is ntdll's
+// NtDelayExecution, which (not alertable) sleeps in the process with no wineserver round trip;
+// elsewhere rex::thread::SleepUntil's high-resolution waitable timer, which under Wine costs two
+// round trips (setting the timer, then waiting on it). Windows' own NtDelayExecution keeps to the
+// system timer's resolution, a millisecond or more.
+void ShortSleep(std::chrono::microseconds duration);
 
 class Waiter {
  public:

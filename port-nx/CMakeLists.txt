@@ -26,6 +26,20 @@ add_compile_options($<$<CXX_COMPILER_ID:Clang,AppleClang>:-ffp-contract=off>)
 
 include(generated/rexglue.cmake)
 
+# The translated code without asynchronous exception handling (#40). generated/rexglue.cmake adds
+# -fasync-exceptions for guest SEH scopes (__try/__except), but the manifest doesn't generate any
+# (generate_exception_handlers is off). Guest memory faults (the write watch, MMIO) go to the SDK's
+# vectored exception handler, which needs no EH mode.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/fear_manifest.toml" FEAR_MANIFEST)
+if(FEAR_MANIFEST MATCHES "\ngenerate_exception_handlers *= *true")
+    message(FATAL_ERROR "fear_manifest.toml generates guest SEH scopes: keep -fasync-exceptions.")
+endif()
+list(REMOVE_ITEM REXGLUE_RECOMP_OPTIONS /EHa -fasync-exceptions)
+if(REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
+    set_source_files_properties(${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+        PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
+endif()
+
 # fear-nx's renderer (unchanged copy; see src/native/UPSTREAM.md). The tests
 # next to it need their own harness and are not built.
 set(FEAR_NATIVE_SOURCES
