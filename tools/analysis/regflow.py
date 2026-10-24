@@ -134,7 +134,7 @@ def gpr_defs_uses(op, args):
     if op in ('xor', 'subf', 'sub') and len(regs) == 3 and regs[1] == regs[2]:
         return {dest}, set()  # xor r30,r30,r30: the zeroing idiom reads nothing
     # Read-modify-write: inserts, multiply-adds into the target, update forms read the base.
-    if op.startswith(('rlwimi', 'rldimi', 'vperm128', 'vmaddfp128', 'vnmsubfp128')) or \
+    if op.startswith(('rlwimi', 'rldimi', 'vmaddfp128', 'vnmsubfp128')) or \
             op.startswith('vrlimi'):
         uses.add(dest)
     if op.startswith('l') and op.endswith(('u', 'ux')) and len(regs) >= 2:

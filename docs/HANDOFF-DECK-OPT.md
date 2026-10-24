@@ -168,3 +168,235 @@ short summary on the tracking issue. In it:
   (Files).
 - Build and Deck packaging (ours, after the user agrees): `docs/HANDOFF-PERF.md`, "How to build,
   run and check".
+
+## Fable's pass (2026-10-23, nothing built or run)
+Read: this doc, `HANDOFF-PERF.md`, `ARCHITECTURE.md`, `fear_029.log` (and `fear_021`), the
+renderer (`native_system.cpp`, `native_renderer.cpp`), the profiler, the SDK's input, UI, timer
+queue and threading code, and the build's actual compiler flags (`out/build/.../build.ninja`).
+
+### 1. Corrections to the picture
+1. **Thread 504 is ours.** `NativeGraphicsSystem::SetupGuestGpu` starts
+   `display_watch_ = std::thread(WatchDisplay)` whenever the game is *not* display-paced, i.e. in
+   the Deck's `fear_vblank_source = "timer"` setup (`native_system.cpp:231-234`). `WatchDisplay`
+   loops on `IDXGIOutput::WaitForVBlank` to count refreshes for the pacing report's "display
+   refreshes between presents" histogram. Under Wine that call is a sleep-and-poll loop
+   (`ZwDelayExecution` + `QueryPerformanceCounter` inside `dxgi.dll`, exactly the profile), and
+   it eats **half a core** for a statistic. `DisplayVblankLoop` already refuses DXGI under Wine
+   (line 558); `WatchDisplay` doesn't. The `_o__beginthreadex` origin is `std::thread`.
+2. **Three of the "measurements to add" already exist as switches**, so they are Deck tests, not
+   builds: `--nx_native_gpu_profile` (GPU time by pass and resolve, one frame in 16, every ~10 s:
+   `Renderer::Impl::ProfileReport`), `--nx_native_record_thread` (the Vulkan calls of draws on a
+   second thread; off by default, no note says why), `--timer_queue_blocking_wait` (the SDK's
+   timer queue blocks instead of spinning: `src/core/timer_queue.cpp`).
+3. **"Renderer CPU 7.9 ms" is wall time, and the ring thread is not the limiter.** `CpuTimer`
+   (`native_renderer.cpp:6567`) is `steady_clock` around `Draw`, `Resolve` and `Swap`; `Swap`
+   includes the blocking `vkAcquireNextImageKHR` and present (the "swap 1.87 ms (present 1.83)"
+   line). The figure is 7.3-8.4 ms in every gameplay window of `fear_029` whether the frame has
+   641 or 1,227 draws: it tracks the frame period, not the draw count. The ring thread's wall time
+   in the heaviest window: 38% our code, ~16% Vulkan calls proper (each a Wine PE-to-Unix thunk),
+   8% acquire, 3% present, 27% waiting (15% in `SleepUntil`'s timer inside `WAIT_REG_MEM`, 12% in
+   the idle `ring_cv_`), and it reports **2.2 ms per frame waiting for the game**. In heavy scenes
+   the two over budget are the game thread (10.8-12.4 ms) and the GPU (10.1-11.3 ms). The ring
+   thread's work matters for power, and for the 1.5x goal later, not for 90 fps now. So W2 ranks
+   below W1, W3 and W4.
+4. **How to read the profiler's numbers.** A thread's "% of a core" is CPU time
+   (`GetThreadTimes`). The breakdown after it is by *samples of the instruction pointer*, taken
+   whether the thread was running or blocked, so "`ZwWaitForSingleObject` 15%" is time spent
+   blocked, not CPU. A blocked thread showing CPU (XThread021C: 7.7% of a core, 94% in a wait) is
+   the cost of Wine's waits themselves (client side; the wineserver's share is in another process
+   and invisible here).
+5. **The UI thread's half core is the SDL event loop being woken per controller poll.** Every
+   `XamInputGetState`/`GetKeystroke`/`SetState` reaches `SDLInputDriver::QueueControllerUpdate`,
+   which posts `SDL_PumpEvents` to the UI thread (`CallInUIThread`, one in flight at a time). Each
+   wake is a `PeekMessage` sweep plus `MsgWaitForMultipleObjectsEx`, both wineserver round trips
+   under Proton. With HIDAPI off, SDL's Windows gamepad backend is XInput, which Wine implements on
+   HID: that is where `xinput1_4.dll` and the `wine_xinput_hid_update` thread (2.9%) come from;
+   `input_backend` is `sdl` alone (the log: "SDL input driver initialized"). `RefreshDevices()` on
+   every input export is separate and runs on the game thread.
+6. **The generated code is compiled with `-fasync-exceptions` and with Tracy zones in every
+   function.** `generated/rexglue.cmake` adds `/EHa` (clang: `-fasync-exceptions`) "for guest SEH
+   scopes", but `generate_exception_handlers` is off for F.E.A.R. (no `SEH_TRY` in either game's
+   output), so it buys nothing and taxes every function: the compiler must treat every load, store
+   and call as a potential throw. `REXGLUE_ENABLE_PROFILING`/`TRACY_ENABLE` are defined for the
+   recomp target too, so `REX_FUNC_PROLOGUE()` is a `ZoneNamedN(..., TracyIsStarted)` in all
+   94,608 functions. Both are measurable, zero-risk flag changes (section 3, item 6).
+7. **GPU passes:** 43,911 passes and 8,866 resolves over 739 frames in the heaviest window: **59
+   passes and 12 resolves a frame.** `BeginPass` splits a pass on any change of the exact
+   attachment set (`targets == pass`), and every attachment is `LOAD_OP_LOAD`/`STORE_OP_STORE`
+   (`native_renderer.cpp:3163-3176`), as W3 suspected. Resolves also end the pass.
+8. **The barrel dip is both sides at once:** 12.4 ms of game thread and 11.3 ms of GPU in the same
+   window, with the ring thread idle 2.2 ms a frame. Fixing one side alone gives nothing visible.
+9. Smaller: "engine sound +12%" is 0.06 ms per frame between two different play sessions, i.e.
+   noise. The `rexruntimerd.dll` +0.10 ms is patch 0013's saves, `memcpy`/`memset` included
+   (`HANDOFF-REGOPTS.md` 7.1). `[rexcrt]` strings can't give much: the whole C runtime is 0.21 ms
+   a frame after stage B.
+
+### 2. Ranked list
+Gains are estimates from `fear_029`'s heaviest window (1,227 draws, 90 Hz target) unless marked
+measured. "Core" = share of one Deck core; the APU's 15 W is shared with the GPU, so cores saved
+are GPU clocks gained in heavy scenes (measure with MangoHud, section 4).
+
+| # | Change | Where | Gain | Risk | Measure | Depends on | Size |
+|---|---|---|---|---|---|---|---|
+| 1 | Don't start `WatchDisplay` under Wine | `native_system.cpp` `SetupGuestGpu` | **0.5 core** | none (a report histogram goes blank) | thread 504 gone from the profile; MangoHud GPU clock in the barrel scene | - | quick |
+| 2 | Timer queue: blocking wait | `--timer_queue_blocking_wait`, then default in `settings.toml` | 0.15 core | timer latency for guest `KeSetTimer`/`KeDelayExecution` (the vblank is its own thread) | profile line gone; sound and animation unchanged | test first (section 5) | quick |
+| 3 | Drop `-fasync-exceptions` and Tracy from the recomp target | `port-nx/CMakeLists.txt` (override `REXGLUE_RECOMP_OPTIONS`, undefine `TRACY_ENABLE`) | 3-10% game thread (**unmeasured**) | none for F.E.A.R. (no SEH scopes generated; faults are handled by the vectored handler) | PC A/B, `abcompare.py` game-thread ms per 1,000 draws | - | quick |
+| 4 | UI pump: at most one `SDL_PumpEvents` per 4 ms, and count the wakes | SDK `sdl_input_driver.cpp` `QueueControllerUpdate` | 0.2-0.4 core | input read up to 4 ms later than the poll that asked for it; the game reads the state of the previous pump today, so the feel is unchanged | thread 332's share; the new wakes/s counter | counter first | quick |
+| 5 | Ring thread: wait on `ring_cv_` instead of a waitable timer in `WAIT_REG_MEM` | `native_system.cpp` PM4_WAIT_REG_MEM | 0.1-0.2 core here, plus wineserver time | none (same 200 µs bound) | `ZwSetTimer`/`ZwWaitForSingleObject` gone from the ring thread | - | quick |
+| 6 | `memcpy`/`memset` hooks without the xmm clobber | SDK `function.h`, `hook.h` (`REXCRT_EXPORT`) | 0.1 ms game thread (measured: 0.23 to 0.33 ms) | none | `rexruntimerd.dll` module ms | - | quick |
+| 7 | GPU: per-pass profile, then pass merging with `VK_EXT_dynamic_rendering_unused_attachments` | `BeginPass`, pipeline creation | 1-3 ms GPU (**guess**; the profile decides) | visuals if a merged pass keeps an attachment the game aliased; pipelines must declare unused attachments | `--nx_native_gpu_profile` before and after | item 7a (section 5) | medium |
+| 8 | Stage C: `non_argument_as_local` | manifests | 3-8% game thread (**unmeasured**) | low: the scan's remaining entry-reads are funclets (patch 0007), `__chkstk` (harmless), unreferenced code and one scan false positive fixed here | PC A/B with the deterministic checks of #34 | 0007-0013 built and clean | medium |
+| 9 | PGO for the recomp target | `tools/build-nx.ps1` (`-fprofile-instr-generate`, a PC play session, `-fprofile-instr-use`) | 10-20% game thread typical for branchy translated code (**unmeasured**) | none at runtime; build pipeline work | PC A/B | - | long |
+| 10 | Direct3D spin to a wait (#32) | hook on `sub_82973C88`, event from the ring thread's swap/fence | power at capped rates (24% of the game thread at a 60 cap, 4% uncapped) | feel if the wake is late: keep a short timeout | profile "Direct3D wait" share, MangoHud CPU power | - | medium |
+| 11 | Profiler: host code visible | `profiler.cpp` `Bucket`, a symbolize script | measurement | none | - | - | quick |
+| 12 | ThinLTO for the recomp target | CMake | 5-10% game thread (**unmeasured**) | build time and memory | PC A/B | - | medium |
+| 13 | Re-key saved pipelines by the current sample count | pipeline prewarm | hitches at MSAA off | none | compile waits at level start | - | quick |
+| 14 | `ldmxcsr` count, then a decision | counter in the fpscr switch | unknown | precision (denormals) if FTZ is made permanent | counter per frame | counter first | small |
+| 15 | Vertex hashing by write watch instead of per-draw hashing | `Draw` fetch path | ~0.8 ms ring-thread wall (off the critical path) | the Deck corruption fix (#27) | `vertex spans` MB hashed | - | long |
+| 16 | Fewer Vulkan calls per draw (push constants, descriptor buffers) | shader translator and `Draw` | ~1-1.5 ms ring-thread wall (off the critical path) | large change | winevulkan share | 1.5x work | long |
+
+Quick wins: 1-6, 11, 13. First batch for the Deck: 1, 2, 4, 5 (power, ~1 core) plus 3 and 6
+(game thread), measured on the PC first.
+
+### 3. Implementation details for the top items
+**Item 1, `WatchDisplay`.** In `SetupGuestGpu`:
+`if (!display_pacing_ && !fear::display_vblank::UnderWine()) display_watch_ = std::thread(...)`.
+`display_watched_` stays false, so `RecordPacing` still runs (it only reads `display_vblanks_`,
+which stays 0) and the pacing line's histogram shows everything in bucket 0; print "display
+refreshes: not watched under Proton" instead when `!display_watched_`. Nothing else reads
+`display_vblanks_` in timer mode. On native Windows the thread stays (its `WaitForVBlank` is a
+real wait there). Test: the profile no longer lists a `dxgi.dll` thread; MangoHud's
+`gpu_core_clock` in the barrel scene against `fear_029`.
+
+**Item 2, timer queue.** No code: `--timer_queue_blocking_wait` in the launch options
+(`--name` is on). `TimerQueue::TimerThreadMain` then waits in disruptorplus's
+`blocking_wait_strategy` (a condition variable, `NtWaitForAlertByThreadId` under Wine) until the
+next due time or a new item. Check in the log that `rex::thread::TimerQueue` leaves the profile
+and that nothing timing-based changes (footsteps and weapon sounds, animation, the autosave).
+Then `timer_queue_blocking_wait = true` in `make_package.py`'s `settings.toml`.
+
+**Item 3, flags for the generated code.** In `port-nx/CMakeLists.txt`, after
+`include(generated/rexglue.cmake)` and before `rexglue_setup_target(fear)`:
+`set(REXGLUE_RECOMP_OPTIONS "")` (or keep only the `-gline-tables-only` entry), and for the
+`fear_recomp` target `target_compile_definitions(fear_recomp PRIVATE TRACY_ENABLE=0)` is not
+enough (the SDK's headers test `#ifdef`); instead give the recomp target its own
+`REX_FUNC_PROLOGUE` by compiling it without `REXGLUE_ENABLE_PROFILING` and `TRACY_ENABLE`
+(`rexglue_apply_recomp_settings` is where the SDK adds them: pass a flag, or strip the two from
+`COMPILE_DEFINITIONS` on `fear_recomp` after setup). Correctness check before the build: `grep -c
+SEH_TRY port-nx/generated/default/*.cpp` is 0 (it is today), and the write-watch handler is a
+vectored exception handler, which needs no C++ EH mode. Measure on the PC: `abcompare.py` game
+thread ms per 1,000 draws and `engine` module ms, same scene. Both games.
+
+**Item 4, UI pump.** In `SDLInputDriver::QueueControllerUpdate`, keep the existing
+`sdl_pumpevents_queued_` flag and add `std::atomic<int64_t> last_pump_ns_`: return early if a
+pump ran less than 4 ms ago (`steady_clock`), else queue it and stamp the time inside the queued
+lambda. Count `pumps_` and `polls_` (atomics) and print them per 10 s from the profiler's report
+(or a `[hid]` line): polls/s, pumps/s. The first run with just the counters says how many wakes
+the loop takes today (my reading of the 49.5% is several hundred a second); the 4 ms cap bounds
+it at 250/s. The game's reads are unchanged in kind: `GetState` returns SDL's last pumped state
+today too. If 4 ms still leaves thread 332 high, the remaining cost is SDL's `SDL_WaitEvent`
+itself under Wine; then pump from a timer on the UI thread at 250 Hz and make `GetState` not
+queue at all.
+
+**Item 5, ring thread wait.** In `PM4_WAIT_REG_MEM`'s loop, replace
+`rex::thread::SleepUntil(Clock::now() + 200us)` with a wait on `ring_cv_` under `ring_mutex_`
+with `wait_for(lock, 200us)` and no predicate (a WPTR write wakes it early, which is also what
+usually ends the wait: the game writes the ring after releasing what the ring waits for). Keep
+the 16 yields. The condition variable is `NtWaitForAlertByThreadId` under Wine (a futex, no
+server round trip); the waitable timer costs `NtSetTimer` plus `NtWaitForSingleObject`, both
+server calls, 11-20 times a frame. Same bound, same `kWaitRegMemMax` limit. Measure: the two
+`Zw*` entries leave the ring thread's list; `per frame: ... ms waiting` unchanged.
+
+**Item 6, rexcrt without the clobber.** `HostToGuestFunction<Func>` gets a second template
+parameter `bool keep_xmm = true`; `REX_KEEP_CALLEE_SAVED_XMM()` becomes
+`if constexpr (keep_xmm) REX_KEEP_CALLEE_SAVED_XMM();`. Add `REX_HOOK_NO_XMM(name, function)`
+that instantiates `<function, false>`, and make `REXCRT_EXPORT` use it (`hook.h:243`). The CRT
+hooks (`src/kernel/crt/memory.cpp`) make no system call, so nothing inside them can change the
+registers. Re-export as SDK patch 0014.
+
+**Item 7, GPU passes.** First `--nx_native_gpu_profile` on the Deck in the barrel scene and the
+benchmark room (section 5). The report names the top 14 keys by `pass c=<target> d=<target>` and
+`resolve ... WxH` with ms per frame, count per frame and draws; what we need from it: ms in
+passes vs resolves vs the swap blit, the number of passes with few draws (pass overhead), and
+the resolves' share. If pass overhead is the story: query
+`VK_EXT_dynamic_rendering_unused_attachments` in the Vulkan provider (RADV has it), create
+pipelines with `VK_FORMAT_UNDEFINED` for the attachments a draw's shader doesn't write, and in
+`BeginPass` keep the current pass when the new set is a *subset* of the active one (the superset
+rule the trace at line 3111 mentions): the draw's color write masks already stop writes to the
+others. Keep the exact rule when the extension is missing (NVIDIA on the PC has it too). What it
+must not change: the EDRAM alias handling (`rt_generation`, `MirrorAliasClear`): a pass may only
+continue if no attachment in it was invalidated since it began. Measure with the same profile
+line, then the frame-time and screenshots of the three standard scenes.
+
+**Item 8, stage C.** The remaining risk from `regflow.py`'s "nonarg" groups: 85 funclets (patch
+0007 hands r12 over), `__chkstk` (reads r12 = 0, returns at once: harmless), `sub_82BBCA20` and
+four unreferenced functions, and two Havok functions the scan flagged for `vperm128` reading its
+destination, which it does not (a scan false positive, fixed in this pass). Plan: build stage C
+on the PC with 0007-0013, run the #34 checks (menu items, tracers, AI, save/load, a level in each
+game, physics props, a texture load), then `abcompare.py` against stage B in the same scene.
+Expected: r0, r2, r11, r12 and f0 are MSVC's scratch registers, 1.5 M references in the
+translation against 1.0 M for the non-volatiles stage B localized; the gain should be of stage
+B's order (-5.7% game thread) or less, since many of them are already short-lived.
+
+**Item 11, host code in the profiler.** `Bucket()` (`profiler.cpp:199`): for an `ip` inside
+`fear.exe`, after `upper_bound` on `g_functions` check `ip < next->start` (the next entry's host
+address) or, for the last entry, `ip - start < 64 KB`; otherwise the sample is host code. Bucket
+it as `kHostTag | ((ip - g_exe_base) & ~0xF)` and name it `fear.exe+0x<rva>`; in `ModuleKey`
+map these to a "fear.exe (host)" module. Then a script `tools/analysis/symbolize_profile.py
+<log> <fear.exe>`: collect every `fear.exe+0x` RVA, run `.tools/llvm/bin/llvm-symbolizer
+--obj=<fear.exe> --functions=short --inlining=false` once with all of them (it reads the `.pdb`
+next to the exe; the Deck package's `fear.exe` is the PC build's, so the PC's `fear.pdb`
+matches), and rewrite the lines. The 16-byte rounding keeps the bucket count bounded; the ring
+thread's top functions (state hashing, `XXH3`, the fetch loop, `Allocate`, `Resolve`) will show
+by name. The "modules" line then separates our renderer from the translated code at last.
+
+### 4. Measurement to add first
+- Item 11 (host symbols) and item 4's counters (polls/s, pumps/s), plus two more counters in the
+  `[native]` report: WPTR writes per frame and ring-thread wakes per frame.
+- Kernel exports by count: a `static std::atomic<uint32_t> calls` per `HostToGuestFunction`
+  instantiation, registered with the function's name in a table at static init, top 10 per 10 s
+  in the profiler report. Answers "which exports does the game call most" without symbols.
+- **Power and clocks without a build: MangoHud.** Launch options:
+  `MANGOHUD=1 MANGOHUD_CONFIG=output_folder=/home/deck/mangohud,log_duration=300,autostart_log=10,no_display,fps,frametime,gpu_core_clock,gpu_power,gpu_load,cpu_mhz,cpu_power,cpu_load WINEDLLOVERRIDES=... %command% ...`
+  (the overlay off, a CSV per run). That answers the W1 question directly: GPU clock and power
+  in the barrel scene before and after items 1, 2, 4, 5. Reading sysfs from the profiler
+  (`Z:\sys\class\hwmon\hwmon*\name` == `amdgpu`, then `power1_average`, and
+  `Z:\sys\class\drm\card*\device\pp_dpm_sclk`) works under Wine (plain file reads) and is safe
+  (read-only), but MangoHud gives the same with no build; add the sysfs read only if the
+  per-window correlation with our own report is wanted.
+- `--nx_native_gpu_profile` is the W3 measurement; nothing to add until its report is read.
+- An `ldmxcsr` counter (item 14) behind a define, PC only.
+
+### 5. Deck tests without a build (one at a time, same three scenes, profiler on)
+1. `--timer_queue_blocking_wait` (item 2).
+2. `--nx_native_gpu_profile` (item 7a): read the `[native] GPU by pass` lines.
+3. `--nx_native_record_thread`: the ring thread's wall time with the Vulkan calls on their own
+   thread; a 5th busy thread on 4 cores, so watch the game thread's share and MangoHud's CPU
+   power. Expected: no fps change now (the ring thread has slack), useful data for the 1.5x
+   question.
+4. MangoHud logging (section 4) on an unchanged build, for the baseline.
+5. A short run with `--no-fear_vertex_exact --no-fear_vertex_spans` to measure the hashing cost
+   in the ring thread's wall time (expect corruption: measurement only).
+
+### 6. False leads
+- **The ring thread as a frame-rate limiter today** (corrections 3 and 8): its waits show slack.
+  Its work is a power item until the GPU and the game thread are under 10 ms.
+- **Acquire and present on their own thread, push descriptors, descriptor buffers, bindless,
+  multi-draw** (W2): each buys ring-thread wall time that is not on the critical path. Keep for
+  the 1.5x work, after item 11 shows where the 38% actually goes.
+- **More `[rexcrt]` functions** for speed: the whole C runtime is 0.21 ms a frame now. Map them
+  for correctness reasons if any, not for performance. The heap group only if the allocator ever
+  shows in the per-module line.
+- **"Engine sound went up 12%":** 0.06 ms between different sessions. Nothing to chase.
+- **The `dxgi.dll` thread as Wine's or the D3D12 backend's:** it is `WatchDisplay` (item 1).
+- **1.5x at over 100 fps:** the GPU is 8.5 ms a frame at 1x (10-11 in heavy scenes) and 1.5x is
+  2.25 times the pixels. Even if items 7 and the pass work halve the GPU cost, 1080p lands near
+  60-70 fps in heavy scenes, not 100. A docked 1080p60 target is realistic after the GPU work;
+  say so on #40 rather than carry the stretch goal as stated.
+- **Cutting the texture upload burst at level start** (644 uploads in 186 ms): one hitch per
+  level, already off the play path; not worth a change now.
+
+### 7. Changed in this pass
+`tools/analysis/regflow.py`: `vperm128` is no longer taken to read its destination (its fourth
+operand is the permute control), which removes two false positives from stage C's risk list.
+This section. Nothing built.
