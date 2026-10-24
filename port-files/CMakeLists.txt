@@ -35,7 +35,7 @@ if(REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
         PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
 endif()
 
-set(HOST"${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/src")
+set(HOST "${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/src")
 set(FEAR_SOURCES
     ${HOST}/main.cpp
     ${HOST}/anim_timing.cpp
