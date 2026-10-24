@@ -27,6 +27,10 @@ itself adapted from Project8Recomp (https://github.com/R-drg/project8-sw)
 and nfsmw-nx (https://github.com/StevensND/nfsmw-nx). The port-nx build that
 links it is therefore distributed under the GNU GPL v3 or later.
 
-third_party/rexglue-sdk-nx (not tracked) is ReXGlue c94f5eb with fear-nx's
-native-vulkan SDK patch and patches/rexglue-sdk-nx/ applied; ReXGlue's
-BSD-3-Clause license and Xenia's notices apply to it.
+third_party/rexglue-sdk-nx (not tracked; tools/setup-sdk.ps1 recreates it) is
+ReXGlue c94f5eb with patches/rexglue-sdk-nx/ applied; ReXGlue's BSD-3-Clause
+license and Xenia's notices apply to it. Of those patches, 0000 is fear-nx's
+native-vulkan SDK patch (patches/native-vulkan/rexglue-sdk.patch from
+https://github.com/infriker/fear-nx, commit acad80d), GPL-3.0-or-later, kept
+here so the SDK can be rebuilt from this repository; 0001 on are this
+project's, under the SDK's BSD-3-Clause license.

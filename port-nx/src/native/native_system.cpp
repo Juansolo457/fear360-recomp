@@ -68,12 +68,10 @@ REXCVAR_DEFINE_STRING(fear_dump_image, "", "F.E.A.R.",
 // The game's image layout, from the generated translation (fear_init.cpp).
 extern const rex::PPCImageInfo PPCImageConfig;
 
-#if defined(__SWITCH__)
 // Adapted from Project8Recomp (GPL-3.0), src/game/src/native/; generic Xenos GPU code.
+// F.E.A.R.: the default on PC too (fear-nx kept xenos there); the emulated renderer corrupts
+// this game's menus and videos.
 #define FEAR_NX_RENDERER_DEFAULT "native"
-#else
-#define FEAR_NX_RENDERER_DEFAULT "xenos"
-#endif
 REXCVAR_DEFINE_STRING(nx_renderer, FEAR_NX_RENDERER_DEFAULT, "F.E.A.R. NX",
                       "xenos = ReXGlue's emulated Xbox 360 GPU; native = the app-owned "
                       "Vulkan Xenos renderer")

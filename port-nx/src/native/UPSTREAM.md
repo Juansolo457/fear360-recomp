@@ -67,5 +67,10 @@ Local changes (see `git log -p -- port-nx/src/native`):
   polygons from stale data, at no measurable renderer cost there. `fear_vertex_spans` (on) turns
   the span reads off for diagnosis. Both are read every frame; the log names the setting
   (`[native] vertex reads: ...`).
+- `nx_renderer` defaults to `native` on PC as well as Switch (fear-nx kept `xenos` on PC).
+- Diagnosis switch (off by default): `fear_debug_skip_shaders` skips a shader's draws by the
+  hash the frame trace prints (`vsh=`/`psh=`, added to the trace); it found the bloom (#38).
+- Under Proton, `WAIT_REG_MEM`'s short sleep is `fear::display_vblank::ShortSleep` (in-process
+  `NtDelayExecution`) and no `WatchDisplay` thread runs (#40).
 
 The `*_test.cpp` files are kept for reference but are not built here.
