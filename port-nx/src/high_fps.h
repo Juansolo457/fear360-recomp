@@ -28,6 +28,27 @@
 //     called at         0x825B4138      0x825FF604
 //   m_bSevered          +0x680          +0x714
 // At the hook, r3 is still the character (SetNextServerUpdate's this; mr r31,r3 comes next).
+//
+// Particle batch markers (issue #7, EchoPatch's "Oversized particles"; the likely cause of the haze
+// under lights, #38). After each batch it emits, a ClientFX particle system puts a marker in its
+// particle list: a particle whose total lifetime holds the batch's update time and whose lifetime
+// is -1, so the next update finds it expired and removes it. Until then it is drawn like any other
+// particle: CParticleSystemGroup::GetParticleSizeAndColor takes its age as 1 - lifetime / total,
+// 1 + 1 / frame time, and the scale and colour curves extrapolate past their last key in a
+// straight line. So every emitting system draws one sprite far bigger than its particles, 31
+// times past the end of life at 30 fps, 121 times at 120: a soft glow sprite near a light becomes
+// a haze, four times larger at 120 fps than on the console. With fear_particle_marker_fix (default
+// on) the marker's lifetime is 0, as EchoPatch sets it: its age is 1, a particle at its end of
+// life, and it is still expired at the next update. The hooks are at the store of the -1.0 (lfs f0
+// from a constant shared by ~290 other places, then stfs f0 to +0x18), in AddParticleBatchMarker
+// and in its copy inlined at the end of EmitParticleBatch (the PC SDK's
+// ClientFxDLL/ParticleSystemGroup.cpp has the same code).
+//                          F.E.A.R.      F.E.A.R. Files
+//   AddParticleBatchMarker sub_82BB65E0  sub_82B7BA50
+//     the hook (f0)        0x82BB6634    0x82B7BAA4
+//   EmitParticleBatch      sub_82BB6E40  sub_82B7C2A8    (calls AddParticleBatchMarker)
+//     the hook (f0)        0x82BB7424    0x82B7C88C
+//   GetParticleSizeAndColor sub_82BB7440 sub_82B7C8A8
 
 #pragma once
 
@@ -35,3 +56,6 @@
 
 // At the start of SetNextServerUpdate: the character in r3, the delay still in f1.
 void FearAiNextUpdate(PPCRegister& r3, PPCRegister& f1);
+
+// At the store of a particle batch marker's lifetime: the -1.0 in f0.
+void FearParticleBatchMarker(PPCRegister& f0);

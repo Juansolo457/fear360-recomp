@@ -15,6 +15,10 @@
 REXCVAR_DEFINE_BOOL(fear_ai_every_frame, true, "F.E.A.R.",
                     "Update enemies every frame (EchoPatch's AI fix). Off = as shipped: above "
                     "100 fps the AI updates every other frame and reacts slowly");
+REXCVAR_DEFINE_BOOL(fear_particle_marker_fix, true, "F.E.A.R.",
+                    "Particle batch markers drawn at a particle's end of life (EchoPatch's "
+                    "oversized particles fix). Off = as shipped: each emitting effect draws one "
+                    "oversized sprite a frame, bigger the higher the frame rate");
 
 namespace {
 // CCharacter's m_bSevered, set once DamageTracker::CheckForSever has cut a piece off (high_fps.h).
@@ -39,4 +43,15 @@ void FearAiNextUpdate(PPCRegister& r3, PPCRegister& f1) {
                 f1.f64);
   }
   f1.f64 = 1e-8;
+}
+
+void FearParticleBatchMarker(PPCRegister& f0) {
+  if (!REXCVAR_GET(fear_particle_marker_fix)) return;
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    REXLOG_INFO("F.E.A.R.: particle batch markers get lifetime 0 (fear_particle_marker_fix; the "
+                "game's {})",
+                f0.f64);
+  }
+  f0.f64 = 0.0;
 }
