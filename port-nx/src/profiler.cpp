@@ -136,9 +136,6 @@ WaitSlot* ThisThreadsWaitSlot() {
 // Translated functions by native address: (native start, guest address), sorted.
 std::vector<std::pair<uintptr_t, uint32_t>> g_functions;
 uintptr_t g_exe_base = 0, g_exe_end = 0;
-// Where the translated code ends: the end of the last translated function (#40). Host code linked
-// after it (our renderer, the SDK) used to count as that function, sub_8307D8A8 in F.E.A.R.
-uintptr_t g_recomp_end = 0;
 
 void BuildFunctionTable() {
   for (const PPCFuncMapping* m = PPCFuncMappings; m->guest || m->host; ++m) {
@@ -150,13 +147,14 @@ void BuildFunctionTable() {
   const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
   g_exe_base = reinterpret_cast<uintptr_t>(base);
   g_exe_end = g_exe_base + nt->OptionalHeader.SizeOfImage;
-  if (!g_functions.empty()) {
-    // Its end from the exe's unwind table; 64 KB on if it has no entry (a leaf function).
-    const uintptr_t last = g_functions.back().first;
-    DWORD64 image = 0;
-    const RUNTIME_FUNCTION* entry = RtlLookupFunctionEntry(DWORD64(last), &image, nullptr);
-    g_recomp_end = entry && image == g_exe_base ? g_exe_base + entry->EndAddress : last + 0x10000;
-  }
+}
+
+// The exe's function holding an address, from its unwind table; null for a leaf function (no
+// entry) or outside the exe.
+const RUNTIME_FUNCTION* ExeFunctionEntry(uintptr_t address) {
+  DWORD64 image = 0;
+  const RUNTIME_FUNCTION* entry = RtlLookupFunctionEntry(DWORD64(address), &image, nullptr);
+  return entry && image == g_exe_base ? entry : nullptr;
 }
 
 // A module's named exports by address (RVA), sorted: a sample outside the translated code is named
@@ -210,18 +208,24 @@ constexpr uint64_t kHostCodeTag = 1ull << 62;
 
 uint64_t Bucket(uintptr_t ip) {
   if (ip >= g_exe_base && ip < g_exe_end && !g_functions.empty()) {
-    // In the translated code: the translated function at or before it.
-    if (ip >= g_functions.front().first && ip < g_recomp_end) {
-      auto it = std::upper_bound(g_functions.begin(), g_functions.end(),
-                                 std::make_pair(ip, UINT32_MAX));
-      return std::prev(it)->second;
+    // The translated function at or before it, if the unwind table says it holds the address
+    // (#40): our renderer and the SDK's code sit after the translated code, and the function
+    // table's import thunks after them, so the nearest start alone put the renderer under the
+    // last translated function (sub_8307D8A8 in F.E.A.R.). A leaf function has no entry: one
+    // without its own counts up to 64 KB from its start.
+    const RUNTIME_FUNCTION* entry = ExeFunctionEntry(ip);
+    auto it = std::upper_bound(g_functions.begin(), g_functions.end(),
+                               std::make_pair(ip, UINT32_MAX));
+    if (it != g_functions.begin()) {
+      const uintptr_t start = std::prev(it)->first;
+      if (entry ? g_exe_base + entry->BeginAddress == start
+                : !ExeFunctionEntry(start) && ip - start < 0x10000) {
+        return std::prev(it)->second;
+      }
     }
-    // The exe's host code: the function holding it, from the unwind table (a leaf function has no
-    // entry: its 16-byte line instead).
-    DWORD64 image = 0;
-    const RUNTIME_FUNCTION* entry = RtlLookupFunctionEntry(DWORD64(ip), &image, nullptr);
-    const uint32_t rva = entry && image == g_exe_base ? uint32_t(entry->BeginAddress)
-                                                      : uint32_t(ip - g_exe_base) & ~0xFu;
+    // The exe's host code: the function holding it (a leaf: its 16-byte line).
+    const uint32_t rva =
+        entry ? uint32_t(entry->BeginAddress) : uint32_t(ip - g_exe_base) & ~0xFu;
     return kModuleTag | kHostCodeTag | rva;
   }
   HMODULE handle = nullptr;

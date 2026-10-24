@@ -439,6 +439,29 @@ Item 2 needs no code: `--timer_queue_blocking_wait` in the launch options for th
 **SDK:** patches 0014 and 0015 are commits `e322091` and `11c330c` on the SDK's branch
 `register-options`, after 0013's `490d264`.
 
+**Built 2026-10-23** (`fear.exe` 19:51, `fearfiles.exe` 19:52; A side saved in
+`private/ab/A-stageB-5a2fdd4` and `-files`). Checked in the binaries: no `-fasync-exceptions` in
+either game's `build.ninja`; the `memcpy` hook's wrapper saves rsi, rdi and rbx only, and the
+runtime DLL's xmm15 saves went from 640 to 630 (the ten leaf hooks).
+
+**PC A/B (2026-10-23, Interval 2 story play, 3x, MSAA honoured, texture pack, 120 cap, profiler
+on).** A `run-20261023-195448-A-stageB-5a2fdd4.log`, B `run-20261023-200444.log`. The user: both
+the smoothest PC runs of the day, B a little better; no visual glitches (one decal flashed once in
+A). `abcompare.py`: game thread 1.65 / 1.69 ms, renderer CPU 1.00 / 1.00, GPU 2.95 / 3.00 ms per
+frame: the same within noise, as expected on a PC this fast at a 120 cap (the Deck is where batch
+1 should show). What B shows:
+- **The game polls the controller 8 times a frame**: `[hid] SDL: 960 controller polls/s, 120 event
+  pumps/s`. Before patch 0015 each poll could wake the UI thread; now it's one pump a frame.
+- **Item 11 didn't work in this build**: the ring thread's host code still showed as
+  `sub_8307D8A8`. The function table (`PPCFuncMappings`) also lists the import thunks
+  (`__imp__XexUnloadImage`, `rexcrt_memcpy`, ...), which sit at the very end of `.text`, after the
+  renderer, so "the end of the last translated function" bounded nothing. **Fixed after the run,
+  not built yet:** a sample is the translated function's only if the unwind table's entry for it
+  starts at that function (or, for a leaf function with no entry, within 64 KB of a start that
+  has none). Checked against this build's `.pdata` and PDB: all 94,371 translated functions
+  classify as translated (46,708 of them leaves), all 6,070 host functions after them as host.
+- **A GPU spike in Docks' closing transformation sequence** (in A too, so not new): #41.
+
 **How to test (ask the user first).**
 1. Keep the current `fear.exe` and `fearfiles.exe` (stage B with 0013) as the A side
    (`private/ab/`), then build both games: a full recompile of the translated code, since its
