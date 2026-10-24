@@ -68,6 +68,10 @@ param(
     # not used before starts empty, as on a new PC: e.g. -Cache cache-new1 to watch the shader
     # warm-up (#53, port-nx/src/shader_warmup.h).
     [ValidatePattern('^[\w.-]+$')][string]$Cache = 'cache',
+    # Each game's user folder (saves, profile, settings.toml), in its port folder, the same way: a
+    # new name is a new player (first-run settings, no saves), e.g. -User user-run1 -Cache
+    # cache-run1 for a smoke-test run from scratch (docs/SMOKE-1.0.md).
+    [ValidatePattern('^[\w.-]+$')][string]$User = 'user',
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
@@ -92,7 +96,7 @@ New-Item -ItemType Directory -Force (Join-Path $port 'logs') | Out-Null
 $log = Join-Path $port "logs\run-$stamp$tag.log"
 $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
-    '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
+    '--game_data_root', "$port\assets", '--user_data_root', "$port\$User",
     '--cache_root', "$port\$Cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
 if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
