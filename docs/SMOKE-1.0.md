@@ -5,9 +5,10 @@ Every level of both games played to the end on PC before 1.0 ships (#55 the setu
 Notes.
 
 **How to run it:** `pwsh -NoProfile -File tools/launch.ps1 -Collection -Invulnerable`, otherwise
-the default settings. With `-Invulnerable` the player can't die: where a hit would have killed,
-health refills and the game says so (the PC's test variable `HealthTest`). The log confirms it
-with `console variable HealthTest = 1` once a level has loaded. Keep each game's `cache` folder:
+the default settings. With `-Invulnerable` (`fear_invulnerable`) the player can't die: where a
+hit would have killed, health refills and play carries on, with no death effect (the PC's test
+variable `HealthTest`). The log confirms it with `console variable HealthTest = 1` once a level
+has loaded. Keep each game's `cache` folder:
 its `prewarm-*.bin` records every shader seen, for the shader warm-up list (#53,
 `tools/make_warmup.py`).
 

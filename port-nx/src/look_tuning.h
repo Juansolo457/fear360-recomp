@@ -36,6 +36,12 @@
 // "EnableVolumetricLight=0,VolumetricLightNoise=0"), and with fear_console_vars_log logs each one
 // the game creates with its starting value. A variable the game sets again later (the detail
 // options, a level's settings) keeps that later value.
+//
+// fear_invulnerable (the smoke test, #55; tools/launch.ps1 -Invulnerable) uses that too: it starts
+// the PC's test variable HealthTest at 1, so where a hit would kill the player in single player or
+// Instant Action, the server refills their health instead. The server then tells the client, which
+// would play a death (a red overlay, a sound and "I was killed") and carry on;
+// FearHealthTestNotice skips that.
 
 #pragma once
 
@@ -54,3 +60,7 @@ void Apply(rex::Runtime& runtime);
 
 // VarTrack::Init(this, client, name (r5), string default, float default (f1)), at its entry.
 void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1);
+
+// CInterfaceMgr::HandlePlayerEventMessage, at its case for the health test event: true (with
+// fear_invulnerable) jumps to the handler's exit, skipping the death effect.
+bool FearHealthTestNotice();

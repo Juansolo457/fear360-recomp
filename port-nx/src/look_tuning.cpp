@@ -49,6 +49,10 @@ REXCVAR_DEFINE_STRING(fear_console_vars, "", "F.E.A.R.",
 REXCVAR_DEFINE_BOOL(fear_console_vars_log, false, "F.E.A.R.",
                     "Log each console variable the game creates, with its starting value")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_invulnerable, false, "F.E.A.R.",
+                    "For testing (the smoke test, #55): the player can't die in single player and "
+                    "Instant Action; where a hit would kill, health refills, with no death effect")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace fear::look_tuning {
 namespace {
@@ -105,6 +109,12 @@ std::vector<std::pair<std::string, float>> TestChanges() {
       changes.emplace_back(name, std::strtof(item.c_str() + equals + 1, nullptr));
     }
     pos = end + 1;
+  }
+  // fear_invulnerable (#55): the PC's test variable HealthTest, still in both games. Where a hit
+  // would kill the player, the server refills their health instead and tells the client, which
+  // FearHealthTestNotice keeps from playing a death.
+  if (REXCVAR_GET(fear_invulnerable)) {
+    changes.emplace_back("HealthTest", 1.0f);
   }
   return changes;
 }
@@ -285,3 +295,5 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
     }
   }
 }
+
+bool FearHealthTestNotice() { return REXCVAR_GET(fear_invulnerable); }

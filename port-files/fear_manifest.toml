@@ -202,6 +202,14 @@ name = "FearConsoleVarDefault"
 address = 0x822C4B28
 registers = ["r5", "f1"]
 
+# fear_invulnerable (port-nx/src/look_tuning.h, #55): CInterfaceMgr::HandlePlayerEventMessage
+# (sub_82340D88), its switch's case 14 here, the health test event: skipped to the handler's exit.
+[[entrypoint.midasm_hook]]
+name = "FearHealthTestNotice"
+address = 0x82340EB4
+registers = []
+jump_address_on_true = 0x82341D18
+
 # PC Settings, Switch Game and Quit to Desktop in the main menu (port-nx/src/fear_menu.*), as in
 # F.E.A.R. CScreenMain::Build (sub_823EAAC0) ends at 0x823EAF24, where both its paths meet: add
 # our items after Options.
