@@ -20,6 +20,8 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/format.h>
+
 #include <rex/cvar.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/filesystem/vfs.h>
@@ -271,7 +273,7 @@ void Apply(rex::Runtime& runtime) {
 
 }  // namespace fear::look_tuning
 
-void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
+void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& r6, PPCRegister& f1) {
   static const auto changes = [] {  // the cvars are final by now
     auto all = fear::look_tuning::Changes();
     const auto fov = fear::look_tuning::FovChanges();
@@ -289,13 +291,22 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
   static std::set<std::string, std::less<>> logged;
   for (const auto& [wanted, value] : changes) {
     if (view != wanted) continue;
+    // A variable created with a text default (r6) starts from the text and ignores the number
+    // (VarTrack::Init), so ours needs the text gone: ModelDecalPerformanceLevel starts as "1",
+    // which kept the blood marks off while the log said 3.
+    const char* text = r6.u32 ? reinterpret_cast<const char*>(
+                                    rex::system::kernel_memory()->virtual_membase() + r6.u32)
+                              : nullptr;
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (logged.insert(wanted).second) {
-        REXLOG_INFO("F.E.A.R.: console variable {} = {} (the game's {})", wanted, value, f1.f64);
+        const std::string game = text ? fmt::format("\"{}\"", std::string_view(text, strnlen(text, 32)))
+                                      : fmt::format("{}", f1.f64);
+        REXLOG_INFO("F.E.A.R.: console variable {} = {} (the game's {})", wanted, value, game);
       }
     }
     f1.f64 = value;
+    r6.u64 = 0;
     return;
   }
   if (log_all) {

@@ -61,8 +61,9 @@ void Apply(rex::Runtime& runtime);
 
 }  // namespace fear::look_tuning
 
-// VarTrack::Init(this, client, name (r5), string default, float default (f1)), at its entry.
-void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1);
+// VarTrack::Init(this, client, name (r5), text default (r6), number default (f1)), at its entry.
+// A variable with a text default ignores the number, so an override also clears r6.
+void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& r6, PPCRegister& f1);
 
 // CInterfaceMgr::HandlePlayerEventMessage, at its case for the health test event: true (with
 // fear_invulnerable) jumps to the handler's exit, skipping the death effect.

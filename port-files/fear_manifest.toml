@@ -195,12 +195,12 @@ registers = ["r3", "f0"]
 
 # Right-stick tuning (port-nx/src/look_tuning.*). Files keeps its game database in the catalogue,
 # so the values are swapped as the game copies them into console variables: VarTrack::Init
-# (sub_822C4B28: name in r5, the database's value in f1), at its entry. The stick's are read in
-# sub_82350318 (GPadAimEdge*, TurningSoftLock*).
+# (sub_822C4B28: name in r5, a text default in r6, which wins over the database's value in f1), at
+# its entry. The stick's are read in sub_82350318 (GPadAimEdge*, TurningSoftLock*).
 [[entrypoint.midasm_hook]]
 name = "FearConsoleVarDefault"
 address = 0x822C4B28
-registers = ["r5", "f1"]
+registers = ["r5", "r6", "f1"]
 
 # fear_invulnerable (port-nx/src/look_tuning.h, #55): CInterfaceMgr::HandlePlayerEventMessage
 # (sub_82340D88), its switch's case 14 here, the health test event: skipped to the handler's exit.

@@ -20,6 +20,15 @@ You build it on your own PC from your own Xbox 360 discs: [SETUP.md](SETUP.md) w
   lights (#38). PC Settings can turn it back on.
 - Optional: the PC version's higher-resolution textures, built from your own PC copy into a local
   pack ([TEXTURES.md](TEXTURES.md)).
+- Blood and armour marks on enemies where your shots hit, at the PC's Maximum detail. The 360
+  version starts with them switched off (#47).
+- Sharper distant textures, like EchoPatch's mipmap bias on PC (#50); PC Settings has three
+  levels.
+
+**Enemies that fight back.** The 360 versions made Normal difficulty easier than the PC's. Now
+every difficulty uses Very Hard's tactics by default: enemies aim well, push, dodge and throw
+grenades. How hard they hit still follows the difficulty you pick. PC Settings → Enemy AI also
+offers the PC's difficulties or the 360's originals (#3).
 
 **High frame rates.** Up to 120 fps, paced to your display. The console code assumes 30 fps in
 places; fixed so far:
@@ -29,8 +38,9 @@ places; fixed so far:
 - Bullet tracers no longer stick in mid-air (#27).
 
 **PC Settings** in each game's main menu: resolution scale, window mode, frame rate limit,
-texture filtering, field of view (#1), aim assist, right-stick feel (the 360's turn ramp off by
-default), animation timing, PC textures and bloom. *Quit to Desktop* is there too.
+texture filtering and sharpness, field of view (#1), aim assist, right-stick feel (the 360's turn
+ramp off by default), enemy AI, blood marks, animation timing, PC textures and bloom. *Quit to
+Desktop* is there too.
 
 **Performance.** The recompiled code keeps PowerPC registers in CPU registers where it can (#34):
 about 30% less CPU time on the game thread than before, measured on PC. Background threads that
@@ -63,8 +73,7 @@ workload, LLVM 20, CMake, Ninja, Git, PowerShell 7 and Python: see [SETUP.md](SE
   controller doesn't respond there, click the game window once.
 - The first-person weapon isn't corrected for wide fields of view yet.
 - Whether the 360-only Holiday bonus mission unlocks normally isn't checked yet (#39).
-- The AI can still feel slower than in the PC version at high frame rates; whether that's the
-  360's own tuning is being checked (#3).
+- The Sharp enemy AI is new, and its tuning across difficulties is still being play-tested (#3).
 - On Windows the games read controllers through XInput (Xbox pads, or anything Steam Input
   presents as one): SDL found no controller in the game on one laptop (#54). `input_backend =
   "sdl"` in `user/settings.toml` brings SDL back. The Steam Deck keeps SDL.

@@ -334,11 +334,11 @@ registers = ["r31", "f1"]
 
 # Console-variable defaults (src/look_tuning.h): the field of view (FovY, set up at 0x823B9948
 # with 70) is swapped as the game creates the variable. VarTrack::Init (sub_822FC710: name in r5,
-# default in f1), at its entry, as in F.E.A.R. Files.
+# text default in r6, which wins over the number default in f1), at its entry, as in F.E.A.R. Files.
 [[entrypoint.midasm_hook]]
 name = "FearConsoleVarDefault"
 address = 0x822FC710
-registers = ["r5", "f1"]
+registers = ["r5", "r6", "f1"]
 
 # fear_invulnerable (src/look_tuning.h, #55): CInterfaceMgr::HandlePlayerEventMessage
 # (sub_8236AE00), its switch's case 13, the health test event (the "HealthTest" sound, "I was
