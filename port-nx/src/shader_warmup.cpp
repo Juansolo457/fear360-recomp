@@ -52,7 +52,9 @@ REXCVAR_DEFINE_BOOL(fear_shader_warmup, true, "F.E.A.R.",
 
 namespace {
 
-// This game's list (<project>/warmup/shader_warmup.inc, from tools/make_warmup.py). Its lines:
+// This build's list: <project>/warmup/shader_warmup.inc, generated locally by tools/make_warmup.py
+// and not tracked, copied into the build tree by cmake/warmup_list.cmake (an empty list when there
+// is none). Its lines:
 //   warmup 1 <title id> <PipelineKey bytes>
 //   s <hash> <type> <dwords> <modification,...> cat <effect> <byte offset> [<dword>:<xor> ...]
 //   s <hash> <type> <dwords> <modification,...> exe <offset in the image> [<dword>:<xor> ...]
@@ -207,7 +209,11 @@ List Load(uint32_t title_id) {
   for (std::string_view& line : lines) {
     if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
   }
-  if (lines.empty()) return list;
+  if (lines.empty()) {
+    REXLOG_INFO("F.E.A.R.: no shader warm-up list in this build (tools/make_warmup.py makes one); "
+                "warming up what this PC's cache has seen");
+    return list;
+  }
   const auto header = Split(lines[0], ' ');
   uint32_t list_title = 0;
   if (header.size() != 4 || header[0] != "warmup" || header[1] != "1" ||

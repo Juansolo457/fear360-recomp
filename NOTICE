@@ -1,36 +1,55 @@
 fear360-recomp: licensing notice
 
-The MIT license in LICENSE covers this repository's own files: tools/, docs/,
-port/src/, port/CMakeLists.txt and the top-level files.
+This repository mixes code under three sets of terms. The full license texts are in LICENSE
+(MIT) and LICENSES/; LICENSES/PROVENANCE.md says where each text comes from. Copied GPL and
+BSD code keeps its own terms: it isn't relicensed as MIT.
 
-port/fear_manifest.toml lists function entry points found and verified by the
-fear-nx project (https://github.com/infriker/fear-nx) for the same executable.
-That list comes from fear-nx's GPL-3.0 manifest, so this file is distributed
-under the GNU GPL v3 or later.
+1. This project's own code: MIT (LICENSE)
+   tools/, docs/, port/src/, port-nx/src/ outside port-nx/src/native/, port-nx/tools/, the
+   CMakeLists.txt files of port/, port-nx/ and port-files/, and the top-level files, except
+   where a file's header says otherwise.
 
-port/generated/rexglue.cmake, port/CMakePresets.json and the initial port/src
-files were produced by `rexglue init` from the ReXGlue SDK
-(https://github.com/rexglue/rexglue-sdk, BSD-3-Clause, derived in part from
-Xenia). The SDK itself is not included; the build uses a local copy.
+2. GNU GPL version 3 or later (LICENSES/GPL-3.0.txt)
+   - port-nx/src/native/ is a copy (with local changes, listed in its UPSTREAM.md) of src/native/
+     from fear-nx (https://github.com/infriker/fear-nx, commit acad80d), which fear-nx licenses
+     GPL-3.0-or-later. fear-nx adapted it from Project8Recomp (https://github.com/R-drg/project8-sw)
+     and nfsmw-nx (https://github.com/StevensND/nfsmw-nx), both GPL-3.0. Most files carry
+     "SPDX-License-Identifier: GPL-3.0-or-later"; the rest of that directory (headers without
+     one, the tests, shaders/*.glsl, adapted from Project8Recomp, and the SPIR-V headers generated
+     from them) is under the same terms. Our changes to these files are GPL-3.0-or-later too.
+   - port/fear_manifest.toml and port-nx/fear_manifest.toml start from fear-nx's GPL-3.0 list of
+     function entry points for the same executable. port-files/fear_manifest.toml follows
+     port-nx's and is distributed under the same terms.
+   - patches/rexglue-sdk-nx/0000-*.patch is fear-nx's native-vulkan SDK patch
+     (patches/native-vulkan/rexglue-sdk.patch from fear-nx, commit acad80d), GPL-3.0-or-later,
+     kept here so the SDK can be rebuilt from this repository.
+   - The programs port-nx and port-files build link all of the above, so those builds are
+     distributed under the GNU GPL v3 or later.
 
-No game assets, executables, generated translations or data from F.E.A.R.
-(Xbox 360 or PC) are distributed here. Tools operate on the user's own copy,
-and their outputs stay local.
+3. BSD-3-Clause (LICENSES/ReXGlue-BSD-3-Clause.txt, LICENSES/Xenia-BSD-3-Clause.txt)
+   - port/generated/rexglue.cmake, port-nx/generated/rexglue.cmake,
+     port-files/generated/rexglue.cmake, the CMakePresets.json files and the initial port/src
+     files were produced by `rexglue init` from the ReXGlue SDK
+     (https://github.com/rexglue/rexglue-sdk, BSD-3-Clause, derived in part from Xenia). This is
+     SDK build scaffolding, not a translation of game code.
+   - patches/rexglue-sdk-nx/0001-*.patch and on are this project's changes to the SDK, under the
+     SDK's BSD-3-Clause license; their context lines are ReXGlue and Xenia code.
+   - Parts of port-nx/src/native/ originate in Xenia (https://github.com/xenia-project/xenia,
+     BSD-3-Clause), reached through ReXGlue and fear-nx; Xenia's notice applies to those parts as
+     well as the GPL.
+   - third_party/rexglue-sdk-nx (not tracked; tools/setup-sdk.ps1 recreates it) is ReXGlue
+     c94f5eb with patches/rexglue-sdk-nx/ applied; ReXGlue's license and Xenia's notices apply,
+     and the libraries in its thirdparty/ keep their own licenses.
 
-F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions.
-This project is not affiliated with or endorsed by Monolith Productions,
-Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.
+Game material
+No game assets, executables, extracted or decrypted images, generated translations or other
+data from F.E.A.R. (Xbox 360 or PC) are distributed here. Tools operate on the user's own copy
+and their outputs stay local: .gitignore keeps them out, and tools/audit_repo.py checks every
+commit. The shader warm-up lists (port-nx/warmup/, port-files/warmup/) are generated locally
+from the user's own files and caches and are not tracked. The private test packages that
+tools/steamdeck/make_package.py makes contain game data and programs built from it: they must
+never be uploaded anywhere, including as release assets.
 
-port-nx/src/native/ is a copy (with local changes, listed in its UPSTREAM.md) of src/native/ from fear-nx
-(https://github.com/infriker/fear-nx, commit acad80d), GPL-3.0-or-later,
-itself adapted from Project8Recomp (https://github.com/R-drg/project8-sw)
-and nfsmw-nx (https://github.com/StevensND/nfsmw-nx). The port-nx build that
-links it is therefore distributed under the GNU GPL v3 or later.
-
-third_party/rexglue-sdk-nx (not tracked; tools/setup-sdk.ps1 recreates it) is
-ReXGlue c94f5eb with patches/rexglue-sdk-nx/ applied; ReXGlue's BSD-3-Clause
-license and Xenia's notices apply to it. Of those patches, 0000 is fear-nx's
-native-vulkan SDK patch (patches/native-vulkan/rexglue-sdk.patch from
-https://github.com/infriker/fear-nx, commit acad80d), GPL-3.0-or-later, kept
-here so the SDK can be rebuilt from this repository; 0001 on are this
-project's, under the SDK's BSD-3-Clause license.
+F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions. This project is
+not affiliated with or endorsed by Monolith Productions, Day 1 Studios, Warner Bros.,
+Vivendi/Sierra, Activision or Microsoft.

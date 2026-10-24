@@ -36,10 +36,13 @@ default), animation timing, PC textures and bloom. *Quit to Desktop* is there to
 about 30% less CPU time on the game thread than before, measured on PC. Background threads that
 only spun or polled under Proton were cut back for the Steam Deck (#40; not measured there yet).
 
-**No first-run stutter.** The first start of each game on a new PC or graphics driver builds the
-shaders and pipelines seen in play, on all CPU cores, before the main menu, with a progress panel
-if it takes more than a moment. The shaders come from your own disc's files. Before, each one was
-built the first time something drew with it, so the first load and every new area hitched (#53).
+**Shaders built before play.** Each start builds every shader and pipeline your PC has seen in
+earlier runs, on all CPU cores, before the main menu, with a progress panel if it takes more than
+a moment. A graphics driver update or a cleared cache no longer brings the stutter back; only the
+very first run builds them as they appear. To skip that on another PC (a laptop, the Deck),
+`tools/make_warmup.py` turns one PC's shader cache and your own game files into a warm-up list the
+next build compiles in. The list is derived from the game, so it stays on your PC: it isn't part of
+the source and must not be shared (#53).
 
 **Steam Deck (experimental).** The Windows build runs under Proton; it held a median of 89 fps
 on a Deck OLED in testing, with the heaviest scenes around 74. Packaging steps:

@@ -77,9 +77,18 @@ if(WIN32)
 endif()
 target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
 set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
+# The shader warm-up list (port-nx/src/shader_warmup.h): generated locally into warmup/ by
+# tools/make_warmup.py and not tracked. Each build copies it, or an empty list, to the build tree.
+add_custom_target(fear_warmup_list
+    COMMAND "${CMAKE_COMMAND}" "-DSRC=${CMAKE_CURRENT_SOURCE_DIR}/warmup/shader_warmup.inc"
+            "-DDST=${CMAKE_CURRENT_BINARY_DIR}/warmup/shader_warmup.inc"
+            -P "${HOST}/../cmake/warmup_list.cmake"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/warmup/shader_warmup.inc"
+    COMMENT "Shader warm-up list")
+add_dependencies(fear fear_warmup_list)
 target_include_directories(fear PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"            # generated/default/fear_init.h, from port-nx/src/main.cpp
-    "${CMAKE_CURRENT_SOURCE_DIR}/warmup"     # shader_warmup.inc, F.E.A.R. Files' list
+    "${CMAKE_CURRENT_BINARY_DIR}/warmup"     # shader_warmup.inc, the list above
     "${HOST}"
     "${REXSDK_DIR}/src/graphics"
     "${REXSDK_DIR}/thirdparty/glslang"

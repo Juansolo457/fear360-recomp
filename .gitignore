@@ -1,52 +1,68 @@
-# Game data: never commit
+# What must never be committed: anything from the game (its files, executables, images,
+# translations of its code, data derived from it) and anything built from it. .gitignore only
+# keeps untracked files out: it doesn't untrack files or clean history. tools/audit_repo.py checks
+# what is tracked and staged, and CI runs it on every push (README.md, "Legal").
+# Port folders: port/ (stock SDK), port-nx/ (F.E.A.R.), port-files/ (F.E.A.R. Files); the
+# /port*/ rules cover any later one too.
+
+# --- The game: your disc and everything extracted, decrypted, dumped or captured from it ---
+# private/ holds the disc, decrypted images, captures, texture packs, A/B builds and the private
+# test packages (tools/steamdeck/make_package.py: game data, never upload them anywhere).
+private/
 game/
+/port*/assets
 *.iso
 *.xex
 *.xbe
 *.god
 *.stfs
+*.gamedb
+uberCatalog.cat
+*.Arch00
+# Shader dumps (--dump_shaders <dir>; a bare --dump_shaders writes to <port>/true/)
+/port*/true/
+/port*/logs/shaders*/
 
-# Generated recompiled code
+# --- Generated translations of the game's code ---
+# generated/<name>/ is the recompiled game (rexglue codegen output). generated/rexglue.cmake
+# beside it is the SDK's build scaffolding (BSD-3-Clause, NOTICE) and stays tracked.
+/port*/generated/*/
 ppc/
 shaders_generated/
 
-# Build output
+# --- Derived from the game, local only ---
+# Shader warm-up lists (tools/make_warmup.py, #53): hashes, locations and patches of game shaders.
+/port*/warmup/
+
+# --- Runtime state: logs, saves, settings, shader and pipeline caches, crash dumps ---
+/port*/logs/
+/port*/user*/
+/port*/cache*/
+*.log
+*.dmp
+
+# --- Build output (programs built from the game's code) and packages ---
+/port*/out/
 build/
 out/
+*.exe
+*.dll
+*.lib
+*.obj
 *.pdb
+*.ilk
+*.zip
+*.7z
+*.rar
 
-# Editor / OS
+# --- Toolchain junction and SDK checkout (tools/setup-sdk.ps1) ---
+.tools/
+third_party/
+
+# --- Editor / OS ---
 .vscode/
 .vs/
 .idea/
 __pycache__/
 Thumbs.db
 .DS_Store
-
-# Local game copy, generated translations and toolchain for port/
-private/
-.tools/
-port/assets/
-port/generated/default/
-port/logs/
-port/user/
-port/cache/
-*.log
-third_party/
-port/out/
-port/user-smoke/
-port/cache-smoke/
-port-nx/assets
-port-nx/generated/default/
-port-nx/out/
-port-nx/logs/
-port-nx/user*/
-port-nx/cache*/
-port-nx/user-smoke/
-port-nx/cache-smoke/
-port-files/assets
-port-files/generated/default/
-port-files/out/
-port-files/logs/
-port-files/user*/
-port-files/cache*/

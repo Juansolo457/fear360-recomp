@@ -24,6 +24,8 @@ The game reads its paths from the command line only, so the Steam launch options
 them relative to the game's folder (Steam's Start In). No shader cache: it is per GPU, and the Deck
 builds its own over the first runs. Stored (not compressed) and Zip64: the data is ~13 GB and
 mostly compressed already. The game data is the user's own disc's: the package stays in private/.
+These packages contain game data and programs built from the game's code: never upload one, share
+it or attach it to a release. Releases are source only.
 """
 import glob
 import os

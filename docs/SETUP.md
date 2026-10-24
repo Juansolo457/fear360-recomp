@@ -119,8 +119,11 @@ higher-resolution textures once and use them in both games: [TEXTURES.md](TEXTUR
 - **A controller that isn't an Xbox one:** add `input_backend = "sdl"` to the game's
   `user/settings.toml`. SDL also reads PlayStation and Switch pads, but on one Windows 11 laptop
   it found no usable pad in the game (#54), which is why XInput is the Windows default.
-- **A pause before the main menu on the first start ("PREPARING SHADERS"):** the game builds its
-  shaders and pipelines for your graphics card and driver, once, so play doesn't hitch. They're
-  kept in the game's `cache` folder; later starts skip it (#53).
+- **Hitches the first time you play, or a pause before the main menu ("PREPARING SHADERS"):**
+  the first run builds each shader and pipeline as it first appears; they're kept in the game's
+  `cache` folder, and every later start builds them all before the main menu, which is quick once
+  the driver has them (#53). To take one PC's shaders to another, `tools/make_warmup.py` (its
+  header has the commands) writes a warm-up list for the next build. That list is derived from
+  the game: keep it local, never commit or share it.
 - **A crash:** the game writes `crash-<time>.txt` and `.dmp` to `port-nx/logs` (or
   `port-files/logs`), next to each run's log. Please attach the text file to an issue on GitHub.

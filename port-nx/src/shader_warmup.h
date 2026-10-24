@@ -7,15 +7,19 @@
 // again. Later runs were smooth: the renderer remembers what it built (its prewarm file, per GPU)
 // and the driver keeps the pipelines (the driver cache). A new PC had neither.
 //
-// So this build carries a list per game, <project>/warmup/shader_warmup.inc, written by
-// tools/make_warmup.py from prewarm files recorded in play. For each shader it says where the game
-// keeps it (a compiled effect in Game/uberCatalog.cat, or the executable), which dwords the game's
-// D3D patches into a vertex shader for its vertex layout, and its translation variants; then the
-// pipelines' keys. No shader code: Load rebuilds the shaders from the player's own files and keeps
-// those that match their hashes. The renderer adds them to its prewarm list, and before the game's
-// first GPU command translates everything and builds every pipeline on all cores, while the game
-// waits (Renderer::RunWarmup). If that takes more than a moment, a panel shows the progress. With
-// the driver's cache warm it takes a fraction of a second.
+// Before the game's first GPU command, the renderer translates everything its prewarm file has seen
+// and builds every pipeline on all cores, while the game waits (Renderer::RunWarmup). If that takes
+// more than a moment, a panel shows the progress. With the driver's cache warm it takes a fraction
+// of a second.
+//
+// A build can also carry a warm-up list per game, <project>/warmup/shader_warmup.inc, which
+// tools/make_warmup.py generates locally from the player's own game files and prewarm files, for
+// example to give a second PC (the laptop, the Deck) what the first one has played. It is derived
+// from the game (shader hashes, where each shader is in the game's files, the dwords the game's D3D
+// patches into a vertex shader for its vertex layout, the pipelines' keys), so it is not tracked
+// and never published: the build compiles in an empty list when there is none
+// (cmake/warmup_list.cmake). Load rebuilds the listed shaders from the player's own files and keeps
+// those that match their hashes; the renderer adds them to its prewarm list.
 
 #pragma once
 

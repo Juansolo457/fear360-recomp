@@ -3,7 +3,8 @@
 Native Windows (then Linux) build of the Xbox 360 **F.E.A.R.**, statically recompiled with ReXGlue. The goal is an OpenCE-style PC version, not a bare port: point it at your own files, launch, and get real options (resolution, widescreen, filtering, frame rate, controls). Roadmap: [docs/PLAN.md](docs/PLAN.md). **Current state: [docs/PROGRESS.md](docs/PROGRESS.md)** (play-test findings, decisions, next steps); build/run detail: [docs/HANDOFF.md](docs/HANDOFF.md). Disc dumping: [docs/RIPPING.md](docs/RIPPING.md). Architecture, executable map and ranked performance options: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (analysis scripts in `tools/analysis/`). Sister projects: `../n3-360-recomp` (same toolchain, parked) and `../quake4-360-recomp`.
 
 ## Hard rules
-- Never commit game data: ISOs, XEX files, extracted assets, generated translations (`port/generated/default/`), logs or saves. All are gitignored.
+- Never commit game data: ISOs, XEX files, extracted assets, generated translations (`port*/generated/<name>/`), shader warm-up lists (`port*/warmup/`), logs or saves. All are gitignored. Run `python -I tools/audit_repo.py` before every commit and push (CI runs it too); it reads git's blobs, so a clean run means nothing tracked or staged is game material.
+- Releases are source only: never attach builds, game files or the private packages from `tools/steamdeck/make_package.py` (they contain game data) to a release or upload them anywhere.
 - The user's disc image is at `D:\x360-recomps\FEAR 1\` and the PC Ultimate Shooter Edition (base + Extraction Point + Perseus Mandate) at `E:\SteamLibrary\steamapps\common\FEAR Ultimate Shooter Edition`. Both are read-only references; never modify them.
 - Never close or kill the user's running game. Ask them to quit it.
 - Don't record where game copies came from.

@@ -8,9 +8,9 @@ Notes.
 the default settings. With `-Invulnerable` (`fear_invulnerable`) the player can't die: where a
 hit would have killed, health refills and play carries on, with no death effect (the PC's test
 variable `HealthTest`). The log confirms it with `console variable HealthTest = 1` once a level
-has loaded. Keep each game's `cache` folder:
-its `prewarm-*.bin` records every shader seen, for the shader warm-up list (#53,
-`tools/make_warmup.py`).
+has loaded. Keep each game's `cache` folder: its `prewarm-*.bin` records every shader seen, for a
+local shader warm-up list (#53, `tools/make_warmup.py`; the list stays local and is never
+committed).
 
 **A level passes when:**
 - it loads, with its chapter card or loading screen shown correctly;

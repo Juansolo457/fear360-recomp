@@ -1,6 +1,11 @@
-"""Write a game's shader warm-up list (#53) from the renderer's prewarm files.
+"""Write a game's shader warm-up list (#53) from the renderer's prewarm files, locally.
 
     python -I tools/make_warmup.py <game assets> <image.bin> <out.inc> <prewarm.bin>...
+
+The output is derived from the game (shader hashes, where each shader is in the game's files, XORs
+of game shader dwords, pipeline state seen in play): it stays on this PC. <project>/warmup/ is
+ignored by git and checked by tools/audit_repo.py; never commit or publish a list. The next build
+compiles it in (port-nx/cmake/warmup_list.cmake); without one the build carries an empty list.
 
     F.E.A.R.:       python -I tools/make_warmup.py port-nx/assets private/image/default.bin
                         port-nx/warmup/shader_warmup.inc port-nx/cache/shaders/driver/prewarm-*.bin
@@ -158,9 +163,8 @@ def main():
         f.write(f'// Shader warm-up list for title {title}, written by tools/make_warmup.py from '
                 f'{len(sys.argv) - 4} prewarm file(s):\n'
                 '// where each shader seen in play is in the game data, with its variants and '
-                'pipelines. No shader\n'
-                '// code: the renderer rebuilds the shaders from the player\'s own files at startup '
-                '(#53).\n')
+                'pipelines (#53).\n'
+                '// Derived from the game: local only, never commit or publish it.\n')
         f.write('R"WARMUP(' + body + '\n)WARMUP"\n')
     print(f'{out}: {len(placed)} shaders ({counts["cat"]} in effects, {counts["exe"]} in the '
           f'executable, {counts["patched"]} patched vertex shaders), {counts["missing"]} left out; '

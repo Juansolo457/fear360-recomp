@@ -37,7 +37,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ✅ PC textures in place of the 360's low-res ones | a local pack built from your PC copy: **4,710 textures at 4× the pixels**, 81% of what the intro draws ([docs/TEXTURES.md](docs/TEXTURES.md)) |
 | ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": two entries added to the game's own menu (under Options) open a settings panel (resolution, window, frame rate, texture filtering, PC textures, field of view, right stick, aim assist, animation timing, bloom; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
-| ✅ No first-run stutter | "no issues in any of the loads of any of the levels": the first start on a new PC or driver builds every shader and pipeline seen in play before the main menu, the shaders rebuilt from your own disc's files (#53, `port-nx/src/shader_warmup.h`) |
+| ✅ Shaders built before play | every start builds the shaders and pipelines your PC has seen before the main menu, on all cores, so driver updates don't bring the stutter back; a locally generated list (`tools/make_warmup.py`, never committed) carries them to another PC, where the test went "no issues in any of the loads of any of the levels" (#53, `port-nx/src/shader_warmup.h`) |
 | ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu before either game loads, *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays at 4K and 80 fps with its own PC texture pack (7,607 textures) and F.E.A.R.'s right-stick fix: "running really well… ran better out of the box than Fear 1 did"; next, the smoke plumes and an optimisation pass. The plan for one collection: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Steam Deck (Proton), experimental | median 89 fps on a Deck OLED, heaviest scenes about 74 (#28, #40; [video](https://youtu.be/6rP_icfY-sM)); `tools/steamdeck/README-SteamDeck.txt` |
@@ -75,9 +75,11 @@ docs/             progress, handoff, findings, plan, ripping
 
 ## Legal
 
-- No assets, executables, generated code or proprietary code are distributed.
-- `port-nx/src/native/` is GPL-3.0-or-later (fear-nx ← Project8Recomp ← nfsmw-nx), so builds that link it are GPL. ReXGlue is BSD-3-Clause with Xenia's notices.
-- Our own tools, docs and glue are MIT ([LICENSE](LICENSE), [NOTICE](NOTICE)).
+- No assets, executables, generated code or proprietary code are distributed. Releases are source only: never attach builds, game files or the private test packages `tools/steamdeck/make_package.py` makes. Before pushing, run `python -I tools/audit_repo.py` (CI runs it too).
+- Three sets of terms, file by file in [NOTICE](NOTICE), full texts in [LICENSES/](LICENSES/):
+  - **MIT** ([LICENSE](LICENSE)): our own tools, docs and glue.
+  - **GPL-3.0-or-later** ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)): `port-nx/src/native/` (fear-nx ← Project8Recomp ← nfsmw-nx), the manifests and SDK patch 0000. Builds that link the renderer are GPL.
+  - **BSD-3-Clause**: ReXGlue (with Xenia's notices), its `rexglue init` scaffolding and our SDK patches 0001 on.
 - F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions. Not affiliated with Monolith, Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.
 
 ## Credits
