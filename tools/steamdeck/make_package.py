@@ -99,6 +99,11 @@ a current Vulkan driver, and an Xbox controller.
 Play: extract the zip anywhere, then double-click "Play F.E.A.R..cmd". It opens the collection
 menu; pick a game. If the controller doesn't react there, click the game window once.
 
+First start of each game: it builds the game's shaders for this graphics card and driver before
+the main menu (a "PREPARING SHADERS" panel if it takes more than half a second), so play
+shouldn't hitch the first time an area or effect appears. Later starts skip it. The log's
+"Shader warm-up:" line says how long it took.
+
 Settings (each game's user/settings.toml, as on the Deck): 1x render scale (1280x720), up to
 120 fps, no MSAA, no PC texture pack, the profiler on for the logs. Controllers are read through
 XInput, the Windows default; an input_backend line from an earlier copy can stay. PC

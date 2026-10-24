@@ -1,4 +1,4 @@
-# F.E.A.R. 360 Recompiled 0.1 (Windows, source release)
+# F.E.A.R. 360 Recompiled 1.0 (Windows, source release)
 
 The Xbox 360 versions of **F.E.A.R.** and **F.E.A.R. Files** (Extraction Point + Perseus
 Mandate), statically recompiled to run natively on Windows: high resolutions, high frame rates,
@@ -7,7 +7,7 @@ PC settings, and the console's own game code.
 **This release is source only.** It contains no game code, no game data and no executables.
 You build it on your own PC from your own Xbox 360 discs: [SETUP.md](SETUP.md) walks through it.
 
-## What's in 0.1
+## What's in 1.0
 
 **Both games in one collection.** A menu picks F.E.A.R. or F.E.A.R. Files before either loads;
 *Switch Game* in each game's main menu returns to it.
@@ -36,6 +36,11 @@ default), animation timing, PC textures and bloom. *Quit to Desktop* is there to
 about 30% less CPU time on the game thread than before, measured on PC. Background threads that
 only spun or polled under Proton were cut back for the Steam Deck (#40; not measured there yet).
 
+**No first-run stutter.** The first start of each game on a new PC or graphics driver builds the
+shaders and pipelines seen in play, on all CPU cores, before the main menu, with a progress panel
+if it takes more than a moment. The shaders come from your own disc's files. Before, each one was
+built the first time something drew with it, so the first load and every new area hitched (#53).
+
 **Steam Deck (experimental).** The Windows build runs under Proton; it held a median of 89 fps
 on a Deck OLED in testing, with the heaviest scenes around 74. Packaging steps:
 `tools/steamdeck/README-SteamDeck.txt`.
@@ -55,8 +60,8 @@ workload, LLVM 20, CMake, Ninja, Git, PowerShell 7 and Python: see [SETUP.md](SE
   controller doesn't respond there, click the game window once.
 - The first-person weapon isn't corrected for wide fields of view yet.
 - Whether the 360-only Holiday bonus mission unlocks normally isn't checked yet (#39).
-- The first run hitches as shaders are translated and built the first time each appears; later
-  runs start with them built (#53).
+- The AI can still feel slower than in the PC version at high frame rates; whether that's the
+  360's own tuning is being checked (#3).
 - On Windows the games read controllers through XInput (Xbox pads, or anything Steam Input
   presents as one): SDL found no controller in the game on one laptop (#54). `input_backend =
   "sdl"` in `user/settings.toml` brings SDL back. The Steam Deck keeps SDL.

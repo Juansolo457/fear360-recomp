@@ -29,6 +29,7 @@
 #include "look_tuning.h"
 #include "native/native_system.h"
 #include "profiler.h"
+#include "shader_warmup.h"
 
 REXCVAR_DEFINE_STRING(fear_gpu_backend, "any", "F.E.A.R.",
                       "Backend of the stock Xenos plugin when nx_renderer is 'xenos': "
@@ -133,6 +134,14 @@ class FearApp : public rex::ReXApp {
   void OnPostSetup() override {
     if (runtime()) fear::look_tuning::Apply(*runtime());
     fear::profiler::Start();
+
+    // The shader warm-up (shader_warmup.h): the shaders come from the game data; the renderer
+    // starts it from its ring thread, the panel shows on the UI thread.
+    if (runtime()) fear::shader_warmup::SetGameDataRoot(runtime()->game_data_root());
+    fear::shader_warmup::SetBeginCallback([this] {
+      app_context().CallInUIThreadDeferred(
+          [this] { fear::shader_warmup::OpenPanel(imgui_drawer()); });
+    });
 
     // The game gets no input while a panel (or an SDK overlay under the mouse) has it.
     if (auto* input = runtime() ? static_cast<rex::input::InputSystem*>(runtime()->input_system())

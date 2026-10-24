@@ -682,6 +682,12 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       if (written == read) {
         continue;
       }
+      // F.E.A.R. (#53): the shader warm-up, before the game's first command. The game waits for
+      // its GPU meanwhile; the UI thread shows the progress.
+      if (!warmed_up_) {
+        warmed_up_ = true;
+        if (renderer_ready_) renderer_.RunWarmup();
+      }
       Reader reader;
       reader.base = memory_->TranslatePhysical(base);
       reader.mask = words - 1;
@@ -1680,6 +1686,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   // timer's stand-ins after a fallback) and are otherwise counted for the report.
   bool display_pacing_ = false;
   bool image_dumped_ = false;  // fear_dump_image
+  bool warmed_up_ = false;     // the ring thread's: RunWarmup done
   std::atomic<bool> display_watched_{false};
   std::atomic<uint64_t> display_vblanks_{0};
   std::mutex display_mutex_;

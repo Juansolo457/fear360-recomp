@@ -66,6 +66,7 @@ set(FEAR_SOURCES
     src/fear_settings.cpp
     src/fx_debug.cpp
     src/look_tuning.cpp
+    src/shader_warmup.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 
@@ -88,9 +89,11 @@ endif()
 target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
 set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
 target_include_directories(fear PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/warmup"   # shader_warmup.inc, F.E.A.R.'s list (src/shader_warmup.h)
     "${REXSDK_DIR}/src/graphics"
     "${REXSDK_DIR}/thirdparty/glslang"
     "${REXSDK_DIR}/thirdparty/renderdoc"   # rex/ui/renderdoc_api.h, private to the plugin
+    "${REXSDK_DIR}/thirdparty/stb"         # stb_image.h's zlib, for the game's catalog
     $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>
 )
 

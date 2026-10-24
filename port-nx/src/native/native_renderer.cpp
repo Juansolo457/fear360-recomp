@@ -71,6 +71,7 @@ extern "C" {
 #include "native_geometry_shaders.h"
 #include "native_hash.h"
 #include "native_textures.h"
+#include "shader_warmup.h"
 
 REXCVAR_DECLARE(bool, gpu_specialize_texture_signs);
 REXCVAR_DEFINE_BOOL(nx_native_depth24, false, "F.E.A.R. NX",
@@ -1694,7 +1695,7 @@ struct Renderer::Impl {
   std::chrono::steady_clock::time_point prewarm_started;
   size_t prewarm_queued = 0;
   void NotePrewarm(VulkanShader::VulkanTranslation* translation);
-  void LoadPrewarm();
+  void LoadPrewarm(uint32_t title_id);
   void SavePrewarm(bool wait);
   struct PipelineJob {
     uint64_t hash = 0;
@@ -1734,6 +1735,8 @@ struct Renderer::Impl {
   std::chrono::steady_clock::time_point prewarm_pipelines_started;
   void NotePrewarmPipeline(uint64_t hash, const PipelineKey& key);
   void PrewarmPipelinesStep();
+  int PrewarmJobFor(const PipelineKey& key, PipelineJob& job);
+  void RunWarmup();
 
   // --- Render targets ------------------------------------------------------------
 
@@ -6137,7 +6140,7 @@ void Renderer::InitializeDriverCache(const std::filesystem::path& cache_root,
   if (REXCVAR_GET(fear_shader_prewarm)) {
     im.prewarm_path = directory / fmt::format("prewarm-{:08X}-{:08X}-{:08X}.bin", title_id,
                                               properties.vendorID, properties.deviceID);
-    im.LoadPrewarm();
+    im.LoadPrewarm(title_id);
   }
   // The newest complete file: the rename that replaces it can fail on Horizon
   // (it does not overwrite), leaving the data in .tmp.
@@ -6169,6 +6172,12 @@ void Renderer::InitializeDriverCache(const std::filesystem::path& cache_root,
   im.driver_cache_saved_size = data.size();
   REXLOG_INFO("[native] Driver pipeline cache: {} KB loaded from {}", data.size() >> 10,
               im.driver_cache_path.string());
+}
+
+void Renderer::RunWarmup() {
+  if (impl_->device && fear::shader_warmup::Enabled()) {
+    impl_->RunWarmup();
+  }
 }
 
 void Renderer::Impl::SaveDriverCache() {
@@ -6263,7 +6272,7 @@ void Renderer::Impl::NotePrewarmPipeline(uint64_t hash, const PipelineKey& key) 
   }
 }
 
-void Renderer::Impl::LoadPrewarm() {
+void Renderer::Impl::LoadPrewarm(uint32_t title_id) {
   std::vector<uint8_t> data;
   if (FILE* file = rex::filesystem::OpenFile(prewarm_path, "rb")) {
     uint64_t header[3] = {};
@@ -6281,7 +6290,7 @@ void Renderer::Impl::LoadPrewarm() {
   uint32_t version = 0, count = 0;
   if (!ReadValue(data, pos, version) || version < 1 || version > kPrewarmVersion ||
       !ReadValue(data, pos, count)) {
-    return;
+    version = count = 0;  // none yet: the warm-up list below may still have shaders
   }
   std::vector<VulkanShader::VulkanTranslation*> jobs;
   size_t shaders_loaded = 0;
@@ -6339,6 +6348,62 @@ void Renderer::Impl::LoadPrewarm() {
         prewarm_pipeline_pending.push_back(key);
       }
     }
+  }
+  // F.E.A.R. (#53): this build's warm-up list, for what the file doesn't have yet (on a new PC,
+  // everything). Its shaders come rebuilt from the game data and checked against their hashes, and
+  // join the file at its next save, as if this PC had seen them.
+  const fear::shader_warmup::List list = fear::shader_warmup::Load(title_id);
+  size_t list_translations = 0, list_pipelines = 0;
+  for (const auto& listed : list.shaders) {
+    auto [it, created] = shaders.try_emplace(listed.hash);
+    if (created) {
+      it->second = std::make_unique<VulkanShader>(device, xenos::ShaderType(listed.type),
+                                                  listed.hash, listed.ucode.data(),
+                                                  listed.ucode.size());
+    }
+    VulkanShader* shader = it->second.get();
+    if (!shader->is_ucode_analyzed()) {
+      shader->AnalyzeUcode(disasm);
+    }
+    PrewarmShader& saved = prewarm[listed.hash];
+    if (saved.ucode.empty()) {
+      saved.type = listed.type;
+      saved.ucode = shader->ucode_data();
+    }
+    for (uint64_t modification : listed.modifications) {
+      if (std::find(saved.modifications.begin(), saved.modifications.end(), modification) ==
+          saved.modifications.end()) {
+        saved.modifications.push_back(modification);
+        prewarm_dirty = true;
+      }
+      auto* translation =
+          static_cast<VulkanShader::VulkanTranslation*>(shader->GetOrCreateTranslation(modification));
+      if (translation_state.try_emplace(translation, uint8_t(1)).second) {
+        jobs.push_back(translation);
+        ++list_translations;
+      }
+    }
+  }
+  if (list.key_size == sizeof(PipelineKey)) {
+    for (const auto& words : list.pipelines) {
+      PipelineKey key;
+      std::memcpy(&key, words.data(), sizeof(key));
+      // Recorded with MSAA on; where it is off here, the same pipelines take one sample.
+      if (!multisample) key.samples = 1;
+      if (prewarm_pipelines.try_emplace(XXH3_64bits(&key, sizeof(key)), key).second) {
+        prewarm_pipeline_pending.push_back(key);
+        prewarm_dirty = true;
+        ++list_pipelines;
+      }
+    }
+  } else if (!list.pipelines.empty()) {
+    REXLOG_WARN("[native] Shader warm-up list: pipeline keys of {} bytes, this build's are {}",
+                list.key_size, sizeof(PipelineKey));
+  }
+  if (prewarm_dirty) {
+    prewarm_changed = std::chrono::steady_clock::now();
+  }
+  if (!prewarm_pipeline_pending.empty()) {
     prewarm_pipelines_loaded = prewarm_pipeline_pending.size();
     prewarm_pipelines_started = std::chrono::steady_clock::now();
   }
@@ -6360,9 +6425,9 @@ void Renderer::Impl::LoadPrewarm() {
     translation_cv.notify_one();
   }
   REXLOG_INFO("[native] Shader pre-warm: {} translations of {} shaders queued, {} pipelines to "
-              "follow, from {}",
+              "follow, from {} (the warm-up list added {} translations and {} pipelines)",
               jobs.size(), shaders_loaded, prewarm_pipeline_pending.size(),
-              prewarm_path.string());
+              prewarm_path.string(), list_translations, list_pipelines);
 }
 
 // Each frame (ring thread): up to 64 of the loaded pipeline keys looked at; those whose shaders
@@ -6373,57 +6438,13 @@ void Renderer::Impl::PrewarmPipelinesStep() {
   }
   DrainTranslations();
   DrainCompletedPipelines();
-  // The module of a translated shader: 2 with it, 1 to wait, 0 to give up on the key.
-  auto module_of = [&](uint64_t shader_hash, uint64_t modification, VkShaderModule& out) {
-    auto shader = shaders.find(shader_hash);
-    if (shader == shaders.end()) return 0;
-    const auto& translations = shader->second->translations();
-    auto found = translations.find(modification);
-    if (found == translations.end()) return 0;
-    auto* translation = static_cast<VulkanShader::VulkanTranslation*>(found->second);
-    auto state = translation_state.find(translation);
-    if (state == translation_state.end()) return 0;
-    if (state->second != 2) return 1;
-    if (!translation->is_valid() || !translation->shader_module()) return 0;
-    out = translation->shader_module();
-    return 2;
-  };
   std::vector<PipelineJob> ready;
   for (int looked = 0; looked < 64 && !prewarm_pipeline_pending.empty(); ++looked) {
     if (prewarm_pipeline_cursor >= prewarm_pipeline_pending.size()) {
       prewarm_pipeline_cursor = 0;
     }
-    const PipelineKey key = prewarm_pipeline_pending[prewarm_pipeline_cursor];
     PipelineJob job;
-    job.key = key;
-    job.hash = XXH3_64bits(&key, sizeof(key));
-    int outcome = pipelines.count(job.hash) || pending_pipelines.count(job.hash) ? 0 : 2;
-    if (outcome == 2) {
-      outcome = module_of(key.vs_hash, key.vs_modification, job.vertex);
-    }
-    if (outcome == 2 && key.ps_hash) {
-      outcome = module_of(key.ps_hash, key.ps_modification, job.pixel);
-    }
-    if (outcome == 2 && key.geometry_shader) {
-      GeometryShaderKey gs_key;
-      gs_key.key = key.geometry_shader;
-      auto it = geometry_shaders.find(gs_key.key);
-      if (it == geometry_shaders.end()) {
-        it = geometry_shaders.emplace(gs_key.key, CreateGeometryShader(device, gs_key)).first;
-      }
-      job.geometry = it->second;
-      if (!job.geometry) outcome = 0;
-    }
-    if (outcome == 2) {
-      const PipelineLayout* layout = GetPipelineLayout(
-          uint32_t(key.layout >> 48) & 0xFFFF, uint32_t(key.layout >> 32) & 0xFFFF,
-          uint32_t(key.layout >> 16) & 0xFFFF, uint32_t(key.layout) & 0xFFFF);
-      if (layout && layout->layout) {
-        job.layout = layout->layout;
-      } else {
-        outcome = 0;
-      }
-    }
+    const int outcome = PrewarmJobFor(prewarm_pipeline_pending[prewarm_pipeline_cursor], job);
     if (outcome == 1) {
       ++prewarm_pipeline_cursor;
       continue;
@@ -6444,6 +6465,128 @@ void Renderer::Impl::PrewarmPipelinesStep() {
     }
     pipeline_cv.notify_one();
   }
+}
+
+// F.E.A.R. (#53): the shader warm-up. Before the game's first GPU command, every pipeline the
+// pre-warm loaded (the prewarm file and this build's list) is built, on all cores but one, while
+// the ring thread and so the game wait; fear::shader_warmup's panel shows the progress. The
+// translations come first, from the worker, which had a head start. With the driver's cache warm
+// this takes a fraction of a second; on a new PC or driver it is what the first run used to pay
+// in hitches.
+void Renderer::Impl::RunWarmup() {
+  if (prewarm_pipeline_pending.empty()) {
+    return;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const uint32_t total = uint32_t(prewarm_pipeline_pending.size());
+  fear::shader_warmup::Begin(total);
+  // Each key once its shaders are translated; those that can't be built are dropped.
+  std::vector<PipelineJob> jobs;
+  while (!prewarm_pipeline_pending.empty()) {
+    DrainTranslations();
+    for (size_t i = 0; i < prewarm_pipeline_pending.size();) {
+      PipelineJob job;
+      const int outcome = PrewarmJobFor(prewarm_pipeline_pending[i], job);
+      if (outcome == 1) {
+        ++i;
+        continue;
+      }
+      if (outcome == 2) jobs.push_back(job);
+      prewarm_pipeline_pending[i] = prewarm_pipeline_pending.back();
+      prewarm_pipeline_pending.pop_back();
+    }
+    if (!prewarm_pipeline_pending.empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  const auto translated = std::chrono::steady_clock::now();
+  const uint32_t dropped = total - uint32_t(jobs.size());
+  std::vector<VkPipeline> built(jobs.size(), VK_NULL_HANDLE);
+  std::atomic<size_t> next{0};
+  std::atomic<uint32_t> done{dropped};
+  fear::shader_warmup::Advance(dropped);
+  auto work = [&] {
+    for (size_t i; (i = next.fetch_add(1)) < jobs.size();) {
+      built[i] = CreatePipeline(jobs[i]);
+      fear::shader_warmup::Advance(done.fetch_add(1) + 1);
+    }
+  };
+  const uint32_t threads =
+      std::clamp<uint32_t>(std::thread::hardware_concurrency(), 2, 17) - 1;
+  std::vector<std::thread> pool;
+  for (uint32_t t = 1; t < threads && t < jobs.size(); ++t) {
+    pool.emplace_back(work);
+  }
+  work();
+  for (auto& thread : pool) thread.join();
+  size_t created = 0;
+  for (size_t i = 0; i < jobs.size(); ++i) {
+    pipelines.emplace(jobs[i].hash, built[i]);
+    if (built[i]) ++created;
+  }
+  if (created) {
+    stats().pipelines_created += uint32_t(created);
+    last_pipeline_time = std::chrono::steady_clock::now();
+  }
+  fear::shader_warmup::End();
+  const auto seconds = [](auto from, auto to) {
+    return std::chrono::duration<double>(to - from).count();
+  };
+  REXLOG_INFO("[native] Shader warm-up: {} pipelines built ({} failed, {} left out) in {:.1f} s "
+              "on {} threads, after {:.1f} s waiting for translations",
+              created, jobs.size() - created, dropped,
+              seconds(translated, std::chrono::steady_clock::now()), threads,
+              seconds(start, translated));
+}
+
+// What a pre-warm key needs, if it is ready: 2 with the job filled in, 1 to wait for a
+// translation, 0 to give up on the key (built already, or a shader or layout missing).
+int Renderer::Impl::PrewarmJobFor(const PipelineKey& key, PipelineJob& job) {
+  // The module of a translated shader: 2 with it, 1 to wait, 0 to give up on the key.
+  auto module_of = [&](uint64_t shader_hash, uint64_t modification, VkShaderModule& out) {
+    auto shader = shaders.find(shader_hash);
+    if (shader == shaders.end()) return 0;
+    const auto& translations = shader->second->translations();
+    auto found = translations.find(modification);
+    if (found == translations.end()) return 0;
+    auto* translation = static_cast<VulkanShader::VulkanTranslation*>(found->second);
+    auto state = translation_state.find(translation);
+    if (state == translation_state.end()) return 0;
+    if (state->second != 2) return 1;
+    if (!translation->is_valid() || !translation->shader_module()) return 0;
+    out = translation->shader_module();
+    return 2;
+  };
+  job.key = key;
+  job.hash = XXH3_64bits(&key, sizeof(key));
+  int outcome = pipelines.count(job.hash) || pending_pipelines.count(job.hash) ? 0 : 2;
+  if (outcome == 2) {
+    outcome = module_of(key.vs_hash, key.vs_modification, job.vertex);
+  }
+  if (outcome == 2 && key.ps_hash) {
+    outcome = module_of(key.ps_hash, key.ps_modification, job.pixel);
+  }
+  if (outcome == 2 && key.geometry_shader) {
+    GeometryShaderKey gs_key;
+    gs_key.key = key.geometry_shader;
+    auto it = geometry_shaders.find(gs_key.key);
+    if (it == geometry_shaders.end()) {
+      it = geometry_shaders.emplace(gs_key.key, CreateGeometryShader(device, gs_key)).first;
+    }
+    job.geometry = it->second;
+    if (!job.geometry) outcome = 0;
+  }
+  if (outcome == 2) {
+    const PipelineLayout* layout = GetPipelineLayout(
+        uint32_t(key.layout >> 48) & 0xFFFF, uint32_t(key.layout >> 32) & 0xFFFF,
+        uint32_t(key.layout >> 16) & 0xFFFF, uint32_t(key.layout) & 0xFFFF);
+    if (layout && layout->layout) {
+      job.layout = layout->layout;
+    } else {
+      outcome = 0;
+    }
+  }
+  return outcome;
 }
 
 void Renderer::Impl::SavePrewarm(bool wait) {

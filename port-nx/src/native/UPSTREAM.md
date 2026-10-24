@@ -47,6 +47,12 @@ Local changes (see `git log -p -- port-nx/src/native`):
   device next to the driver cache; at the next start they are queued for the translation worker,
   behind any draw is waiting for. Pipelines too: each one's key is recorded, and at the next
   start created on the pipeline worker once its shaders are translated. See `docs/REVIEW.md`.
+- Shader warm-up (`fear_shader_warmup`, #53, `src/shader_warmup.*`): the pre-warm also loads this
+  build's list of the shaders and pipelines seen in play, the shaders rebuilt from the game's own
+  `uberCatalog.cat` and checked against their hashes. Before the game's first GPU command the
+  ring thread builds every loaded pipeline on all cores (`Renderer::RunWarmup`, called from
+  `RingLoop`) instead of in the background, with a progress panel on the UI thread. Keys recorded
+  with MSAA on take one sample where `nx_native_msaa` is off.
 
 - `fear_vertex_exact` (on): vertex and index ranges that changed in about the last second, and
   any of 4 KB or less, are read again for every draw (no once-a-frame reuse, no sampled/trusted

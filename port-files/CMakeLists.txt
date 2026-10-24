@@ -53,6 +53,7 @@ set(FEAR_SOURCES
     ${HOST}/fear_settings.cpp
     ${HOST}/fx_debug.cpp
     ${HOST}/look_tuning.cpp
+    ${HOST}/shader_warmup.cpp
     ${HOST}/native/native_system.cpp
     ${HOST}/native/native_renderer.cpp
     ${HOST}/native/native_textures.cpp
@@ -78,9 +79,11 @@ target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xeno
 set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
 target_include_directories(fear PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"            # generated/default/fear_init.h, from port-nx/src/main.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/warmup"     # shader_warmup.inc, F.E.A.R. Files' list
     "${HOST}"
     "${REXSDK_DIR}/src/graphics"
     "${REXSDK_DIR}/thirdparty/glslang"
     "${REXSDK_DIR}/thirdparty/renderdoc"
+    "${REXSDK_DIR}/thirdparty/stb"           # stb_image.h's zlib, for the game's catalog
     $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>
 )

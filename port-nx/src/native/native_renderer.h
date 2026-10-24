@@ -166,6 +166,10 @@ class Renderer {
   // saves them there as new ones appear. Call before the guest starts.
   void InitializeDriverCache(const std::filesystem::path& cache_root, uint32_t title_id);
 
+  // F.E.A.R. (#53): builds every pipeline the pre-warm loaded, on all cores, before the game's
+  // first GPU command (fear_shader_warmup). From the ring thread; returns when done.
+  void RunWarmup();
+
   // The 256-entry gamma ramp, as the DC_LUT_30_COLOR register packs it.
   void SetGammaRamp256(const uint32_t* entries);
 

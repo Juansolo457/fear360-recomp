@@ -57,6 +57,10 @@ param(
     # rexruntimerd.dll beside it. The log is named after its folder. Compare the two logs with
     # tools/analysis/abcompare.py.
     [string]$Exe = '',
+    # Each game's cache folder (shaders and the driver's pipelines), in its port folder. A name
+    # not used before starts empty, as on a new PC: e.g. -Cache cache-new1 to watch the shader
+    # warm-up (#53, port-nx/src/shader_warmup.h).
+    [ValidatePattern('^[\w.-]+$')][string]$Cache = 'cache',
     [ValidateSet('Debug','Release','RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo'
 )
 $ErrorActionPreference = 'Stop'
@@ -82,7 +86,7 @@ $log = Join-Path $port "logs\run-$stamp$tag.log"
 $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\user",
-    '--cache_root', "$port\cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
+    '--cache_root', "$port\$Cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
 if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
 }

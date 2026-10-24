@@ -119,7 +119,8 @@ higher-resolution textures once and use them in both games: [TEXTURES.md](TEXTUR
 - **A controller that isn't an Xbox one:** add `input_backend = "sdl"` to the game's
   `user/settings.toml`. SDL also reads PlayStation and Switch pads, but on one Windows 11 laptop
   it found no usable pad in the game (#54), which is why XInput is the Windows default.
-- **Hitches the first time you play:** shaders are translated and built as they first appear,
-  then kept in the game's `cache` folder; later runs are smooth (#53).
+- **A pause before the main menu on the first start ("PREPARING SHADERS"):** the game builds its
+  shaders and pipelines for your graphics card and driver, once, so play doesn't hitch. They're
+  kept in the game's `cache` folder; later starts skip it (#53).
 - **A crash:** the game writes `crash-<time>.txt` and `.dmp` to `port-nx/logs` (or
   `port-files/logs`), next to each run's log. Please attach the text file to an issue on GitHub.
