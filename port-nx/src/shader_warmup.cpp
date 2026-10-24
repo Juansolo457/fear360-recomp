@@ -202,7 +202,11 @@ void SetGameDataRoot(const std::filesystem::path& root) { g_game_data_root = roo
 List Load(uint32_t title_id) {
   List list;
   if (!Enabled()) return list;
-  const auto lines = Split(std::string_view(kList, sizeof(kList) - 1), '\n');
+  auto lines = Split(std::string_view(kList, sizeof(kList) - 1), '\n');
+  // A checkout with Windows line endings can leave a carriage return on each line.
+  for (std::string_view& line : lines) {
+    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+  }
   if (lines.empty()) return list;
   const auto header = Split(lines[0], ' ');
   uint32_t list_title = 0;

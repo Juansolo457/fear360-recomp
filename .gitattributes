@@ -1,0 +1,3 @@
+# The shader warm-up lists are embedded as raw string literals (port-nx/src/shader_warmup.cpp):
+# keep their line endings as written.
+*/warmup/shader_warmup.inc text eol=lf
