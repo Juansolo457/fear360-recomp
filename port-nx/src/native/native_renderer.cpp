@@ -22,6 +22,7 @@
 #include <array>
 #include <bit>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <set>
@@ -151,6 +152,12 @@ REXCVAR_DEFINE_BOOL(fear_alias_clears_depth, true, "F.E.A.R.",
 // F.E.A.R.: a full log of sampled frames, to see what a frame does to EDRAM.
 REXCVAR_DEFINE_UINT32(nx_native_trace_frame_every, 0, "F.E.A.R. NX",
                       "Log every draw and resolve of one frame in this many (0 = off)");
+// F.E.A.R. (diagnosis, #38): to find which draws make an artefact, skip a shader's draws by the
+// hash the frame trace prints (vsh= or psh=).
+REXCVAR_DEFINE_STRING(fear_debug_skip_shaders, "", "F.E.A.R.",
+                      "Skip every draw whose vertex or pixel shader hash (hex, as the frame "
+                      "trace prints it) is in this comma-separated list (diagnosis)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace fear_nx::native {
 namespace shaders {
@@ -3773,11 +3780,13 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
       }
     }
     REXLOG_INFO(
-        "[native][frame] f={} d={} skip={} prim={} n={} src={} ps={} c=[{} {} {} {}] z={} "
+        "[native][frame] f={} d={} skip={} prim={} n={} src={} ps={} vsh={:016X} psh={:016X} "
+        "c=[{} {} {} {}] z={} "
         "cmask={:04X} zctl={}{}{} f{} s{} f{} p{} sc=({},{} {}x{}) vp=({},{} {}x{}) "
         "woff=({},{}) vwo={} wod={} pitch={} msaa={} mode={} bc={:08X} tex=[{}]",
         frame, trace_frame_draw++, int32_t(st.skip_reason), uint32_t(initiator.prim_type),
         guest_count, uint32_t(initiator.source_select), st.ps != nullptr,
+        st.vs ? st.vs->ucode_data_hash() : 0, st.ps ? st.ps->ucode_data_hash() : 0,
         target_text(st.targets.color[0]), target_text(st.targets.color[1]),
         target_text(st.targets.color[2]), target_text(st.targets.color[3]),
         target_text(st.targets.depth), r[rex::graphics::XE_GPU_REG_RB_COLOR_MASK] & 0xFFFF,
@@ -3796,6 +3805,28 @@ void Renderer::Impl::Draw(const uint32_t* immediate_indices, uint32_t immediate_
   }
   if (st.skip_reason != UINT32_MAX) {
     return skip(st.skip_reason);
+  }
+  // F.E.A.R. (diagnosis, #38): the draws of the shaders listed in fear_debug_skip_shaders.
+  static const std::unordered_set<uint64_t> debug_skip = [] {
+    std::unordered_set<uint64_t> hashes;
+    const std::string list = REXCVAR_GET(fear_debug_skip_shaders);
+    for (size_t pos = 0; pos < list.size();) {
+      size_t end = list.find(',', pos);
+      if (end == std::string::npos) end = list.size();
+      if (end > pos) hashes.insert(std::strtoull(list.c_str() + pos, nullptr, 16));
+      pos = end + 1;
+    }
+    if (!hashes.empty()) {
+      REXLOG_INFO("[native] skipping the draws of {} shaders (fear_debug_skip_shaders)",
+                  hashes.size());
+    }
+    return hashes;
+  }();
+  if (!debug_skip.empty() &&
+      ((st.vs && debug_skip.count(st.vs->ucode_data_hash())) ||
+       (st.ps && debug_skip.count(st.ps->ucode_data_hash())))) {
+    ++stats().draws_skipped;
+    return;
   }
   VulkanShader* vs = st.vs;
   VulkanShader* ps = st.ps;
