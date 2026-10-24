@@ -148,6 +148,12 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "Vertical, in degrees. The gun isn't corrected for wide angles yet (EchoPatch "
                       "does that on PC), so it can look stretched at the higher settings."});
+  settings.push_back({"Bloom",
+                      "fear_bloom_intensity",
+                      {{"0", "Off (the PC's)"}, {"-1", "On (the 360's)"}},
+                      false,
+                      "The 360 version adds a screen bloom the PC version doesn't have. Near "
+                      "bright lights it spreads a grey haze over the scene."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
                       {{"true", "Exact"}, {"false", "As shipped"}},

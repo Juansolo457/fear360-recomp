@@ -238,18 +238,6 @@ name = "FearBloomParams"
 address = 0x82390ED4
 registers = ["f1", "f31"]
 
-# Particle batch markers (port-nx/src/high_fps.h, #7, #38): lifetime 0 instead of -1, at the store
-# of the -1.0 in AddParticleBatchMarker and in its copy inlined in EmitParticleBatch.
-[[entrypoint.midasm_hook]]
-name = "FearParticleBatchMarker"
-address = 0x82B7BAA4
-registers = ["f0"]
-
-[[entrypoint.midasm_hook]]
-name = "FearParticleBatchMarker"
-address = 0x82B7C88C
-registers = ["f0"]
-
 # Profiler (src/profiler.h, #30): Direct3D's own bookkeeping of each wait for the GPU, at the
 # start of the function that records a wait's start (the reason in r5) and of the one that records
 # its end. Only noted while fear_profile is on.

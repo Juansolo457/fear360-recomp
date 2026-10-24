@@ -713,15 +713,6 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     reported_copies_ = copies_;
     reported_swaps_before_ = reported_swaps_;
     reported_swaps_ = swaps_;
-    // F.E.A.R.: the game's occlusion queries (EVENT_WRITE_ZPD), each answered with the fake
-    // sample count (#38).
-    if (occlusion_queries_ != reported_occlusion_queries_) {
-      REXLOG_INFO("[native] occlusion queries (10 s): {} results written, each {} samples "
-                  "(query_occlusion_fake_sample_count)",
-                  occlusion_queries_ - reported_occlusion_queries_,
-                  REXCVAR_GET(query_occlusion_fake_sample_count));
-      reported_occlusion_queries_ = occlusion_queries_;
-    }
     if (renderer_ready_) {
       const RendererStats& s = renderer_.stats();
       REXLOG_INFO(
@@ -1314,7 +1305,6 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     if (end) {
       counts->ZPass_A = uint32_t(fake_sample_count);
       counts->Total_A = uint32_t(fake_sample_count);
-      ++occlusion_queries_;
     }
   }
 
@@ -1743,7 +1733,6 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   uint64_t waits_ = 0, wait_ns_ = 0, reported_waits_ = 0, reported_wait_ns_ = 0;
   uint64_t reported_packets_ = 0, reported_draws_ = 0, reported_copies_ = 0,
            reported_swaps_ = 0;
-  uint64_t occlusion_queries_ = 0, reported_occlusion_queries_ = 0;
 
   struct Framebuffer {
     VkFramebuffer framebuffer = VK_NULL_HANDLE;
