@@ -19,6 +19,8 @@
 # in the game's main menu (port-nx/src/fear_settings.h). For them this script passes a setting
 # (-Scale, -Windowed, -FrameRate, -TexturePack, -LookRamp, -NoSoftLock) only when it is given:
 # a flag wins over the saved value for that run.
+#
+#   ... -Collection -Invulnerable   # the smoke test (#55): both games, the player can't die
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -51,6 +53,11 @@ param(
     # turn rate follows the stick). See port-nx/src/look_tuning.h.
     [ValidateSet('console', 'nodelay', 'instant', 'off')][string]$LookRamp = 'off',
     [switch]$NoSoftLock,  # no aim-assist slowdown of turning near enemies
+    # For the smoke test (#55): the player can't die, in single player and Instant Action. Where
+    # a hit would have killed, health refills to full and the game says you would have died: the
+    # PC's test console variable HealthTest, still in both 360 games, started at 1 (port-nx/src/
+    # look_tuning.h, fear_console_vars). Don't also pass --fear_console_vars in -Extra.
+    [switch]$Invulnerable,
     [string]$Extra = '',  # more flags, space separated
     # Another F.E.A.R. program instead of the build's (port-nx; with -Collection, F.E.A.R.'s
     # entry): the A side of an A/B, e.g. private/ab/A-master-8db2298/fear.exe, with its own
@@ -95,6 +102,7 @@ if ($isNx) {
     if ($given.ContainsKey('Scale')) { $arguments += @('--nx_native_resolution_scale', "$Scale") }
     if ($given.ContainsKey('LookRamp')) { $arguments += @('--fear_look_ramp', $LookRamp) }
     if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
+    if ($Invulnerable) { $arguments += @('--fear_console_vars', 'HealthTest=1') }
 }
 if ($Pack) {
     if (!$isNx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }
