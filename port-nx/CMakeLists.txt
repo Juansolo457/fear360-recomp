@@ -52,6 +52,7 @@ set(FEAR_NATIVE_SOURCES
 set(FEAR_SOURCES
     src/main.cpp
     src/anim_timing.cpp
+    src/bloom.cpp
     src/high_fps.cpp
     src/profiler.cpp
     src/cpu_check.cpp

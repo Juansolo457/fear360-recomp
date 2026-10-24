@@ -231,6 +231,13 @@ name = "FearAiNextUpdate"
 address = 0x8266F638
 registers = ["r3", "f1"]
 
+# Screen bloom strength and threshold (port-nx/src/bloom.h, #38): after both are read
+# (threshold in f1, strength in f31), before they go to the bloom material.
+[[entrypoint.midasm_hook]]
+name = "FearBloomParams"
+address = 0x82390ED4
+registers = ["f1", "f31"]
+
 # Particle batch markers (port-nx/src/high_fps.h, #7, #38): lifetime 0 instead of -1, at the store
 # of the -1.0 in AddParticleBatchMarker and in its copy inlined in EmitParticleBatch.
 [[entrypoint.midasm_hook]]
