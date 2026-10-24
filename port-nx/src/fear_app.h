@@ -64,6 +64,17 @@ class FearApp : public rex::ReXApp {
   // PC Settings (fear_settings.h): saved in the user data folder, loaded below the command line.
   void OnConfigurePaths(rex::PathConfig& paths) override {
     fear::settings::Load(paths.user_data_root);
+#if defined(_WIN32)
+    // Controllers through XInput on native Windows, as the collection menu reads them: the SDL
+    // driver found no usable pad in the game on a Windows 11 laptop (#54). Under Proton the
+    // Steam Deck keeps SDL, its tested path. A backend chosen in settings.toml or on the command
+    // line wins.
+    if (!fear::display_vblank::UnderWine() &&
+        rex::cvar::GetFlagSource("input_backend") == rex::cvar::Source::kDefault) {
+      rex::cvar::SetFlagByName("input_backend", "xinput");
+      REXLOG_INFO("F.E.A.R.: controllers through XInput (input_backend; \"sdl\" for SDL)");
+    }
+#endif
   }
 
   void OnConfigureFonts(ImFontAtlas* atlas) override { fear::panel::AddFonts(atlas); }

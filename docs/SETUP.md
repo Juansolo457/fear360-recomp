@@ -93,7 +93,9 @@ pwsh -NoProfile -File tools/launch.ps1 -Collection
 This opens the collection menu: pick **F.E.A.R.** or **F.E.A.R. Files**; *Switch Game* in either
 game's main menu comes back to it. Play with an Xbox controller, as on the console; plug it in
 before you start. If the controller doesn't react in the collection menu, click the game window
-once so it has focus.
+once so it has focus. On Windows the games read controllers through XInput, so other pads
+(PlayStation, Switch) need Steam Input or another XInput wrapper, or the SDL setting under
+*When something goes wrong*.
 
 In each game's main menu, **PC Settings** sets the resolution scale, frame rate limit, texture
 filtering, field of view, aim assist, right-stick feel and more. Saves and settings stay in each
@@ -114,5 +116,10 @@ higher-resolution textures once and use them in both games: [TEXTURES.md](TEXTUR
   one above. Only those executables are supported.
 - **"Toolchain missing" or "Patched SDK missing":** check step 1's `.tools` layout, or run
   `tools/setup-sdk.ps1` again (with `-Force` to start over).
+- **A controller that isn't an Xbox one:** add `input_backend = "sdl"` to the game's
+  `user/settings.toml`. SDL also reads PlayStation and Switch pads, but on one Windows 11 laptop
+  it found no usable pad in the game (#54), which is why XInput is the Windows default.
+- **Hitches the first time you play:** shaders are translated and built as they first appear,
+  then kept in the game's `cache` folder; later runs are smooth (#53).
 - **A crash:** the game writes `crash-<time>.txt` and `.dmp` to `port-nx/logs` (or
   `port-files/logs`), next to each run's log. Please attach the text file to an issue on GitHub.

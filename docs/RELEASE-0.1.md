@@ -55,6 +55,11 @@ workload, LLVM 20, CMake, Ninja, Git, PowerShell 7 and Python: see [SETUP.md](SE
   controller doesn't respond there, click the game window once.
 - The first-person weapon isn't corrected for wide fields of view yet.
 - Whether the 360-only Holiday bonus mission unlocks normally isn't checked yet (#39).
+- The first run hitches as shaders are translated and built the first time each appears; later
+  runs start with them built (#53).
+- On Windows the games read controllers through XInput (Xbox pads, or anything Steam Input
+  presents as one): SDL found no controller in the game on one laptop (#54). `input_backend =
+  "sdl"` in `user/settings.toml` brings SDL back. The Steam Deck keeps SDL.
 - On the Steam Deck the controller can drop for about a second at story autosaves (#36).
 - PC-parity fixes from EchoPatch are being worked through: #2 tracks them.
 
