@@ -13,9 +13,38 @@ comments, too). General project state: `docs/HANDOFF.md`, `docs/PROGRESS.md`, `d
   below are the history, newest first.
 - The Deck's corrupted debris and hands are fixed by `fear_vertex_fresh` (on by default since
   `54135f6`).
-- **Best Deck run so far: `fear_021`** (below): register-options stage A (#34), uncapped to 120 on
-  the OLED's 90 Hz screen, no MSAA, no PC textures. Median 88 fps; the heavy benchmark-room
-  scenes bottom out near 60, limited by the game thread and the GPU together.
+- **Best Deck run so far: `fear_029`** (below): register-options stage B with SDK patch 0013 (#34),
+  uncapped to 120 on the OLED's 90 Hz screen, no MSAA, no PC textures. Median 89 fps; heavy scenes
+  bottom out at 74. Stage B crashed on the Deck before patch 0013 (`docs/HANDOFF-REGOPTS.md`
+  section 7).
+
+## Deck run of stage B with patch 0013 (`fear_029.log`, 2026-10-23, branch `register-options` at `a8f7cf7`)
+The update zip with stage B's `fear.exe` (17:43; stage A plus `non_volatile_as_local`, setjmp and
+patches 0007-0013), the uncapped settings, profiler on. Docks, including the barrel scene, 9
+minutes (17:53-18:02), quit normally. **No crash.** Stage B without patch 0013 crashed within 50-78
+s every time with the profiler on (`fear_023`-`fear_025`). The user: "one of the best runs"; the
+barrel scene dipped.
+
+| | `fear_020` (master, 60 cap) | `fear_021` (stage A) | `fear_029` (stage B + 0013) |
+|---|---:|---:|---:|
+| game-thread work per 1,000 draws, median | 13.74 ms | 12.37 ms | **11.00 ms** |
+| fps, lowest tenth of windows | 53.4 | 71.8 | **79.5** |
+| heavy scenes (1,200+ draws): windows | 7 | 5 | 6 |
+| heavy scenes: fps min / median | 47.1 / 54.6 | 59.2 / 64.9 | **73.9 / 79.5** |
+| heavy scenes: game-thread work | 13.9 ms | 14.7 ms | **10.8 ms** |
+| heavy scenes: GPU | 13.3 ms | 12.8 ms | 10.1 ms |
+
+Against `fear_021`, per module (ms per frame):
+- **C runtime 0.66 to 0.21:** the register save/restore helpers (`8287B4xx`) are gone.
+- **The runtime DLL 0.23 to 0.33:** patch 0013's saves in every kernel-export wrapper. That
+  includes the native `memcpy`/`memset`, as the review predicted; a variant without the clobber
+  for those hooks would win it back.
+- **Smaller gains elsewhere:** game client -13%, ClientFX -16%, engine renderer -9%.
+
+Slow frames (50 ms and over): only at the level start (textures) and at quit; none in play. The
+lowest window, 17:57:44, ran 73.9 fps with 1,227 draws per frame: 12.4 ms of game-thread work
+(engine 31%) and 11.3 ms of GPU. Single frames up to 37 ms. That's likely the barrel scene's dip,
+and at that length it's visible.
 
 ## Deck run of register-options stage A, uncapped (`fear_021.log`, 2026-10-23, branch `register-options` at `a20d6fd`)
 The update zip with stage A's `fear.exe` (`skip_lr` and CTR/XER/CR/reservation as locals,

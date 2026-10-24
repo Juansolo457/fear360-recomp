@@ -525,6 +525,24 @@ Proton build without the dump. Patch 0013 and the manifests are unchanged.
 - The Deck update zip (`private/steamdeck/FEAR360-SteamDeck-update.zip`) has this build. F.E.A.R.
   Files is unchanged (09:53).
 
+### 7.4 Deck result: no crash (`fear_029.log`)
+Nine minutes on the Deck with the profiler on (17:53-18:02), and no crash. Without patch 0013, the
+same setup crashed within 50-78 s three times out of three. So patch 0013 fixes it: the register
+changes happen during host calls, as the review's stale-save-area reading predicted, and saving
+`xmm6`-`xmm15` around those calls is enough. What changes them in Proton is still unidentified.
+The crash report's new lines will show it if anything slips through.
+
+Stage B's Deck speed: game-thread work per 1,000 draws 12.37 ms (stage A, `fear_021`) to 11.00 ms
+(-11%); heavy scenes' minimum 59 to 74 fps, median 65 to 80. Patch 0013 costs about 0.1 ms per frame
+in the runtime DLL, partly from the native `memcpy`/`memset` paying the saves. Details in
+`docs/HANDOFF-PERF.md`.
+
+Open:
+- the clobber-free wrapper for the rexcrt hooks (7.1);
+- F.E.A.R. Files at stage B (its manifest already has the review's `share_registers` entries);
+- stage C (`non_argument_as_local`, patch 0007);
+- the translator rule that ignores the translator's own changes (7.3).
+
 ## 5. Questions for the reviewer
 1. The SDK's funclet hand-off copies only the r14-r31 that were already referenced earlier in the
    function, in address order (`locals.r[i]`). A non-volatile live at a funclet call but first
