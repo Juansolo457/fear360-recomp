@@ -162,7 +162,8 @@ void FearDebugWeaponImpact(PPCRegister& r3) {
 //     buffer lock, whose failure drops the rest of the group for that frame; the vertices granted
 //   CParticleSystemFX::HandleUpdateTime (sub_82BAE3B8): updates made, and skipped (under 5 ms
 //     since the last, or under 0.3 s for a system that wasn't drawn since)
-// One line per shot, 3 s after it, with fear_debug_weapon_fire.
+// One line per shot, 3 s after it (at the next particle render or shot), with
+// fear_debug_weapon_fire.
 namespace {
 
 struct ShotParticles {
@@ -242,6 +243,8 @@ void FearDebugParticleEmit(PPCRegister& r29, PPCRegister& r25) {
 void FearDebugParticleRender(PPCRegister& r27) {
   if (!REXCVAR_GET(fear_debug_weapon_fire)) return;
   std::lock_guard<std::mutex> lock(g_mutex);
+  // Shots 3 s old are reported here too, not only when a later shot comes.
+  FlushShots(NowMs());
   if (ShotParticles* shot = ShotOf(g_group_shot, r27.u32)) ++shot->renders;
 }
 
