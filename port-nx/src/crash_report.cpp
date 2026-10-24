@@ -133,33 +133,30 @@ LONG WINAPI OnUnhandledException(EXCEPTION_POINTERS* pointers) {
                  "rax %016llX rbx %016llX rcx %016llX rdx %016llX\n"
                  "rsi %016llX rdi %016llX rbp %016llX rsp %016llX\n"
                  "r8  %016llX r9  %016llX r10 %016llX r11 %016llX\n"
-                 "r12 %016llX r13 %016llX r14 %016llX r15 %016llX\n"
-                 "Stack:\n",
+                 "r12 %016llX r13 %016llX r14 %016llX r15 %016llX\n",
                  c.Rax, c.Rbx, c.Rcx, c.Rdx, c.Rsi, c.Rdi, c.Rbp, c.Rsp, c.R8, c.R9, c.R10,
                  c.R11, c.R12, c.R13, c.R14, c.R15);
     // The callee-saved vector registers: the generated code keeps values in them across its host
     // calls (docs/HANDOFF-REGOPTS.md, section 7), and under Wine the dump viewer is not at hand.
     const M128A* xmm = &c.Xmm6;
     for (int i = 0; i < 10; i += 2) {
-      std::fprintf(out, "xmm%-2d %016llX_%016llX xmm%-2d %016llX_%016llX
-", 6 + i,
+      std::fprintf(out, "xmm%-2d %016llX_%016llX xmm%-2d %016llX_%016llX\n", 6 + i,
                    static_cast<unsigned long long>(xmm[i].High),
                    static_cast<unsigned long long>(xmm[i].Low), 7 + i,
                    static_cast<unsigned long long>(xmm[i + 1].High),
                    static_cast<unsigned long long>(xmm[i + 1].Low));
     }
-    std::fprintf(out, "mxcsr %08lX
-", static_cast<unsigned long>(c.MxCsr));
+    std::fprintf(out, "mxcsr %08lX\n", static_cast<unsigned long>(c.MxCsr));
     // Wine (Proton) names itself through ntdll; the logs don't say which build ran.
     if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll")) {
       using GetVersion = const char*(__cdecl*)();
       auto version = reinterpret_cast<GetVersion>(GetProcAddress(ntdll, "wine_get_version"));
       auto build = reinterpret_cast<GetVersion>(GetProcAddress(ntdll, "wine_get_build_id"));
       if (version) {
-        std::fprintf(out, "Wine %s (%s)
-", version(), build ? build() : "no build id");
+        std::fprintf(out, "Wine %s (%s)\n", version(), build ? build() : "no build id");
       }
     }
+    std::fprintf(out, "Stack:\n");
     WriteStack(out, c);
     std::fclose(out);
   }
