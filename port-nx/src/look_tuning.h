@@ -31,6 +31,11 @@
 // FovYWidescreen with it in F.E.A.R. Files, whose camera uses that one on a widescreen display.
 // F.E.A.R. has the hook too (port-nx/fear_manifest.toml, VarTrack::Init at 0x822FC710), where it
 // also sees the stick's variables, already patched in the database, and sets the same values.
+//
+// For testing, the same hook starts any console variable at another value (fear_console_vars,
+// "EnableVolumetricLight=0,VolumetricLightNoise=0"), and with fear_console_vars_log logs each one
+// the game creates with its starting value. A variable the game sets again later (the detail
+// options, a level's settings) keeps that later value.
 
 #pragma once
 

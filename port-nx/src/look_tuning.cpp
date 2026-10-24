@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -39,6 +40,14 @@ REXCVAR_DEFINE_BOOL(fear_aim_softlock, true, "F.E.A.R.",
 REXCVAR_DEFINE_DOUBLE(fear_fov, 70.0, "F.E.A.R.",
                       "Vertical field of view in degrees (the console variables FovY and "
                       "FovYWidescreen; 70 as shipped, the PC's too)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_STRING(fear_console_vars, "", "F.E.A.R.",
+                      "For testing: console variables to start at other values, as Name=value "
+                      "pairs separated by commas (e.g. EnableVolumetricLight=0), applied as the "
+                      "game creates them")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_console_vars_log, false, "F.E.A.R.",
+                    "Log each console variable the game creates, with its starting value")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace fear::look_tuning {
@@ -77,6 +86,27 @@ std::vector<std::pair<std::string, float>> FovChanges() {
   const double fov = std::clamp(REXCVAR_GET(fear_fov), 40.0, 130.0);
   if (std::abs(fov - 70.0) < 0.01) return {};
   return {{"FovY", float(fov)}, {"FovYWidescreen", float(fov)}};
+}
+
+// fear_console_vars: "Name=value,Name=value", for testing a console variable's effect (#38).
+std::vector<std::pair<std::string, float>> TestChanges() {
+  std::vector<std::pair<std::string, float>> changes;
+  const std::string list = REXCVAR_GET(fear_console_vars);
+  size_t pos = 0;
+  while (pos < list.size()) {
+    size_t end = list.find(',', pos);
+    if (end == std::string::npos) end = list.size();
+    const std::string item = list.substr(pos, end - pos);
+    const size_t equals = item.find('=');
+    if (equals != std::string::npos) {
+      std::string name = item.substr(0, equals);
+      name.erase(0, name.find_first_not_of(' '));
+      name.erase(name.find_last_not_of(' ') + 1);
+      changes.emplace_back(name, std::strtof(item.c_str() + equals + 1, nullptr));
+    }
+    pos = end + 1;
+  }
+  return changes;
 }
 
 // The database path of each attribute.
@@ -226,16 +256,19 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
     auto all = fear::look_tuning::Changes();
     const auto fov = fear::look_tuning::FovChanges();
     all.insert(all.end(), fov.begin(), fov.end());
+    const auto test = fear::look_tuning::TestChanges();
+    all.insert(all.end(), test.begin(), test.end());
     return all;
   }();
-  if (changes.empty() || !r5.u32) return;
+  static const bool log_all = REXCVAR_GET(fear_console_vars_log);
+  if ((changes.empty() && !log_all) || !r5.u32) return;
   const auto* name = reinterpret_cast<const char*>(
       rex::system::kernel_memory()->virtual_membase() + r5.u32);
   const std::string_view view(name, strnlen(name, 64));
+  static std::mutex mutex;
+  static std::set<std::string, std::less<>> logged;
   for (const auto& [wanted, value] : changes) {
     if (view != wanted) continue;
-    static std::mutex mutex;
-    static std::set<std::string> logged;
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (logged.insert(wanted).second) {
@@ -244,5 +277,11 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& f1) {
     }
     f1.f64 = value;
     return;
+  }
+  if (log_all) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (logged.emplace(view).second) {
+      REXLOG_INFO("F.E.A.R.: console variable {} starts at {}", view, f1.f64);
+    }
   }
 }
