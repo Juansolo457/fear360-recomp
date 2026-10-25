@@ -6,6 +6,28 @@ that draws from the game's own Xbox 360 Direct3D calls, ported from
 [shaunsingh/pgr4-native](https://github.com/shaunsingh/pgr4-native). **1.0 waits on it**: the
 renderer, then a performance test against today's, then the full smoke test (#55-#57).
 
+## Status (2026-10-25)
+
+First runs on PC (RTX 4090, autopilot through a new game's opening to the hangar, 120 fps, 720p
+window), side by side with fear-nx (`--fear_d3d12`):
+- **The front end works on F.E.A.R.'s Direct3D as mapped**: 760 million push-buffer dwords decoded
+  per run with no resyncs, torn packets, unknown opcodes or draws outside the hooks.
+- **The picture matches fear-nx's** (play-tested: "basically 1:1 the 360 version") after three
+  fixes for F.E.A.R. tiling side by side where GRAW tiles in full-width bands: host targets as
+  wide as the untiled draws, no scissor clamp to the surface pitch (one tile's width while
+  tiling), and EndTiling's clears kept off the next tile's overlap (the first tile is 768 wide,
+  the next starts at 640). `k_4_4_4_4` textures added: F.E.A.R.'s fonts (the intro's subtitles).
+- **The briefing screen's flicker (#66) is gone**: in a recording of both windows, the screen in
+  fear-nx's alternates between two brightnesses every other frame (105 changes in 211 frames);
+  the D3D12 renderer's holds steady, and shows the video's camera feeds where fear-nx's shows the
+  logo.
+- **Cost, same scenes**: fear-nx's ring runs each draw 1.4-2.0 times and each register write
+  1.5-2.0 times (2-3 tiles a frame; `--fear_tile_stats`), and its renderer thread uses about
+  1.1 ms of CPU a frame; the D3D12 renderer draws each once, about 0.26 ms of recording and 0.2 ms
+  of present a frame, adding about 70 us to the game thread for the hooks.
+- Open: `k_5_6_5` resolves (no typed UAV store for B5G6R5), the primary mode (`-D3D12`) not run
+  yet, the parity list below, F.E.A.R. Files, the Steam Deck.
+
 ## Where F.E.A.R. starts from
 
 GRAW replaced ReXGlue's Xenos plugin (Xenia's emulated GPU, its command processor and register
