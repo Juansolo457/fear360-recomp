@@ -1,18 +1,94 @@
-// D3D12 renderer: F.E.A.R.'s guest Xbox 360 D3D (default.xex, August 2006 XDK). Function
-// addresses, device fields and object layouts, from the generated code; found by pairing each of
-// GRAW's D3D functions (graw360-recomp native/graw_d3d.h) with its twin here and aligning the two
-// instruction by instruction (docs/NATIVE_RENDERER.md). F.E.A.R. Files has its own addresses (not
-// mapped yet).
+// D3D12 renderer: the guest Xbox 360 D3D of F.E.A.R. (port-nx, default.xex, August 2006 XDK) and
+// of F.E.A.R. Files (port-files, FEAR_TITLE_FILES, a later XDK build). Function addresses, device
+// fields and object layouts, from the generated code: each of GRAW's D3D functions
+// (graw360-recomp native/graw_d3d.h) paired with its twin in F.E.A.R. by instruction shape and the
+// two aligned instruction by instruction, then F.E.A.R.'s with F.E.A.R. Files' the same way
+// (docs/NATIVE_RENDERER.md).
 //
-// Against GRAW's D3D: the push cursor is at +40 (GRAW +0, PGR4 +48), the five dirty masks at +0
+// F.E.A.R. against GRAW's D3D: the push cursor is at +40 (GRAW +0), the five dirty masks at +0
 // (GRAW +16), the register shadow blocks 1,216 bytes lower, the constant shadows 128 lower, and
-// the resource header is 24 bytes (GRAW 12, PGR4 24). The draw functions flush their dirty state
-// inline (GRAW calls sub_824D9E98), and there are two EndVertices, one after each Begin.
+// the resource header is 24 bytes (GRAW 12). The draw functions flush their dirty state inline
+// (GRAW calls sub_824D9E98), and there are two EndVertices, one after each Begin.
+// F.E.A.R. Files against F.E.A.R.: the push cursor at +48, the constant shadows where GRAW has
+// them (128 bytes higher), the register shadows 128 higher, the surfaces 264 higher, the tile list
+// 268 higher, and the dirty masks' bits laid out otherwise; the resource header is the same.
 #pragma once
 
 #include <cstdint>
 
 namespace fear::d3d12 {
+
+#if defined(FEAR_TITLE_FILES)
+
+// Guest D3D functions the native path hooks (generated sub_X; r3 = the device unless noted).
+namespace fn {
+constexpr uint32_t kBeginVertices = 0x8297DE88;
+constexpr uint32_t kEndVertices = 0x8297E328;
+constexpr uint32_t kEndIndexedVertices = 0x8297E8B0;
+constexpr uint32_t kDrawVerticesUP = 0x8297E338;
+constexpr uint32_t kBeginIndexedVertices = 0x8297E380;
+constexpr uint32_t kDrawVertices = 0x8297E960;
+constexpr uint32_t kDrawIndexedVertices = 0x8297ED48;
+constexpr uint32_t kClearF = 0x8297D9D8;
+constexpr uint32_t kClear = 0x8297DB00;
+constexpr uint32_t kResolve = 0x8297B5C8;
+constexpr uint32_t kSwap = 0x829746C0;
+constexpr uint32_t kBeginTiling = 0x82979B10;
+constexpr uint32_t kEndTiling = 0x82979FA8;
+constexpr uint32_t kMakeSpace = 0x82981538;       // submits through sub_829813B0
+constexpr uint32_t kWrapSegment = 0x82981130;
+constexpr uint32_t kRestoreSegment = 0x8297FD00;  // the segment saved at device+13392
+}  // namespace fn
+
+namespace dev {
+constexpr uint32_t kDirtyMasks = 0;
+constexpr uint32_t kPush = 48;
+constexpr uint32_t kPushEnd = 52;
+constexpr uint32_t kPushLimit = 56;
+constexpr uint32_t kFetchConstants = 1152;  // sub_8298F718
+constexpr uint32_t kVsConstants = 1920;
+constexpr uint32_t kPsConstants = 6016;
+constexpr uint32_t kBoolLoop = 10112;
+constexpr uint32_t kShadow2000 = 10368;
+constexpr uint32_t kShadow2100 = 10444;
+constexpr uint32_t kShadow2180 = 10528;
+constexpr uint32_t kShadow2200 = 10548;
+constexpr uint32_t kShadow2280 = 10596;
+constexpr uint32_t kShadow2300 = 10680;
+constexpr uint32_t kShadow2380 = 10832;
+constexpr uint32_t kRingReadPtr = 10896;
+constexpr uint32_t kFlags = 10940;
+constexpr uint8_t kFlagTiling = 0x20;
+constexpr uint32_t kScissorTL = 10436;
+constexpr uint32_t kScissorBR = 10440;
+constexpr uint32_t kIndexBuffer = 12428;
+constexpr uint32_t kColorSurfaces = 12432;
+constexpr uint32_t kDepthSurface = 12448;
+constexpr uint32_t kVertexStride = 12520;
+constexpr uint32_t kTileCount = 12740;
+constexpr uint32_t kTileRects = 12744;
+constexpr uint32_t kTileOrigins = 12984;
+constexpr uint32_t kPendingPush = 13428;
+}  // namespace dev
+
+// The bits the draws' inline flush tests (sub_8297DE88 and the other draw functions), by mask.
+constexpr uint64_t kDirtyBits[5] = {
+    ~0ull,                 // +0: VS float constants
+    ~0ull,                 // +8: PS float constants
+    0x003FFFC000000000ull  // +16: register block 0x2000
+        | 0x000003FFFFE00000ull  //  0x2100
+        | 0x00000000001E0000ull  //  the shader load (sub_82990610)
+        | 0x000000000001F000ull  //  0x2180
+        | 0xFFFull,              //  0x2200
+    0x0007FFFC00000000ull  // +24: register block 0x2280
+        | 0x00000000FFFFFFFFull, //  fetch constants (sub_8298F718)
+    0x0100000000000000ull  // +32: bool/loop constants
+        | 0x007E000000000000ull  //  sub_8298F598
+        | 0x00003FC000000000ull  //  register block 0x2380
+        | 0x0000003FFFFFFFFFull, //  0x2300
+};
+
+#else  // F.E.A.R.
 
 // Guest D3D functions the native path hooks (generated sub_X; r3 = the device unless noted).
 namespace fn {
@@ -94,7 +170,10 @@ constexpr uint64_t kDirtyBits[5] = {
         | 0x0000003FFFFFFFFFull, //  0x2300
 };
 
-// Resource objects: F.E.A.R.'s D3DResource header is 24 bytes (GRAW's: 12), as in PGR4's XDK.
+#endif
+
+// Resource objects: the D3DResource header is 24 bytes in both games (GRAW's: 12), as in PGR4's
+// XDK.
 constexpr uint32_t kTextureFetchOffset = 28;  // D3DBaseTexture: GPU fetch constant, 6 dwords
                                               // (Swap copies it from there)
 constexpr uint32_t kIndexBufferFormat = 0;    // D3DIndexBuffer: bit 31 = 32-bit indices

@@ -12,10 +12,7 @@
 
 namespace fear_nx::native {
 
-// Whether the nx_renderer cvar asks for the native renderer.
-bool Enabled();
-
-// Swaps the native renderer has presented since startup (0 when disabled).
+// Swaps the game has made since startup.
 uint64_t SwapsPresented();
 
 // The 256-entry gamma ramp the game set (DC_LUT_*: 10 bits per channel, red in bits 20-29), for

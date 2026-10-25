@@ -5,10 +5,9 @@
 #   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, auto fps
 #   ... -Nx -FrameRate 30 -Timer                                               # the console's pacing
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
-#   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
-#   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
-#   ... -Files -Extra '--nx_renderer native'      # F.E.A.R. Files (port-files, port-nx's host code)
-#   ... -Collection -Extra '--nx_renderer native' # the collection menu: F.E.A.R. and F.E.A.R. Files
+#   pwsh -NoProfile -File tools/launch.ps1 -Nx          # port-nx: F.E.A.R. (the D3D12 renderer)
+#   ... -Files                    # F.E.A.R. Files (port-files, port-nx's host code)
+#   ... -Collection               # the collection menu: F.E.A.R. and F.E.A.R. Files
 #
 # -Collection writes private/collection.toml with both games (each its own data, user and cache
 # folders, log, and texture pack when one is built: private/texture_pack, private/files/
@@ -21,8 +20,9 @@
 # a flag wins over the saved value for that run.
 #
 #   ... -Collection -Invulnerable   # the smoke test (#55): both games, the player can't die
-#   ... -Nx -D3D12                  # F.E.A.R. drawn by the D3D12 renderer (F9: fear-nx's again)
-#   ... -Nx -D3D12Side              # fear-nx draws, the D3D12 renderer in a second window
+#
+# port-nx and port-files draw with the D3D12 renderer only (docs/NATIVE_RENDERER.md), which has no
+# resolution scale or texture pack yet: -Scale and -TexturePack apply to port only.
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -60,12 +60,6 @@ param(
     # (fear_invulnerable: the PC's test console variable HealthTest, still in both 360 games;
     # port-nx/src/look_tuning.h).
     [switch]$Invulnerable,
-    # The D3D12 renderer (port-nx/src/d3d12, docs/NATIVE_RENDERER.md; F.E.A.R. only so far): it
-    # draws the game into the game window, F9 switching back and forth with fear-nx's renderer
-    # (-D3D12), or it draws in a debug window beside fear-nx's, which stays the game's output
-    # (-D3D12Side).
-    [switch]$D3D12,
-    [switch]$D3D12Side,
     [string]$Extra = '',  # more flags, space separated
     # Another F.E.A.R. program instead of the build's (port-nx; with -Collection, F.E.A.R.'s
     # entry): the A side of an A/B, e.g. private/ab/A-master-8db2298/fear.exe, with its own
@@ -73,8 +67,7 @@ param(
     # tools/analysis/abcompare.py.
     [string]$Exe = '',
     # Each game's cache folder (shaders and the driver's pipelines), in its port folder. A name
-    # not used before starts empty, as on a new PC: e.g. -Cache cache-new1 to watch the shader
-    # warm-up (#53, port-nx/src/shader_warmup.h).
+    # not used before starts empty, as on a new PC: e.g. -Cache cache-new1.
     [ValidatePattern('^[\w.-]+$')][string]$Cache = 'cache',
     # Each game's user folder (saves, profile, settings.toml), in its port folder, the same way: a
     # new name is a new player (first-run settings, no saves), e.g. -User user-run1 -Cache
@@ -110,16 +103,16 @@ if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
 }
 if ($isNx) {
-    # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
-    if ($given.ContainsKey('Scale')) { $arguments += @('--nx_native_resolution_scale', "$Scale") }
+    # The D3D12 renderer's anisotropic filtering: samples, where the SDK's enum has 5 = 16x.
+    if ($given.ContainsKey('Anisotropic')) {
+        $arguments += @('--fear_d3d12_anisotropy', "$(if ($Anisotropic -gt 0) { [math]::Pow(2, $Anisotropic - 1) } else { 1 })")
+    }
     if ($given.ContainsKey('LookRamp')) { $arguments += @('--fear_look_ramp', $LookRamp) }
     if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
     if ($Invulnerable) { $arguments += '--fear_invulnerable' }
-    if ($D3D12) { $arguments += '--fear_d3d12_primary' }
-    if ($D3D12Side) { $arguments += '--fear_d3d12' }
 }
 if ($Pack) {
-    if (!$isNx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }
+    if ($isNx) { throw "-TexturePack: the D3D12 renderer has no texture pack yet (docs/NATIVE_RENDERER.md)." }
     $resolved = Resolve-Path $Pack
     if (!(Test-Path (Join-Path $resolved 'index.tsv'))) { throw "No index.tsv in $resolved." }
     $arguments += @('--fear_texture_pack', ($resolved.Path -replace '\\', '/'))

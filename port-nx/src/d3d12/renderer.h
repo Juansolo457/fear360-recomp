@@ -1,13 +1,13 @@
-// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see native/README.md): host of the native D3D12 path.
+// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see README.md): F.E.A.R.'s only renderer
+// (docs/NATIVE_RENDERER.md).
 //
-// The guest D3D hooks in fear_d3d_hooks.cpp forward every call to the guest D3D (without
-// --fear_d3d12_primary the fear-nx renderer keeps rendering, as the oracle) and, with
-// --fear_d3d12, then call the NativeRenderer entry points below with the guest device and the
-// call's arguments. Only the outermost
-// draw/clear/resolve/Swap call is passed on (the D3D's internal clear, copy and Swap quads are
-// not game draws); a top-level BeginVertices reaches OnDraw at the entry of the next hooked
-// call, once the game has written its vertices. The renderer owns its own D3D12 queue, window
-// and swapchain, separate from ReXGlue's presenter (d3d12_device.h).
+// The guest D3D hooks in fear_d3d_hooks.cpp forward every call to the guest D3D, then call the
+// NativeRenderer entry points below with the guest device and the call's arguments. Only the
+// outermost draw/clear/resolve/Swap call is passed on (the D3D's internal clear, copy and Swap
+// quads are not game draws); a top-level BeginVertices reaches OnDraw at the entry of the next
+// hooked call, once the game has written its vertices. The renderer records on ReXGlue's D3D12
+// presenter's device and queue and hands each frame to that presenter, which keeps the window
+// (d3d12_device.h, present.h).
 //
 // Threading: the guest D3D device is used by one guest thread at a time; all On* entry points
 // are called on that thread, after the original guest function returned, and are serialized
@@ -86,14 +86,12 @@ struct FrameStats {
 
 class NativeRenderer {
  public:
-  // The renderer, created on first use when --fear_d3d12 is on; nullptr when it is off, when
-  // D3D12 initialization failed (logged once) and from a failed frame on (Fail).
+  // The renderer, created on first use; nullptr when D3D12 initialization failed (logged once)
+  // and from a failed frame on (Fail).
   static NativeRenderer* Get();
-  // The renderer while it draws the game: Get(), except after the renderer switch handed the
-  // game to the fear-nx renderer (primary mode, bind_renderer_switch) or a frame failed (in primary
-  // mode from the guest thread's next Swap, which hands the game to the plugin as the switch
-  // does). The hooks use this one, a single load while the renderer draws; while it is null the
-  // guest D3D runs unchanged and nothing is tracked.
+  // The renderer while it draws the game: Get(), until a frame failed. The hooks use this one, a
+  // single load while the renderer draws; while it is null the guest D3D runs unchanged and
+  // nothing is tracked.
   static NativeRenderer* Live() {
     if (NativeRenderer* r = live_.load(std::memory_order_acquire)) [[likely]]
       return r;
@@ -112,9 +110,6 @@ class NativeRenderer {
   void OnClear(const uint8_t* base, const HookArgs& args);
   void OnResolve(const uint8_t* base, const HookArgs& args);
   void OnSwap(uint8_t* base, const HookArgs& args);
-  // A Swap while the fear-nx renderer draws (Live() is null): the renderer switch takes the game
-  // back.
-  void OnSwapSuspended();
 
   // For modules.
   D3D12Device& device() { return *device_; }
@@ -165,20 +160,9 @@ class NativeRenderer {
   // Before each submission, once the untiles finished: the texture upload lists to submit first
   // (TextureCache::CloseUploadLists), into upload_lists_. False on failure (logged).
   bool CloseUploadLists();
-  // A failed submission or present: logs and turns the native path off for the rest of the run.
-  // In primary mode it also releases the game window to ReXGlue's presenter (on the thread that
-  // records, which owns the swapchain), and the guest thread hands the game to the fear-nx renderer
-  // at its next Swap (HandOver).
+  // A failed submission: logs and stops the renderer for the rest of the run (nothing takes over;
+  // the window keeps the last frame).
   void Fail();
-  // Primary mode, at a Swap before anything is recorded into the back buffer: who presents into
-  // the game window. The renderer while it draws the game and no XAM dialog is up; ReXGlue's
-  // presenter otherwise (the dialogs are its ImGui overlay, and after the renderer switch it
-  // shows the fear-nx renderer's frames). A window has one swapchain at a time: the presenter's
-  // surface is disconnected before ours is created, and ours released before it is connected
-  // again. Returns false when the swapchain cannot be created (logged).
-  bool OwnGameWindow(bool own);
-  // OwnGameWindow(false) from any state, including a half-done OwnGameWindow(true).
-  void ReleaseGameWindow();
   // Render thread mode.
   struct Queue;
   void QueueDraw(const uint8_t* base, const HookArgs& args);
@@ -186,40 +170,20 @@ class NativeRenderer {
   void QueueResolve(const uint8_t* base, const HookArgs& args);
   void QueueSwap(uint8_t* base, const HookArgs& args);
   void RenderThreadMain();
-  // Renderer switch. The key bind_renderer_switch (F9; a Steam Input binding can send it from a
-  // back grip) requests it on the UI thread; the guest thread takes the request at its next
-  // Swap. A key rather than a pad combination: the game reads every button of the pad.
-  // HandOver: the fear-nx renderer draws from the next frame on (also after a failed frame, Fail);
-  // TakeBack: native again.
-  bool SwitchRequested() {
-    return switch_requested_.load(std::memory_order_relaxed) &&
-           switch_requested_.exchange(false, std::memory_order_relaxed);
-  }
-  void HandOver(uint8_t* base, uint32_t device);
-  void TakeBack();
-  // At a Swap: whether the game goes to fear-nx's renderer from the next frame, for the renderer
-  // switch or, in primary mode, for one of F.E.A.R.'s own panels (PC Settings, the collection
-  // menu: fear_panel.h). They are ImGui dialogs in ReXGlue's presenter, so fear-nx draws the game
-  // behind them; the renderer takes the game back at the first Swap after the last one closed.
-  bool HandOverDue();
 
   static inline std::atomic<bool> paces_frames_{false};       // pacer_->pacing(), for any thread
   static inline std::atomic<NativeRenderer*> live_{nullptr};  // Live()
-  std::atomic<bool> switch_requested_{false};
-  bool switch_bound_ = false;  // primary mode with --fear_d3d12_renderer_switch
-  bool panel_suspended_ = false;  // handed over for a panel (HandOverDue)
 
   std::unique_ptr<Queue> queue_;  // render thread mode only
 
   std::unique_ptr<D3D12Device> device_;
-  bool primary_ = false;       // --fear_d3d12_primary: presenting into the game window
-  bool window_taken_ = false;  // OwnGameWindow disconnected ReXGlue's presenter from the window
   std::unique_ptr<RenderTargets> rt_;
   std::unique_ptr<Resolver> resolver_;
   std::unique_ptr<TextureCache> textures_;
   std::unique_ptr<DrawRenderer> draw_;
   std::unique_ptr<Presenter> present_;
-  // Primary mode with --fear_d3d12_frame_latency > 0, or observing only with --fear_d3d12_csv.
+  // Never created in F.E.A.R. (ReXGlue's presenter paces the window; frame_pacer.h is pgr4-native's
+  // pacer for a swapchain of its own).
   std::unique_ptr<FramePacer> pacer_;
   GpuTimer* gpu_timer_ = nullptr;  // device_'s, with --fear_d3d12_gpu_timing
   bool frame_begun_ = false;

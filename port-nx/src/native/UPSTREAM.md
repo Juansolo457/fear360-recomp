@@ -2,6 +2,14 @@ Copied from https://github.com/infriker/fear-nx (GPL-3.0-or-later), commit acad8
 (2026-10-21), `src/native/`. Their renderer is adapted from Project8Recomp's generic
 Xenos Vulkan renderer, itself based on nfsmw-nx.
 
+**D3D12 only (2026-10-25, docs/NATIVE_RENDERER.md).** Only `native_system.*` is left: fear-nx's
+graphics system, which runs the GPU ring (register file, fences, write-backs, interrupts, swaps,
+the vblank and display pacing, the gamma table) and now owns ReXGlue's D3D12 presenter instead of
+its Vulkan one. fear-nx's Vulkan renderer (`native_renderer.*`, `native_textures.*`,
+`native_geometry_shaders.*`, the shaders and tests) is removed; the D3D12 renderer in
+`../d3d12/` draws the game. The notes below describe the removed renderer's local changes, kept
+for the history (`git log -- port-nx/src/native`).
+
 Local changes (see `git log -p -- port-nx/src/native`):
 - Integer draw-resolution scaling (`nx_native_resolution_scale`, 1-4): host render
   targets, resolve images and the swap are scaled; guest-space math is untouched.

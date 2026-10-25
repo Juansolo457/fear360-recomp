@@ -3,7 +3,7 @@
 //
 // Each hook overrides the generated function (REX_HOOK_RAW) and always runs the original first,
 // so the guest device stays as the game expects and fear-nx's ring gets the whole stream.
-// While the native renderer is live (--fear_d3d12 or --fear_d3d12_primary):
+// While the renderer is live (always, unless it failed):
 //   - every hooked call reports its entry and exit to the push-buffer tracker (d3d_state.h),
 //     which decodes the packets the call wrote; the push-buffer functions (MakeSpace, the
 //     segment wrap and restore) report the cursor's jump instead;
@@ -12,7 +12,7 @@
 //     EndTiling carry that call (TilingCall);
 //   - BeginVertices (and BeginIndexedVertices) only reserve: the D3D publishes their packets and
 //     the game its vertices at EndVertices, where their draw is queued.
-// With the renderer off, the hooks only call the originals.
+// After a failure, the hooks only call the originals.
 #include "d3d_state.h"
 #include "hook_args.h"
 #include "renderer.h"
@@ -85,11 +85,6 @@ inline void NativeHook(PPCContext& ctx, uint8_t* base) {
   nat::NativeRenderer* const r = nat::NativeRenderer::Live();
   if (!r) {
     kOriginal(ctx, base);
-    if constexpr (kFn == HookFn::kSwap) {
-      // Primary mode after the renderer switch handed the game to the fear-nx renderer: F9 again
-      // takes it back at a Swap.
-      if (nat::NativeRenderer* suspended = nat::NativeRenderer::Get()) suspended->OnSwapSuspended();
-    }
     return;
   }
   constexpr uint32_t kAddr = uint32_t(kFn);
@@ -192,8 +187,51 @@ inline void JumpHook(PPCContext& ctx, uint8_t* base, uint32_t fn) {
 
 }  // namespace
 
-#define FEAR_D3D12_HOOK(addr, kfn, cls)                               REX_EXTERN(__imp__sub_##addr);                                      REX_HOOK_RAW(sub_##addr) {                                            NativeHook<HookFn::kfn, cls, __imp__sub_##addr>(ctx, base);       }                                                                   static_assert(uint32_t(HookFn::kfn) == 0x##addr##u, "address")
+#define FEAR_D3D12_HOOK(addr, kfn, cls)                          \
+  REX_EXTERN(__imp__sub_##addr);                                 \
+  REX_HOOK_RAW(sub_##addr) {                                     \
+    NativeHook<HookFn::kfn, cls, __imp__sub_##addr>(ctx, base);  \
+  }                                                              \
+  static_assert(uint32_t(HookFn::kfn) == 0x##addr##u, "address")
 
+#define FEAR_D3D12_JUMP_HOOK(addr, kfn)                                               \
+  REX_EXTERN(__imp__sub_##addr);                                                      \
+  REX_HOOK_RAW(sub_##addr) { JumpHook<__imp__sub_##addr>(ctx, base, nat::fn::kfn); }  \
+  static_assert(nat::fn::kfn == 0x##addr##u, "address")
+
+#define FEAR_D3D12_END_VERTICES_HOOK(addr, kfn)                   \
+  REX_EXTERN(__imp__sub_##addr);                                  \
+  REX_HOOK_RAW(sub_##addr) {                                      \
+    EndVerticesHook<__imp__sub_##addr>(ctx, base, nat::fn::kfn);  \
+  }                                                               \
+  static_assert(nat::fn::kfn == 0x##addr##u, "address")
+
+#define FEAR_D3D12_TILING_HOOK(addr, kfn, call)                                \
+  REX_EXTERN(__imp__sub_##addr);                                               \
+  REX_HOOK_RAW(sub_##addr) {                                                   \
+    TilingHook<TilingCall::call, __imp__sub_##addr>(ctx, base, nat::fn::kfn);  \
+  }                                                                            \
+  static_assert(nat::fn::kfn == 0x##addr##u, "address")
+
+// The hooks, by title (fear_d3d.h fn::): the symbols are the generated functions' names.
+#if defined(FEAR_TITLE_FILES)
+FEAR_D3D12_HOOK(8297ED48, kDrawIndexedVertices, kNatDraw);
+FEAR_D3D12_HOOK(8297E960, kDrawVertices, kNatDraw);
+FEAR_D3D12_HOOK(8297E338, kDrawVerticesUP, kNatDraw);
+FEAR_D3D12_HOOK(8297DE88, kBeginVertices, kNatPendingDraw);
+FEAR_D3D12_HOOK(8297E380, kBeginIndexedVertices, kNatPendingDraw);
+FEAR_D3D12_HOOK(8297DB00, kClear, kNatClear);
+FEAR_D3D12_HOOK(8297D9D8, kClearF, kNatClear);
+FEAR_D3D12_HOOK(8297B5C8, kResolve, kNatResolve);
+FEAR_D3D12_HOOK(829746C0, kSwap, kNatSwap);
+FEAR_D3D12_JUMP_HOOK(82981538, kMakeSpace);
+FEAR_D3D12_JUMP_HOOK(82981130, kWrapSegment);
+FEAR_D3D12_JUMP_HOOK(8297FD00, kRestoreSegment);
+FEAR_D3D12_END_VERTICES_HOOK(8297E328, kEndVertices);
+FEAR_D3D12_END_VERTICES_HOOK(8297E8B0, kEndIndexedVertices);
+FEAR_D3D12_TILING_HOOK(82979B10, kBeginTiling, kBegin);
+FEAR_D3D12_TILING_HOOK(82979FA8, kEndTiling, kEnd);
+#else  // F.E.A.R.
 FEAR_D3D12_HOOK(82988340, kDrawIndexedVertices, kNatDraw);
 FEAR_D3D12_HOOK(82987F38, kDrawVertices, kNatDraw);
 FEAR_D3D12_HOOK(829878B0, kDrawVerticesUP, kNatDraw);
@@ -203,41 +241,11 @@ FEAR_D3D12_HOOK(829872B0, kClear, kNatClear);
 FEAR_D3D12_HOOK(82986F00, kClearF, kNatClear);
 FEAR_D3D12_HOOK(82984718, kResolve, kNatResolve);
 FEAR_D3D12_HOOK(82974598, kSwap, kNatSwap);
-
-REX_EXTERN(__imp__sub_82987890);
-REX_HOOK_RAW(sub_82987890) {
-  EndVerticesHook<__imp__sub_82987890>(ctx, base, nat::fn::kEndVertices);
-}
-static_assert(nat::fn::kEndVertices == 0x82987890u);
-
-REX_EXTERN(__imp__sub_82987E60);
-REX_HOOK_RAW(sub_82987E60) {
-  EndVerticesHook<__imp__sub_82987E60>(ctx, base, nat::fn::kEndIndexedVertices);
-}
-static_assert(nat::fn::kEndIndexedVertices == 0x82987E60u);
-
-REX_EXTERN(__imp__sub_82979BD0);
-REX_HOOK_RAW(sub_82979BD0) {
-  TilingHook<TilingCall::kBegin, __imp__sub_82979BD0>(ctx, base, nat::fn::kBeginTiling);
-}
-static_assert(nat::fn::kBeginTiling == 0x82979BD0u);
-
-REX_EXTERN(__imp__sub_8297A0C8);
-REX_HOOK_RAW(sub_8297A0C8) {
-  TilingHook<TilingCall::kEnd, __imp__sub_8297A0C8>(ctx, base, nat::fn::kEndTiling);
-}
-static_assert(nat::fn::kEndTiling == 0x8297A0C8u);
-
-REX_EXTERN(__imp__sub_8298A988);
-REX_HOOK_RAW(sub_8298A988) { JumpHook<__imp__sub_8298A988>(ctx, base, nat::fn::kMakeSpace); }
-static_assert(nat::fn::kMakeSpace == 0x8298A988u);
-
-REX_EXTERN(__imp__sub_8298A620);
-REX_HOOK_RAW(sub_8298A620) { JumpHook<__imp__sub_8298A620>(ctx, base, nat::fn::kWrapSegment); }
-static_assert(nat::fn::kWrapSegment == 0x8298A620u);
-
-REX_EXTERN(__imp__sub_82989998);
-REX_HOOK_RAW(sub_82989998) {
-  JumpHook<__imp__sub_82989998>(ctx, base, nat::fn::kRestoreSegment);
-}
-static_assert(nat::fn::kRestoreSegment == 0x82989998u);
+FEAR_D3D12_JUMP_HOOK(8298A988, kMakeSpace);
+FEAR_D3D12_JUMP_HOOK(8298A620, kWrapSegment);
+FEAR_D3D12_JUMP_HOOK(82989998, kRestoreSegment);
+FEAR_D3D12_END_VERTICES_HOOK(82987890, kEndVertices);
+FEAR_D3D12_END_VERTICES_HOOK(82987E60, kEndIndexedVertices);
+FEAR_D3D12_TILING_HOOK(82979BD0, kBeginTiling, kBegin);
+FEAR_D3D12_TILING_HOOK(8297A0C8, kEndTiling, kEnd);
+#endif

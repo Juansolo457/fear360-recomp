@@ -47,7 +47,7 @@ OUT = ARGV[0] if ARGV else os.path.join(
 TOP = 'FEAR360-Windows' if WINDOWS else 'FEAR360-SteamDeck'
 CRT_DLLS = ['msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
 ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root', 'assets',
-        '--user_data_root', 'user', '--cache_root', 'cache', '--nx_renderer', 'native']
+        '--user_data_root', 'user', '--cache_root', 'cache']
 # The PC texture packs (4x the pixels) cost the Deck's shared memory bandwidth; the baseline is the
 # 360's own textures. True ships them and passes --fear_texture_pack again.
 SHIP_TEXTURE_PACKS = False
@@ -55,8 +55,6 @@ if SHIP_TEXTURE_PACKS:
     ARGS += ['--fear_texture_pack', 'texture_pack']
 DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
-                 "# Steam Deck: 1x (1280x720 for the Deck's 1280x800 screen).\n"
-                 'nx_native_resolution_scale = 1\n'
                  '# Uncapped to 120 fps (#28): the vblank from a timer at 240 Hz instead of the\n'
                  '# display (the game presents every second one), mailbox presentation (no\n'
                  '# tearing; on a 60 Hz screen the extra frames are dropped). 120 is the tested\n'
@@ -64,12 +62,11 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  '# replace these three lines with: fear_frame_rate_limit = 60\n'
                  'fear_vblank_source = "timer"\n'
                  'video_mode_refresh_rate = 240\n'
-                 'vulkan_allow_present_mode_immediate = false\n'
-                 "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
-                 "# the GPU), SDL's HIDAPI drivers off (the controls come through Steam Input's\n"
-                 '# pad, the usual Proton path; #29) and the profiler on for the logs (about 6%\n'
-                 '# of a core). Saving PC Settings in the game rewrites this file without them.\n'
-                 'nx_native_msaa = false\n'
+                 "# Deck baseline (#28): SDL's HIDAPI drivers off (the controls come through Steam\n"
+                 "# Input's pad, the usual Proton path; #29) and the profiler on for the logs\n"
+                 '# (about 6% of a core). Saving PC Settings in the game rewrites this file\n'
+                 '# without them. (The D3D12 renderer draws at 1280x720 with the game\'s MSAA: it\n'
+                 '# has no render scale or MSAA switch yet, docs/NATIVE_RENDERER.md.)\n'
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
                  'fear_profile_hz = 200\n')
@@ -77,12 +74,10 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
 # Windows the games read controllers through XInput by default (fear_app.h): SDL found no usable
 # pad in the game on a work laptop, 2026-10-23 (#54).
 WINDOWS_SETTINGS = DECK_SETTINGS.replace(
-    "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
-    "# the GPU), SDL's HIDAPI drivers off (the controls come through Steam Input's\n"
-    '# pad, the usual Proton path; #29) and the profiler on for the logs (about 6%\n'
-    '# of a core).',
-    "# Deck baseline (#28): no MSAA (the game's 2x/4x, honoured on the host, costs\n"
-    '# the GPU) and the profiler on for the logs (about 6% of a core).\n#').replace(
+    "# Deck baseline (#28): SDL's HIDAPI drivers off (the controls come through Steam\n"
+    "# Input's pad, the usual Proton path; #29) and the profiler on for the logs\n"
+    '# (about 6% of a core).',
+    '# Deck baseline (#28): the profiler on for the logs (about 6% of a core).').replace(
     'hid_sdl_hidapi = "off"\n', '')
 assert WINDOWS_SETTINGS != DECK_SETTINGS and 'hid_sdl_hidapi' not in WINDOWS_SETTINGS
 WINDOWS_LAUNCHER = ('@echo off\r\n'
@@ -95,22 +90,20 @@ WINDOWS_README = """F.E.A.R. 360 recomp (F.E.A.R. + F.E.A.R. Files): private Win
 The same builds and settings as the Steam Deck package, for another Windows PC. It contains your
 own game data and programs made from your discs: keep it to yourself.
 
-Needs: Windows 10/11 64-bit, a CPU with AVX2 (Intel Haswell / AMD Excavator or newer), a GPU with
-a current Vulkan driver, and an Xbox controller.
+Needs: Windows 10/11 64-bit, a CPU with AVX2 (Intel Haswell / AMD Excavator or newer), a
+Direct3D 12 GPU, and an Xbox controller.
 
 Play: extract the zip anywhere, then double-click "Play F.E.A.R..cmd". It opens the collection
 menu; pick a game. If the controller doesn't react there, click the game window once.
 
-First start of each game: it builds the game's shaders for this graphics card and driver before
-the main menu (a "PREPARING SHADERS" panel if it takes more than half a second), so play
-shouldn't hitch the first time an area or effect appears. Later starts skip it. The log's
-"Shader warm-up:" line says how long it took.
+First start of each game: shaders and pipelines are built as they first appear (brief hitches
+the first time an area or effect is seen) and kept in the cache folder for later starts.
 
-Settings (each game's user/settings.toml, as on the Deck): 1x render scale (1280x720), up to
-120 fps, no MSAA, no PC texture pack, the profiler on for the logs. Controllers are read through
+Settings (each game's user/settings.toml, as on the Deck): up to 120 fps, no PC texture pack,
+the profiler on for the logs. Controllers are read through
 XInput, the Windows default; an input_backend line from an earlier copy can stay. PC
-Settings in each game's main menu changes them (it then rewrites the file without the MSAA and
-profiler lines).
+Settings in each game's main menu changes them (it then rewrites the file without the profiler
+lines).
 
 Logs: fear/logs and fearfiles/logs, one file per run; copy the newest back for a read.
 """

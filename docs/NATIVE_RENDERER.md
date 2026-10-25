@@ -133,17 +133,29 @@ Before it can be the default, in both games:
 4. **First runs**: side by side with fear-nx (capture pairs, PSNR), then primary with F9 back to
    fear-nx. Autopilot through the opening and Interval 2's heavy fights.
 5. **Parity and performance**: the list above, then PC and Deck against step 1.
-6. **D3D12 only** (decided 2026-10-25): the game ships with the D3D12 renderer alone, no fear-nx
-   or ReXGlue renderer and no switch. What that takes:
-   - F.E.A.R.'s panels (PC Settings, the quit confirmation, the collection menu, the shader
-     warm-up's progress) and any system dialog drawn by the D3D12 renderer: today they are ImGui
-     in ReXGlue's presenter, and the game goes back to fear-nx while one is open.
+6. **D3D12 only** (decided 2026-10-25, done in the code the same day, not built yet): the game
+   ships with the D3D12 renderer alone, no fear-nx or ReXGlue renderer and no switch.
+   - fear-nx's graphics system (`port-nx/src/native/native_system.*`) keeps the GPU ring and owns
+     ReXGlue's **D3D12 presenter** instead of its Vulkan one. The D3D12 renderer records on the
+     presenter's device and queue and hands it each frame (`Presenter::HandToPresenter`: the
+     front buffer blitted with the gamma table into a 10:10:10:2 image, copied into the
+     presenter's guest output in its refresh callback). The presenter keeps the window and draws
+     F.E.A.R.'s ImGui panels and the system dialogs over the game, so nothing hands the window
+     back and forth.
+   - Removed: fear-nx's Vulkan renderer, its shader warm-up (`shader_warmup.*`,
+     `tools/make_warmup.py`), the texture pack's runtime hooks (the offline indexer stays), the
+     side-by-side window, primary mode, F9, `nx_renderer`, `gpu_skip_draws`. PC Settings loses
+     Resolution, PC textures and Texture sharpness until the D3D12 renderer has them; Texture
+     filtering now sets `fear_d3d12_anisotropy`.
+   - **F.E.A.R. Files** mapped the same way (F.E.A.R.'s functions paired with Files', `fear_d3d.h`
+     under `FEAR_TITLE_FILES`): push cursor at +48, constant shadows where GRAW has them, register
+     shadows 128 bytes above F.E.A.R.'s, surfaces 264 above, its own dirty bits.
+   What it still takes:
    - The parity list above done in the D3D12 renderer, since nothing falls back to fear-nx.
    - The Steam Deck: Direct3D 12 through vkd3d-proton is then the Deck's only path, so it is
-     tested and measured there early, before the rest is removed.
-   - fear-nx's ring kept for what it does besides drawing (fences, interrupts, swaps, pacing);
-     its Vulkan renderer, presenter and texture code, `nx_renderer`, the F9 switch and the
-     side-by-side window out of the shipped build.
+     tested and measured there next.
+   - `tools/steamdeck/make_package.py` still writes fear-nx's options (harmless: unknown options
+     are ignored) and the Deck's MSAA-off choice has no D3D12 equivalent yet.
    - Then the smoke test (#55-#57) and 1.0.
 
 Licensing: GRAW 360 Recompiled and pgr4-native are MIT, the Xenia- and ReXGlue-derived parts

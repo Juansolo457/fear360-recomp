@@ -2,7 +2,7 @@
 # keep it in front, tap a key at an interval (Space = A: through "Press Start", the profile
 # prompt, New game, difficulty and the intro), take screenshots on a schedule, then stop it.
 # Its own profile and cache; it never touches a copy the user started.
-#   pwsh -NoProfile -File tools/autoplay.ps1 -Nx -Seconds 150 -Extra '--nx_renderer native ...' -Tag packon
+#   pwsh -NoProfile -File tools/autoplay.ps1 -Nx -Seconds 150 -Extra '--fear_tile_stats=true' -Tag run
 [CmdletBinding()]
 param(
     [ValidateRange(10,900)][int]$Seconds = 150,

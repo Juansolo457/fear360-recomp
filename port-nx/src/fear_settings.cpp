@@ -78,15 +78,6 @@ std::string FrameRateLabel(double limit) {
 
 std::vector<Setting> BuildSettings() {
   std::vector<Setting> settings;
-  settings.push_back({"Resolution",
-                      "nx_native_resolution_scale",
-                      {{"1", "1280 x 720 (the 360's)"},
-                       {"2", "2560 x 1440"},
-                       {"3", "3840 x 2160 (4K)"},
-                       {"4", "5120 x 2880"}},
-                      false,
-                      "The game draws at this size, then fits it to your screen. Its own MSAA "
-                      "still applies on top."});
   settings.push_back({"Display",
                       "fullscreen",
                       {{"true", "Fullscreen"}, {"false", "Window"}},
@@ -102,26 +93,10 @@ std::vector<Setting> BuildSettings() {
                       "Each frame is shown for a whole number of your display's refreshes, the "
                       "fewest that keep it at or under the limit."});
   settings.push_back({"Texture filtering",
-                      "nx_native_max_anisotropy",
+                      "fear_d3d12_anisotropy",
                       {{"1", "Off"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}},
                       false,
                       "Anisotropic filtering: sharper floors and walls at an angle."});
-  const std::string pack = CvarValue("fear_texture_pack");
-  if (pack.empty()) {
-    settings.push_back({"PC textures",
-                        "fear_texture_pack_enabled",
-                        {{"true", "Not built"}},
-                        false,
-                        "Built on your PC from your own copy of the PC game: "
-                        "tools/texture_pack.py (docs/TEXTURES.md)."});
-  } else {
-    settings.push_back({"PC textures",
-                        "fear_texture_pack_enabled",
-                        {{"true", "On"}, {"false", "Off (the 360's)"}},
-                        false,
-                        "The PC version's textures, from the pack built from your own copy: " +
-                            pack});
-  }
   settings.push_back({"Right stick at its edge",
                       "fear_look_ramp",
                       {{"off", "No boost"},
@@ -155,12 +130,6 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "The 360 version adds a screen bloom the PC version doesn't have. Near "
                       "bright lights it spreads a grey haze over the scene."});
-  settings.push_back({"Texture sharpness",
-                      "fear_mip_bias",
-                      {{"0", "As shipped"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
-                      false,
-                      "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
-                      "sharpest setting can shimmer on fine patterns."});
   settings.push_back({"Enemy AI",
                       "fear_ai",
                       {{"sharp", "Sharp"}, {"pc", "As on PC"}, {"360", "As on 360"}},
@@ -471,19 +440,6 @@ class QuitPanel final : public HostPanel {
   bool closing_ = false;
 };
 
-// First run: draw at the multiple of 720p that covers the display (3 on 4K, 2 on 1080p and
-// 1440p).
-uint32_t FirstRunScale() {
-#if defined(_WIN32)
-  DEVMODEW mode{};
-  mode.dmSize = sizeof(mode);
-  if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmPelsHeight) {
-    return std::clamp(uint32_t(std::ceil(mode.dmPelsHeight / 720.0)), 1u, 3u);
-  }
-#endif
-  return 1;
-}
-
 }  // namespace
 
 namespace fear::settings {
@@ -491,10 +447,8 @@ namespace fear::settings {
 void Load(const std::filesystem::path& user_data_root) {
   fear::process::WaitForPreviousRun();
   g_path = user_data_root / "settings.toml";
-  std::error_code error;
-  if (!fs::exists(g_path, error)) {
-    WriteSettings({{"nx_native_resolution_scale", std::to_string(FirstRunScale())}});
-  }
+  // (fear-nx's renderer started a first run at the display's multiple of 720p; the D3D12
+  // renderer has no resolution scale yet: docs/NATIVE_RENDERER.md.)
   rex::cvar::LoadConfig(g_path);
 }
 

@@ -11,13 +11,13 @@ BSD code keeps its own terms: it isn't relicensed as MIT.
    where a file's header says otherwise.
 
 2. GNU GPL version 3 or later (LICENSES/GPL-3.0.txt)
-   - port-nx/src/native/ is a copy (with local changes, listed in its UPSTREAM.md) of src/native/
-     from fear-nx (https://github.com/infriker/fear-nx, commit acad80d), which fear-nx licenses
-     GPL-3.0-or-later. fear-nx adapted it from Project8Recomp (https://github.com/R-drg/project8-sw)
-     and nfsmw-nx (https://github.com/StevensND/nfsmw-nx), both GPL-3.0. Most files carry
-     "SPDX-License-Identifier: GPL-3.0-or-later"; the rest of that directory (headers without
-     one, the tests, shaders/*.glsl, adapted from Project8Recomp, and the SPIR-V headers generated
-     from them) is under the same terms. Our changes to these files are GPL-3.0-or-later too.
+   - port-nx/src/native/ is what is left of a copy (with local changes, listed in its UPSTREAM.md)
+     of src/native/ from fear-nx (https://github.com/infriker/fear-nx, commit acad80d), which
+     fear-nx licenses GPL-3.0-or-later: its graphics system (native_system.*), which runs the GPU
+     ring. fear-nx adapted it from Project8Recomp (https://github.com/R-drg/project8-sw) and
+     nfsmw-nx (https://github.com/StevensND/nfsmw-nx), both GPL-3.0. fear-nx's renderer, removed
+     here in 2026-10 (D3D12 only), stays in this repository's history under the same terms. Our
+     changes to these files are GPL-3.0-or-later too.
    - port/fear_manifest.toml and port-nx/fear_manifest.toml start from fear-nx's GPL-3.0 list of
      function entry points for the same executable. port-files/fear_manifest.toml follows
      port-nx's and is distributed under the same terms.
@@ -35,9 +35,9 @@ BSD code keeps its own terms: it isn't relicensed as MIT.
      SDK build scaffolding, not a translation of game code.
    - patches/rexglue-sdk-nx/0001-*.patch and on are this project's changes to the SDK, under the
      SDK's BSD-3-Clause license; their context lines are ReXGlue and Xenia code.
-   - Parts of port-nx/src/native/ originate in Xenia (https://github.com/xenia-project/xenia,
-     BSD-3-Clause), reached through ReXGlue and fear-nx; Xenia's notice applies to those parts as
-     well as the GPL.
+   - Parts of port-nx/src/native/ (and of fear-nx's renderer in this repository's history)
+     originate in Xenia (https://github.com/xenia-project/xenia, BSD-3-Clause), reached through
+     ReXGlue and fear-nx; Xenia's notice applies to those parts as well as the GPL.
    - Parts of port-nx/src/d3d12/ are ported from the ReXGlue SDK and, through it, from Xenia
      (each file's header names them); ReXGlue's license, with Xenia's notice, applies to those
      parts as well as the MIT terms in 4.

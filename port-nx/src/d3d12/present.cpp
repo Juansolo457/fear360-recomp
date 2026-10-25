@@ -1,4 +1,5 @@
-// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see native/README.md): Swap -> debug window, front buffer captures.
+// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see README.md): Swap -> ReXGlue's presenter,
+// front buffer captures.
 // See present.h.
 #include "present.h"
 
@@ -12,8 +13,12 @@
 
 #include <rex/cvar.h>
 #include <rex/graphics/registers.h>
+#include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
+#include <rex/system/interfaces/graphics.h>
+#include <rex/system/xvideo.h>
+#include <rex/ui/d3d12/d3d12_presenter.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xmemory.h>
 
@@ -40,10 +45,11 @@ REXCVAR_DEFINE_INT32(fear_d3d12_capture_hold_ms, 500, "F.E.A.R. D3D12",
 REXCVAR_DEFINE_INT32(fear_d3d12_capture_burst, 1, "F.E.A.R. D3D12",
                      "Debug: a capture request (file or F12) captures this many frames in a row "
                      "(a frame or two apart with the Xenos copy, which holds the guest)");
-REXCVAR_DEFINE_BOOL(fear_d3d12_capture_xenos, true, "F.E.A.R. D3D12",
-                    "Captures also write the fear-nx renderer's copy of the frame and the PSNR "
+REXCVAR_DEFINE_BOOL(fear_d3d12_capture_xenos, false, "F.E.A.R. D3D12",
+                    "Captures also write the front buffer as guest memory holds it and the PSNR "
                     "between them, holding the guest thread (--fear_d3d12_capture_hold_ms); "
-                    "false: the native image alone, written off the guest thread");
+                    "false: the native image alone, written off the guest thread. Nothing else "
+                    "writes the front buffer into guest memory now (fear-nx's renderer is gone)");
 REXCVAR_DEFINE_BOOL(fear_d3d12_luma_probe, false, "F.E.A.R. D3D12",
                     "Read back three rows of every front buffer (at 10, 40 and 80 % of its "
                     "height) and log their mean brightness in the frame CSV, to find frames "
@@ -536,6 +542,11 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
     desc = image->texture->GetDesc();
     extent = ImageExtent(*image, desc);
   }
+  // The output image is the front buffer's size, so the blit below copies it 1:1 (the presenter
+  // scales it to the window); without a front buffer it keeps its size, 1280x720 at first.
+  if (!d.EnsureOutput(found ? extent.width : (d.width() ? d.width() : 1280),
+                      found ? extent.height : (d.height() ? d.height() : 720)))
+    return;
   if (glitch.on()) glitch.Collect(d.frame_slot());
   // A held frame (DrawRenderer::FrameIncomplete) never reaches the screen: it is neither blitted
   // nor recorded, so the glitch catcher and the luma probe see what was shown.
@@ -681,6 +692,52 @@ void Presenter::ReadSwap(const uint8_t* base, const HookArgs& args, SwapCall* ou
 }
 
 void Presenter::OnSwap(const SwapCall& swap, bool shown) { impl_->OnSwap(swap, shown); }
+
+bool Presenter::HandToPresenter(std::span<ID3D12CommandList* const> first) {
+  D3D12Device& d = impl_->r.device();
+  rex::Runtime* runtime = rex::Runtime::instance();
+  rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
+  // fear-nx's graphics system (../native/native_system.h) runs ReXGlue's D3D12 presenter.
+  auto* presenter =
+      graphics ? static_cast<rex::ui::d3d12::D3D12Presenter*>(graphics->presenter()) : nullptr;
+  ID3D12Resource* const output = d.back_buffer();
+  if (!presenter || !output) return false;
+  rex::system::X_VIDEO_MODE mode;
+  rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
+  const uint32_t aspect_x = std::max(1u, uint32_t(mode.display_width));
+  const uint32_t aspect_y = std::max(1u, uint32_t(mode.display_height));
+  bool submitted = false;
+  presenter->RefreshGuestOutput(
+      d.width(), d.height(), aspect_x, aspect_y,
+      [&](rex::ui::Presenter::GuestOutputRefreshContext& context) {
+        using rex::ui::d3d12::D3D12Presenter;
+        ID3D12Resource* const target =
+            static_cast<D3D12Presenter::D3D12GuestOutputRefreshContext&>(context)
+                .resource_uav_capable();
+        ID3D12GraphicsCommandList* const list = d.command_list();
+        D3D12_RESOURCE_BARRIER b[2] = {
+            TransitionBarrier(target, D3D12Presenter::kGuestOutputInternalState,
+                              D3D12_RESOURCE_STATE_COPY_DEST),
+            TransitionBarrier(output, D3D12_RESOURCE_STATE_COMMON,
+                              D3D12_RESOURCE_STATE_COPY_SOURCE)};
+        list->ResourceBarrier(2, b);
+        D3D12_TEXTURE_COPY_LOCATION to = {}, from = {};
+        to.pResource = target;
+        to.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        from.pResource = output;
+        from.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        const D3D12_BOX box = {0, 0, 0, d.width(), d.height(), 1};
+        list->CopyTextureRegion(&to, 0, 0, 0, &from, &box);
+        for (D3D12_RESOURCE_BARRIER& t : b)
+          std::swap(t.Transition.StateBefore, t.Transition.StateAfter);
+        list->ResourceBarrier(2, b);
+        // 10 bits per channel: the gamma ramp's entries are.
+        context.SetIs8bpc(false);
+        submitted = d.Submit(first);
+        return submitted;
+      });
+  return submitted;
+}
 
 bool Presenter::front_buffer_found() const { return impl_->front_buffer_found; }
 

@@ -1,6 +1,5 @@
 // D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see native/README.md): NativeRenderer host.
 #include "renderer.h"
-#include "../fear_panel.h"
 
 #include "async_file.h"
 #include "clock.h"
@@ -20,6 +19,7 @@
 #include <rex/runtime.h>
 #include <rex/system/interfaces/graphics.h>
 #include <rex/system/kernel_state.h>
+#include <rex/ui/d3d12/d3d12_provider.h>
 #include <rex/ui/keybinds.h>
 #include <rex/ui/window.h>
 #include <rex/ui/windowed_app_context.h>
@@ -41,16 +41,8 @@
 // runtime has no such patch, so the column stays 0.
 static uint64_t rex_xam_take_frame_pad() { return 0; }
 
-REXCVAR_DEFINE_BOOL(fear_d3d12, false, "F.E.A.R. D3D12",
-                    "Run the native D3D12 renderer beside the fear-nx renderer (debug window)");
-REXCVAR_DEFINE_BOOL(fear_d3d12_primary, false, "F.E.A.R. D3D12",
-                    "The native renderer is the game's output: it presents into the game window "
-                    "and the fear-nx renderer skips all draws, resolves and swaps (gpu_skip_draws, "
-                    "tools/patches/pgr4-native/0031); implies --fear_d3d12");
 REXCVAR_DEFINE_STRING(fear_d3d12_csv, "", "F.E.A.R. D3D12",
                       "Per-frame CSV of the native path: counts and CPU time per hook class");
-REXCVAR_DEFINE_INT32(fear_d3d12_width, 1280, "F.E.A.R. D3D12", "Debug window width");
-REXCVAR_DEFINE_INT32(fear_d3d12_height, 720, "F.E.A.R. D3D12", "Debug window height");
 REXCVAR_DEFINE_BOOL(fear_d3d12_profile, false, "F.E.A.R. D3D12",
                     "Per-stage CPU time of the draw path (RDTSC), appended to the native CSV as "
                     "st_<stage>_us columns and to the stats log line");
@@ -74,26 +66,6 @@ REXCVAR_DEFINE_INT32(fear_d3d12_submit_draws, 256, "F.E.A.R. D3D12",
                      "Submit the frame's commands every this many draws, so the GPU starts on them "
                      "while the rest of the frame is recorded (0: one submission per frame, at the "
                      "Swap)");
-REXCVAR_DEFINE_BOOL(fear_d3d12_renderer_switch, true, "F.E.A.R. D3D12",
-                    "With --fear_d3d12_primary, the key bind_renderer_switch (F9) switches "
-                    "between the native renderer and the fear-nx renderer at the next Swap");
-REXCVAR_DEFINE_INT32(fear_d3d12_frame_latency, 0, "F.E.A.R. D3D12",
-                     "With --fear_d3d12_primary: pace the game's frames on the display, with at "
-                     "most this many frames begun but not yet shown (1-3, frame_pacer.h); 0 (the "
-                     "default) leaves the pacing to the game's vblank wait, which runs GRAW at "
-                     "its 30 fps (the display pacer needs the guest to present at once, which "
-                     "GRAW's hooks do not do yet; with --fear_d3d12_csv the shown presents are "
-                     "still logged)")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_BOOL(fear_d3d12_low_latency, true, "F.E.A.R. D3D12",
-                    "With the frames paced on the display: begin each frame as late as the "
-                    "time the frames before it waited for the display allows (frame_pacer.h), "
-                    "so a frame limit lowers the latency instead of raising it")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_INT32(fear_d3d12_latency_margin_us, 4000, "F.E.A.R. D3D12",
-                     "With --fear_d3d12_low_latency: how long before the display shows a frame "
-                     "the GPU should have finished it, in microseconds")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(
     fear_d3d12_mark_audit, 0, "F.E.A.R. D3D12",
     "Debug, render thread mode: a mark (F12 or <capture dir>/capture.request) also "
@@ -123,18 +95,6 @@ namespace {
 // Set once the device or swapchain failed; the native path stops.
 std::atomic<bool> g_failed{false};
 
-// The game window (the SDK's display window), and ReXGlue's presenter, which presents into it
-// unless the renderer does (OwnGameWindow).
-rex::ui::Window* GameWindow() {
-  rex::Runtime* runtime = rex::Runtime::instance();
-  return runtime ? runtime->display_window() : nullptr;
-}
-rex::ui::Presenter* SdkPresenter() {
-  rex::Runtime* runtime = rex::Runtime::instance();
-  rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
-  return graphics ? graphics->presenter() : nullptr;
-}
-
 // `path`, or the first of <stem>.1<ext>, <stem>.2<ext>... that does not exist: a title launched
 // from this one gets this process's arguments (games/common/title_launch.cpp), and PGR4 started
 // again after Geometry Wars must not overwrite the first run's files.
@@ -146,11 +106,6 @@ std::string UnusedPath(const std::string& path) {
     p.replace_filename(p.stem().string() + "." + std::to_string(i) + p.extension().string());
   }
   return p.string();
-}
-
-bool FlagOn(const char* name) {
-  const std::string v = rex::cvar::GetFlagByName(name);
-  return v == "true" || v == "1";
 }
 
 // One column of the frame CSV: its name in the header and its value in this frame's row, so
@@ -205,20 +160,6 @@ void AppendCsvCells(std::span<const CsvCell> cells, bool header, bool leading_co
                     std::string* line) {
   for (size_t i = 0; i < cells.size(); ++i)
     AppendCsvCell(cells[i], header, i || leading_comma, line);
-}
-
-// The window's presenter belongs to the UI thread. Connected again for a XAM dialog, it is asked
-// to paint: it paints on guest frames (none while the fear-nx renderer draws nothing) and on paint
-// requests, and the dialog's own request came while the window was ours, so without this the
-// window stayed black until something else repainted it (#24).
-void ConnectSdkPresenter(bool connect) {
-  rex::ui::Window* window = GameWindow();
-  rex::ui::Presenter* presenter = SdkPresenter();
-  if (window && presenter)
-    window->app_context().CallInUIThreadSynchronous([&] {
-      window->SetPresenter(connect ? presenter : nullptr);
-      if (connect) presenter->RequestUIPaintFromUIThread();
-    });
 }
 
 }  // namespace
@@ -332,7 +273,7 @@ struct NativeRenderer::Queue {
 };
 
 NativeRenderer* NativeRenderer::Get() {
-  if (!(REXCVAR_GET(fear_d3d12) || REXCVAR_GET(fear_d3d12_primary)) || g_failed) return nullptr;
+  if (g_failed) return nullptr;
   // Never destroyed: the process exits with the game, and the guest thread may still be in a
   // hook during static destruction.
   static NativeRenderer* r = [] {
@@ -349,38 +290,22 @@ NativeRenderer* NativeRenderer::Get() {
   return g_failed ? nullptr : r;
 }
 
-NativeRenderer::~NativeRenderer() {
-  if (switch_bound_) rex::ui::UnregisterBind("bind_renderer_switch");
-}
+NativeRenderer::~NativeRenderer() = default;
 
 bool NativeRenderer::Initialize() {
-  device_ = std::make_unique<D3D12Device>();
-  uint32_t w = uint32_t(std::max(64, REXCVAR_GET(fear_d3d12_width)));
-  uint32_t h = uint32_t(std::max(64, REXCVAR_GET(fear_d3d12_height)));
-  const bool primary = primary_ = REXCVAR_GET(fear_d3d12_primary);
-  const bool paced = primary && REXCVAR_GET(fear_d3d12_frame_latency) > 0;
-  // The pacer, or with the CSV only its log of the presents shown.
-  const bool pacer = paced || (primary && !REXCVAR_GET(fear_d3d12_csv).empty());
-  HWND game_window = nullptr;
-  if (primary) {
-    // The first D3D call comes after the SDK opened its window; wait briefly in case not.
-    for (int i = 0; i < 100 && !game_window; ++i) {
-      if (rex::ui::Window* window = GameWindow())
-        game_window = static_cast<HWND>(window->GetNativeWindowHandle());
-      if (!game_window) Sleep(50);
-    }
-    if (!game_window) {
-      REXLOG_ERROR("D3D12: --fear_d3d12_primary: no game window found");
-      return false;
-    }
-    // The pacer needs FIFO: vkd3d-proton releases the frame latency waitable on the display's
-    // present feedback only for capped present modes, and on the blit for the others. Without
-    // the pacer, the same switch as the SDK presenter's.
-    device_->set_vsync(paced || FlagOn("d3d12_present_vsync"));
-    device_->set_frame_latency_waitable(pacer);
-  }
-  if (!device_->Initialize(w, h, primary ? L"F.E.A.R. D3D12" : L"D3D12 (debug)", game_window))
+  // On ReXGlue's D3D12 presenter's device and queue: the presenter takes each frame there
+  // (Presenter::HandToPresenter) and keeps the window (d3d12_device.h). fear-nx's graphics system
+  // (../native/native_system.h) creates it before the game's first D3D call.
+  rex::Runtime* runtime = rex::Runtime::instance();
+  rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
+  auto* provider =
+      graphics ? static_cast<rex::ui::d3d12::D3D12Provider*>(graphics->provider()) : nullptr;
+  if (!provider) {
+    REXLOG_ERROR("D3D12: no D3D12 provider (the graphics system has not set up presentation)");
     return false;
+  }
+  device_ = std::make_unique<D3D12Device>();
+  if (!device_->Initialize(provider->GetDevice(), provider->GetDirectQueue())) return false;
   if (REXCVAR_GET(fear_d3d12_gpu_timing)) {
     if (device_->EnableGpuTimer()) {
       gpu_timer_ = device_->gpu_timer();
@@ -401,18 +326,6 @@ bool NativeRenderer::Initialize() {
   if (!draw_->Initialize()) return false;
   present_ = std::make_unique<Presenter>(*this);
   if (!present_->Initialize()) return false;
-  // Only once native is up: from here the fear-nx renderer does no draw, copy or swap work, and its
-  // command processor only runs fences, write-backs and interrupts.
-  if (primary && !rex::cvar::SetFlagByName("gpu_skip_draws", "true"))
-    REXLOG_ERROR(
-        "D3D12: could not set gpu_skip_draws (the renderer plugin lacks "
-        "tools/patches/pgr4-native/0031); Xenos keeps drawing");
-  if (primary && REXCVAR_GET(fear_d3d12_renderer_switch)) {
-    rex::ui::RegisterBind("bind_renderer_switch", "F9",
-                          "D3D12: switch between the native renderer and the fear-nx renderer",
-                          [this] { switch_requested_.store(true, std::memory_order_relaxed); });
-    switch_bound_ = true;
-  }
   csv_ = std::make_unique<Csv>();
   profile::enabled.store(REXCVAR_GET(fear_d3d12_profile), std::memory_order_relaxed);
   const std::string path = REXCVAR_GET(fear_d3d12_csv).empty()
@@ -431,24 +344,6 @@ bool NativeRenderer::Initialize() {
     } else {
       REXLOG_ERROR("D3D12: cannot open {}", path);
     }
-  }
-  if (pacer) {
-    std::unique_ptr<AsyncFile> log;
-    if (!path.empty()) {
-      const std::string log_path =
-          path.substr(0, path.size() - (path.ends_with(".csv") ? 4 : 0)) + "-presents.csv";
-      if (!(log = AsyncFile::Create(log_path)))
-        REXLOG_ERROR("D3D12: cannot open {}", log_path);
-    }
-    pacer_ = std::make_unique<FramePacer>(FramePacer::Options{
-        .frame_latency = uint32_t(std::max(0, REXCVAR_GET(fear_d3d12_frame_latency))),
-        .low_latency = REXCVAR_GET(fear_d3d12_low_latency),
-        .latency_margin_ns =
-            uint64_t(std::max(0, REXCVAR_GET(fear_d3d12_latency_margin_us))) * 1000,
-        .log = std::move(log)});
-    if (pacer_->frame_latency() > 0)
-      REXLOG_INFO("D3D12: frames paced on the display, at most {} begun but not shown",
-                  pacer_->frame_latency());
   }
   frame_start_ns_ = NowNs();
   if (REXCVAR_GET(fear_d3d12_render_thread)) {
@@ -613,7 +508,7 @@ void NativeRenderer::QueueResolve(const uint8_t* base, const HookArgs& args) {
 void NativeRenderer::QueueSwap(uint8_t* base, const HookArgs& args) {
   // The render thread failed a frame (Fail): what was queued since is dropped.
   if (g_failed) [[unlikely]]
-    return HandOver(base, args.device);
+    return;
   const uint64_t t0 = NowNs();
   Queue& q = *queue_;
   Queue::Batch& b = *q.current;
@@ -646,7 +541,6 @@ void NativeRenderer::QueueSwap(uint8_t* base, const HookArgs& args) {
   s.hook_max_ns = std::max({q.hook_max_ns, TicksToNs(q.hook_max_ticks), t1 - t0 - wait});
   s.track_calls = profile::g.track_calls;
   s.pad = rex_xam_take_frame_pad();
-  const bool hand_over = s.call.hand_over = HandOverDue();
   std::memcpy(s.ticks, profile::g.ticks, sizeof(s.ticks));
   for (uint64_t& t : profile::g.ticks) t = 0;
   profile::g.track_calls = 0;
@@ -654,10 +548,8 @@ void NativeRenderer::QueueSwap(uint8_t* base, const HookArgs& args) {
   q.Push(Queue::kSwap, uint32_t(b.swaps.size() - 1));
   q.Publish();
   ++q.frame;
-  // Handing over and a capture's wait count towards the next frame. A hand-over waits for the
-  // render thread to run this Swap (its last native frame, which also gives the game window back)
-  // before the fear-nx renderer draws again.
-  const uint64_t capture_wait = sync || hand_over ? q.WaitFrames(q.frame) : 0;
+  // A capture's wait counts towards the next frame.
+  const uint64_t capture_wait = sync ? q.WaitFrames(q.frame) : 0;
   // The render thread has run this Swap: the capture is taken, or waits for a shown frame.
   if (sync) q.capture_armed = present_->capture_holding_guest();
   const uint64_t pace_wait = pacer_ ? pacer_->WaitToBegin() : 0;
@@ -669,7 +561,6 @@ void NativeRenderer::QueueSwap(uint8_t* base, const HookArgs& args) {
   q.hook_max_ns = tail - capture_wait;
   q.begin_ns = t2;
   q.pace_wait_ns = pace_wait;
-  if (hand_over) HandOver(base, args.device);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -706,64 +597,15 @@ void NativeRenderer::OnResolve(const uint8_t* base, const HookArgs& args) {
 void NativeRenderer::OnSwap(uint8_t* base, const HookArgs& args) {
   if (queue_) return QueueSwap(base, args);
   if (g_failed) [[unlikely]]
-    return HandOver(base, args.device);
+    return;
   stats_.guest_swap_ns = NowNs();
   SwapCall swap;
   Presenter::ReadSwap(base, args, &swap);
   stats_.pad = rex_xam_take_frame_pad();
-  swap.hand_over = HandOverDue();
   ExecuteSwap(swap);
   // stats_ is the next frame's from here.
   stats_.pace_wait_ns = pacer_ ? pacer_->WaitToBegin() : 0;
   stats_.guest_begin_ns = NowNs();
-  if (swap.hand_over || g_failed) HandOver(base, args.device);
-}
-
-void NativeRenderer::OnSwapSuspended() {
-  if (panel_suspended_) {
-    if (fear::panel::AnyOpen()) return;
-    panel_suspended_ = false;
-    TakeBack();
-    return;
-  }
-  if (SwitchRequested()) TakeBack();
-}
-
-bool NativeRenderer::HandOverDue() {
-  if (SwitchRequested()) return true;
-  if (primary_ && fear::panel::AnyOpen()) {
-    panel_suspended_ = true;
-    return true;
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Renderer switch (primary mode)
-
-void NativeRenderer::HandOver(uint8_t* base, uint32_t device) {
-  // Beside the fear-nx renderer (debug window) it never stopped drawing; Fail cleared live_ already.
-  if (!primary_) return;
-  // The plugin skipped the shader loads while native drew (gpu_skip_draws): the next draw
-  // writes them, and the rest of the state, again.
-  MarkAllDirty(base, device);
-  rex::cvar::SetFlagByName("gpu_skip_draws", "false");
-  // The plugin presents on its own: the game waits for its vblanks again.
-  paces_frames_.store(false, std::memory_order_relaxed);
-  live_.store(nullptr, std::memory_order_relaxed);
-  if (g_failed)
-    REXLOG_INFO("D3D12: the fear-nx renderer draws for the rest of the run");
-  else
-    REXLOG_INFO("D3D12: renderer switch: the fear-nx renderer draws");
-}
-
-void NativeRenderer::TakeBack() {
-  // The tracker saw none of the calls the plugin drew. The next native frame's ExecuteSwap
-  // takes the game window back (OwnGameWindow), and the pacing with it.
-  GuestState().Resync();
-  rex::cvar::SetFlagByName("gpu_skip_draws", "true");
-  live_.store(this, std::memory_order_release);
-  REXLOG_INFO("D3D12: renderer switch: native draws");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -836,51 +678,9 @@ bool NativeRenderer::CloseUploadLists() {
 
 void NativeRenderer::Fail() {
   g_failed = true;
-  paces_frames_.store(false, std::memory_order_relaxed);
-  if (pacer_) pacer_->Stop();
-  REXLOG_ERROR("D3D12: frame {} failed; native path off for the rest of the run",
-               frame_index_);
-  if (!primary_) {
-    live_.store(nullptr, std::memory_order_relaxed);
-    return;
-  }
-  // The fear-nx renderer skips its draws until the guest thread's next Swap hands the game back
-  // (HandOver: it needs the guest device, between two of the guest's D3D calls); live_ stays
-  // set so that the hooks reach that Swap.
-  ReleaseGameWindow();
-}
-
-void NativeRenderer::ReleaseGameWindow() {
-  D3D12Device& d = *device_;
-  paces_frames_.store(false, std::memory_order_relaxed);
-  if (d.has_swapchain()) {
-    d.DetachSwapchain();
-    if (pacer_) pacer_->Detach();
-  }
-  if (window_taken_) {
-    ConnectSdkPresenter(true);
-    window_taken_ = false;
-    REXLOG_INFO("D3D12: the game window shows ReXGlue's presenter");
-  }
-}
-
-bool NativeRenderer::OwnGameWindow(bool own) {
-  D3D12Device& d = *device_;
-  if (own == d.has_swapchain()) return true;
-  if (!own) {
-    ReleaseGameWindow();
-    return true;
-  }
-  ConnectSdkPresenter(false);
-  window_taken_ = true;
-  if (!d.AttachSwapchain()) return false;
-  if (pacer_) {
-    HANDLE waitable = d.TakeFrameLatencyWaitable(FramePacer::kMaxFrameLatency);
-    if (!waitable) return false;
-    pacer_->Attach(waitable, d.fence());
-    paces_frames_.store(pacer_->pacing(), std::memory_order_relaxed);
-  }
-  return true;
+  live_.store(nullptr, std::memory_order_relaxed);
+  // Nothing takes over (D3D12 only): the presenter keeps the last frame it was given.
+  REXLOG_ERROR("D3D12: frame {} failed; the renderer stops for the rest of the run", frame_index_);
 }
 
 void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
@@ -892,10 +692,8 @@ void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
   // stays on screen while the next one waits for them.
   const bool incomplete = draw_->FrameIncomplete();
   if (incomplete) ++stats_.frames_held;
-  if (primary_ && !OwnGameWindow(!swap.hand_over && !rex::kernel::xam::xeXamIsUIActive()))
-    return Fail();
-  const bool shown = !incomplete && d.has_swapchain();
-  // The resolved front buffer into the back buffer (PRESENT in and out).
+  const bool shown = !incomplete;
+  // The resolved front buffer into the output image (PRESENT in and out).
   present_->OnSwap(swap, shown);
   // The frame's texture copies read upload memory the untile workers fill.
   const uint64_t u0 = NowNs();
@@ -903,7 +701,13 @@ void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
   stats_.swap_untile_ns = NowNs() - u0;
   draw_->BeforeSubmit();
   const uint64_t fence = d.frame_fence();
-  if (!CloseUploadLists() || !d.EndFrame(shown, upload_lists_)) return Fail();
+  if (!CloseUploadLists()) return Fail();
+  // The frame to ReXGlue's presenter, which submits it (the texture uploads first) in its
+  // callback; a held or refused frame is submitted here, and the window keeps the last one.
+  const bool handed = shown && present_->HandToPresenter(upload_lists_);
+  if (!d.EndFrame(handed, handed ? std::span<ID3D12CommandList* const>()
+                                 : std::span<ID3D12CommandList* const>(upload_lists_)))
+    return Fail();
   const D3D12Device::EndFrameTimes& et = d.end_frame_times();
   stats_.swap_submit_ns = et.submit_ns;
   stats_.swap_present_ns = et.present_ns;
@@ -915,7 +719,6 @@ void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
     pacer_->RetireUnshown();
   ++frame_index_;
   frame_begun_ = false;
-  d.SetTitleFrame(frame_index_);
   const uint64_t completed = d.completed_fence();
   if (queue_) {
     // Frees the guest thread's vertex upload memory of finished frames (Prepare's tags).

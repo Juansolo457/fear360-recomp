@@ -1,19 +1,12 @@
-// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see native/README.md): the app's own D3D12 queue, fence, frame command lists and
-// swapchain, separate from ReXGlue's presenter and the fear-nx renderer.
+// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see README.md): the frame command lists,
+// fence and output image, on ReXGlue's D3D12 presenter's device and direct queue.
 //
-// Two window modes: the debug window (a top-level window of its own beside the game's), or, with
-// --fear_d3d12_primary, the game window itself (the SDK's). There the swapchain exists only
-// between AttachSwapchain and DetachSwapchain, while the renderer owns the window; the rest of
-// the time ReXGlue's presenter has its swapchain there (renderer.h, OwnGameWindow). The game
-// window and not a child window over it: gamescope's WSI layer flips only the swapchain of a
-// top-level window with no child window above it, and sends any other through Xwayland's copy,
-// which has neither FIFO nor the frame limiter and drops all but the newest frame per refresh.
-//
-// D3D12 returns the same ID3D12Device for the same adapter within a process, so the device may
-// be the one the fear-nx renderer also uses; everything else here (queue, allocators, lists,
-// fence, swapchain) is ours. A device removal caused by the native path would also take down
-// the fear-nx renderer. The D3D12 debug layer cannot be enabled here (the device usually exists
-// already when the native path starts).
+// F.E.A.R.: the renderer draws the game alone (docs/NATIVE_RENDERER.md, D3D12 only), and
+// ReXGlue's D3D12 presenter keeps the window: it shows each frame the renderer hands it
+// (present.h, HandToPresenter) with the ImGui panels and the system dialogs on top, scaled to the
+// window and paced on the display. So there is no swapchain or window here, only the output image
+// each frame's last pass draws into, in the presenter's guest output format so that the hand-over
+// is a copy. pgr4-native's and GRAW's renderer owned a device, queue, swapchain and window.
 #pragma once
 
 #ifndef NOMINMAX
@@ -26,11 +19,9 @@
 #include <wrl/client.h>
 #undef DrawState  // winuser.h maps it to DrawStateA/W; d3d_state.h's struct has that name
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include "win_handle.h"
@@ -44,53 +35,41 @@ class GpuTimer;
 class D3D12Device {
  public:
   static constexpr uint32_t kFramesInFlight = 2;
-  static constexpr uint32_t kBackBuffers = 3;
-  static constexpr DXGI_FORMAT kBackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-  // With HDR output (--fear_d3d12_hdr): HDR10, BT.2020 primaries and the PQ curve.
-  static constexpr DXGI_FORMAT kHdrBackBufferFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+  // The output image's format: ReXGlue's D3D12Presenter::kGuestOutputFormat, which the hand-over
+  // copies into (a copy needs the same format). The HDR output pgr4-native has is not used: the
+  // presenter outputs SDR (the name stays for present.cpp's HDR pipeline, never chosen).
+  static constexpr DXGI_FORMAT kBackBufferFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+  static constexpr DXGI_FORMAT kHdrBackBufferFormat = kBackBufferFormat;
 
   ~D3D12Device();
 
-  // Creates the device objects and opens the first frame's command list; without
-  // `game_window`, also the debug window (on its own message thread) and its swapchain. With it,
-  // the frames are presented there, at its client size, once AttachSwapchain created the
-  // swapchain (width/height are ignored). Logs and returns false on failure.
-  bool Initialize(uint32_t width, uint32_t height, const wchar_t* title,
-                  HWND game_window = nullptr);
+  // Creates the fence, allocators and frame list on `device` (ReXGlue's D3D12 provider's) and
+  // opens the first frame's list. Everything is submitted to `queue`, the provider's direct queue,
+  // which the presenter's guest output refresh requires. Logs and returns false on failure.
+  bool Initialize(ID3D12Device* device, ID3D12CommandQueue* queue);
 
-  // Present with sync interval 1 (vsync) instead of 0 (tearing when supported).
-  void set_vsync(bool vsync) { vsync_ = vsync; }
-  // Before Initialize: every swapchain gets a frame latency waitable object (frame_pacer.h).
-  void set_frame_latency_waitable(bool on) { latency_waitable_ = on; }
-  // The current swapchain's frame latency waitable object, with room for `max_latency` presents
-  // in flight; the caller owns it. Take it before the swapchain's first Present. nullptr without
-  // set_frame_latency_waitable, or on failure (logged).
-  HANDLE TakeFrameLatencyWaitable(uint32_t max_latency);
-
-  // Game window mode, between frames (no back buffer use recorded in the open list):
-  // AttachSwapchain creates the swapchain at the window's client size; no other swapchain may
-  // exist on the window. Logs and returns false on failure. DetachSwapchain waits for the GPU
-  // and releases it. Frames recorded without a swapchain are submitted but not presented.
-  bool AttachSwapchain();
-  void DetachSwapchain();
-  bool has_swapchain() const { return swapchain_ != nullptr; }
+  // Between frames, before the frame's last pass records into back_buffer(): the output image
+  // at width x height, created again (once the GPU is done with the old one) when the size
+  // changed. Logs and returns false on failure.
+  bool EnsureOutput(uint32_t width, uint32_t height);
 
   ID3D12Device* device() const { return device_.Get(); }
   ID3D12CommandQueue* command_queue() const { return queue_.Get(); }
   ID3D12GraphicsCommandList* command_list() const { return list_.Get(); }
 
-  // The swapchain's current back buffer (state PRESENT outside EndFrame) and its RTV.
-  ID3D12Resource* back_buffer() const { return back_buffers_[back_index_].Get(); }
-  D3D12_CPU_DESCRIPTOR_HANDLE back_buffer_rtv() const;
+  // The output image (state COMMON, which is PRESENT, outside the pass that draws into it) and its
+  // RTV; null before EnsureOutput.
+  ID3D12Resource* back_buffer() const { return output_.Get(); }
+  D3D12_CPU_DESCRIPTOR_HANDLE back_buffer_rtv() const {
+    return rtv_heap_->GetCPUDescriptorHandleForHeapStart();
+  }
   uint32_t width() const { return width_; }
+  uint32_t height() const { return height_; }
   // The adapter's PCI vendor ID (DXGI_ADAPTER_DESC1::VendorId).
   uint32_t vendor_id() const { return vendor_id_; }
-  uint32_t height() const { return height_; }
-  // The swapchain presents HDR10 (kHdrBackBufferFormat): --fear_d3d12_hdr is on and the display
-  // takes it (under Proton: gamescope with HDR on and DXVK_HDR=1, as in Steam's Game Mode).
-  bool hdr() const { return hdr_; }
-  // With hdr(): the luminance, in nits, that the presented image peaks at (the HDR10 metadata).
-  float hdr_peak_nits() const { return hdr_peak_nits_; }
+  // No HDR output: the presenter's guest output is SDR.
+  bool hdr() const { return false; }
+  float hdr_peak_nits() const { return 0.0f; }
 
   // Fence value EndFrame signals for the frame being recorded; last value the GPU reached.
   uint64_t frame_fence() const { return next_fence_; }
@@ -101,16 +80,14 @@ class D3D12Device {
   uint32_t frame_slot() const { return slot_; }
   void WaitFence(uint64_t value);
 
-  // Closes and submits the frame's command list (the caller recorded into the back buffer;
-  // EndFrame adds no barriers), presents (unless `present` is false or there is no swapchain:
-  // the window keeps the previous frame), signals the frame fence, follows the game window's
-  // client size, then waits for the slot kFramesInFlight frames back and opens the next frame's
-  // list.
+  // Closes and submits the frame's command list, signals the frame fence, then waits for the
+  // slot kFramesInFlight frames back and opens the next frame's list. `shown`: the frame went to
+  // the presenter (counted in end_frame_times).
   // `first`: closed lists that run ahead of the frame's in the same ExecuteCommandLists, for
   // work that would otherwise split its render passes (TextureCache::CloseUploadLists); the
   // frame's fence covers them, GpuTimer passes do not.
-  // Returns false once the device or swapchain failed (logged once); the caller stops.
-  bool EndFrame(bool present = true, std::span<ID3D12CommandList* const> first = {});
+  // Returns false once the device failed (logged once); the caller stops.
+  bool EndFrame(bool shown, std::span<ID3D12CommandList* const> first = {});
   // Submits what the frame recorded so far (after `first`, as in EndFrame) and continues it in
   // the same list, reset on the frame's allocator, so the GPU starts on it while the rest of the
   // frame is recorded. The frame fence and slot stay the frame's (EndFrame signals once for all
@@ -120,16 +97,12 @@ class D3D12Device {
   // Where the last EndFrame spent its time.
   struct EndFrameTimes {
     uint64_t submit_ns = 0;   // Close + ExecuteCommandLists
-    uint64_t present_ns = 0;  // Present
+    uint64_t present_ns = 0;  // (none: the presenter presents)
     uint64_t fence_ns = 0;    // OpenList: waiting for the GPU to finish the slot's last frame
-    bool presented = false;   // Present ran (a swapchain and a complete frame)
-    uint64_t presents = 0;    // Presents so far, this one included
+    bool presented = false;   // the frame went to the presenter
+    uint64_t presents = 0;    // frames handed over so far, this one included
   };
   const EndFrameTimes& end_frame_times() const { return end_frame_times_; }
-
-  // Shows a frame counter in the debug window's title (a 500 ms timer on the window thread
-  // reads it).
-  void SetTitleFrame(uint64_t frame) { title_frame_.store(frame, std::memory_order_relaxed); }
 
   // Waits for the GPU to finish everything submitted so far, mid-frame Submits included; the
   // frame being recorded keeps its frame_fence.
@@ -142,19 +115,11 @@ class D3D12Device {
   GpuTimer* gpu_timer() const { return gpu_timer_.get(); }
 
  private:
-  bool CreateWindowThread(const wchar_t* title);
-  bool CreateSwapchain(HWND hwnd);
-  // Switches the new swapchain to HDR10 if wanted and supported, else to kBackBufferFormat.
-  bool SetUpColorSpace();
   bool OpenList();
   bool CloseAndExecute(std::span<ID3D12CommandList* const> first);
-  bool GetBackBuffers();
-  bool FollowWindowSize();
-  static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
   uint32_t width_ = 0, height_ = 0;
   uint32_t vendor_id_ = 0;
-  ComPtr<IDXGIFactory6> factory_;
   ComPtr<ID3D12Device> device_;
   ComPtr<ID3D12CommandQueue> queue_;
   ComPtr<ID3D12Fence> fence_;
@@ -170,25 +135,10 @@ class D3D12Device {
   std::vector<ID3D12CommandList*> submit_lists_;  // CloseAndExecute's
   EndFrameTimes end_frame_times_;
 
-  ComPtr<IDXGISwapChain3> swapchain_;
-  ComPtr<ID3D12Resource> back_buffers_[kBackBuffers];
+  ComPtr<ID3D12Resource> output_;
   ComPtr<ID3D12DescriptorHeap> rtv_heap_;
-  uint32_t rtv_stride_ = 0;
-  uint32_t back_index_ = 0;
-  UINT swapchain_flags_ = 0;  // DXGI_SWAP_CHAIN_FLAG_*: creation and every ResizeBuffers
-  bool tearing_ = false;
-  bool vsync_ = false;
-  bool hdr_ = false;
-  float hdr_peak_nits_ = 0.0f;
-  bool latency_waitable_ = false;
-  HWND game_window_ = nullptr;
 
   std::unique_ptr<GpuTimer> gpu_timer_;
-
-  // The debug window and its message thread.
-  std::thread window_thread_;
-  std::atomic<HWND> hwnd_{nullptr};
-  std::atomic<uint64_t> title_frame_{0};
 };
 
 // Logs a failed HRESULT with the call text; returns true when it failed.

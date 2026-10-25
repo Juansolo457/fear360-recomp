@@ -1,12 +1,15 @@
-// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see native/README.md): guest Swap -> the debug window, and captures.
+// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see README.md): guest Swap -> ReXGlue's
+// presenter, and captures.
 //
 // OnSwap reads the front buffer texture of the guest Swap (r4, a D3DBaseTexture; fetch
 // constant at +28, the same object the frame's last Resolve wrote), finds its host image in the
-// Resolver (RTResolve) and draws it into the debug window's back buffer with the fetch
-// constant's swizzle and the display controller's gamma ramp (present.cpp). Without a
-// resolved image the back buffer is cleared to black.
+// Resolver (RTResolve) and draws it into the output image (D3D12Device::back_buffer, sized to it)
+// with the fetch constant's swizzle and the display controller's gamma ramp (present.cpp).
+// Without a resolved image the output is cleared to black. HandToPresenter then gives the output
+// to ReXGlue's D3D12 presenter, which shows it in the game window with the ImGui panels and the
+// system dialogs on top.
 //
-// Captures (the image check against Xenos): --fear_d3d12_capture_dir (empty by default: no
+// Captures: --fear_d3d12_capture_dir (empty by default: no
 // requests polled) and either the file <dir>\capture.request (deleted when taken, read every 16
 // frames), a mark (F12), or --fear_d3d12_capture_frame=N. A request at Swap F-1 switches the
 // fear-nx renderer to full readback (HoldFullReadback in resolve.h; with "fast" guest memory holds
@@ -33,6 +36,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
+
+struct ID3D12CommandList;
 
 namespace fear::d3d12 {
 
@@ -54,8 +60,6 @@ struct SwapCall {
   uint32_t fetch[6] = {};  // its fetch constant (+28), as stored (virtual address)
   // -1: OnSwap checks for a capture request itself; 0/1: the caller did (CaptureRequested).
   int8_t capture_request = -1;
-  // The renderer switch hands the game to the fear-nx renderer after this frame: hide the window.
-  bool hand_over = false;
 };
 
 class Presenter {
@@ -83,6 +87,12 @@ class Presenter {
   // root signature, pipeline and descriptor heap on the list. `shown`: the frame is presented
   // (false: held, no blit).
   void OnSwap(const SwapCall& swap, bool shown);
+
+  // In NativeRenderer::ExecuteSwap after OnSwap drew a shown frame, before EndFrame: hands the
+  // output image to ReXGlue's D3D12 presenter (RefreshGuestOutput). The copy goes into the frame's
+  // list, which is submitted (after `first`) inside the presenter's callback, as the presenter
+  // requires. True when the presenter took the frame; then `first` went with it.
+  bool HandToPresenter(std::span<ID3D12CommandList* const> first);
 
   // In NativeRenderer::ExecuteSwap after EndFrame: finishes a pending capture (with the Xenos
   // copy: waits for the frame's fence, holds the guest thread, reads guest memory, writes the
