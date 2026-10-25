@@ -17,6 +17,7 @@
 #include <mutex>
 #include <thread>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <fmt/format.h>
@@ -67,6 +68,14 @@ REXCVAR_DEFINE_STRING(fear_dump_image, "", "F.E.A.R.",
                       "Write the loaded executable image (0x82000000 on) to this file once it runs");
 // The game's image layout, from the generated translation (fear_init.cpp).
 extern const rex::PPCImageInfo PPCImageConfig;
+
+// F.E.A.R. (docs/NATIVE_RENDERER.md, step 1): how much of each frame the ring runs more than once.
+// With predicated tiling the game's Direct3D records the frame once and replays it for each EDRAM
+// tile; a packet keeps its guest address in every replay, so counting the packets run against the
+// distinct addresses gives the replay factor an API-level renderer would not pay.
+REXCVAR_DEFINE_BOOL(fear_tile_stats, false, "F.E.A.R.",
+                    "Count the draws and register writes the ring runs per frame against the "
+                    "unique ones (tile replays), in the 10-second report");
 
 // Adapted from Project8Recomp (GPL-3.0), src/game/src/native/; generic Xenos GPU code.
 // F.E.A.R.: the default on PC too (fear-nx kept xenos there); the emulated renderer corrupts
@@ -876,8 +885,66 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       pacing_ms_sum_ = pacing_ms_squares_ = pacing_ms_max_ = 0;
       std::fill(std::begin(pacing_refreshes_), std::end(pacing_refreshes_), 0);
     }
+    if (const double frames = double(tile_sums_.frames)) {
+      REXLOG_INFO(
+          "[native] tiles (fear_tile_stats), per frame over {} frames: draws {:.0f} run / {:.0f} "
+          "unique (x{:.2f}), {:.0f} skipped outside their tile; register writes {:.0f} run / "
+          "{:.0f} unique (x{:.2f}); {:.1f} bin selects, {:.1f} tiles",
+          tile_sums_.frames, tile_sums_.draws / frames, tile_sums_.unique_draws / frames,
+          double(tile_sums_.draws) / double(std::max<uint64_t>(tile_sums_.unique_draws, 1)),
+          tile_sums_.skipped / frames, tile_sums_.registers / frames,
+          tile_sums_.unique_registers / frames,
+          double(tile_sums_.registers) / double(std::max<uint64_t>(tile_sums_.unique_registers, 1)),
+          tile_sums_.selects / frames, tile_sums_.tiles / frames);
+      tile_sums_ = {};
+    }
   }
   RendererStats reported_render_;
+
+  // fear_tile_stats: the packets this frame by guest location, folded into the sums at the swap.
+  // Read again at every swap; off, nothing is counted.
+  bool tile_stats_ = false;
+  std::unordered_set<const void*> tile_draws_, tile_registers_;
+  std::unordered_set<uint64_t> tile_selects_;
+  struct TileSums {
+    uint64_t frames = 0, draws = 0, unique_draws = 0, skipped = 0, registers = 0,
+             unique_registers = 0, selects = 0, tiles = 0;
+  };
+  TileSums tile_frame_, tile_sums_;
+
+  // The guest location of the packet whose header `data` follows (data is just past it).
+  static const void* PacketLocation(const Reader& data) {
+    const uint32_t header = data.mask ? ((data.pos - 1) & data.mask) : data.pos - 1;
+    return data.base + size_t(header) * 4;
+  }
+
+  void CountRegisters(const Reader& data, uint32_t count) {
+    tile_frame_.registers += count;
+    if (tile_registers_.insert(PacketLocation(data)).second) {
+      tile_frame_.unique_registers += count;
+    }
+  }
+
+  void FoldTileFrame() {
+    if (tile_stats_) {
+      tile_frame_.frames = 1;
+      tile_frame_.unique_draws = tile_draws_.size();
+      tile_frame_.tiles = tile_selects_.size();
+      tile_sums_.frames += tile_frame_.frames;
+      tile_sums_.draws += tile_frame_.draws;
+      tile_sums_.unique_draws += tile_frame_.unique_draws;
+      tile_sums_.skipped += tile_frame_.skipped;
+      tile_sums_.registers += tile_frame_.registers;
+      tile_sums_.unique_registers += tile_frame_.unique_registers;
+      tile_sums_.selects += tile_frame_.selects;
+      tile_sums_.tiles += tile_frame_.tiles;
+    }
+    tile_frame_ = {};
+    tile_draws_.clear();
+    tile_registers_.clear();
+    tile_selects_.clear();
+    tile_stats_ = REXCVAR_GET(fear_tile_stats);
+  }
   uint64_t reported_swaps_before_ = 0;
 
   // --- PM4 packets -----------------------------------------------------------------
@@ -911,6 +978,9 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
     if (!packet) {
       return true;
     }
+    if (tile_stats_ && (packet >> 30) < 2) {
+      CountRegisters(data, count);
+    }
     switch (packet >> 30) {
       case 0: {
         const uint32_t index = packet & 0x7FFF;
@@ -942,8 +1012,19 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
 
   void Type3Packet(Reader& data, uint32_t packet, uint32_t words, int depth) {
     const uint32_t opcode = (packet >> 8) & 0x7F;
+    const bool draw = opcode == xenos::PM4_DRAW_INDX || opcode == xenos::PM4_DRAW_INDX_2;
     if ((packet & 0x1) && (!(bin_select_ & bin_mask_) || opcode == xenos::PM4_XE_SWAP)) {
+      if (tile_stats_ && draw) {
+        ++tile_frame_.skipped;
+      }
       return;  // predicate fails; predicated swaps are always dropped
+    }
+    if (tile_stats_ && draw) {
+      ++tile_frame_.draws;
+      tile_draws_.insert(PacketLocation(data));
+      if (packet & 0x1) {
+        tile_selects_.insert(bin_select_);
+      }
     }
     switch (opcode) {
       case xenos::PM4_INTERRUPT: {
@@ -976,6 +1057,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
         Present();
         swap_interrupt_pending_ = true;
         ReportSlowFrame();
+        FoldTileFrame();
         break;
       case xenos::PM4_INDIRECT_BUFFER:
       case xenos::PM4_INDIRECT_BUFFER_PFD: {
