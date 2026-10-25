@@ -5,7 +5,8 @@ This repository mixes code under three sets of terms. The full license texts are
 BSD code keeps its own terms: it isn't relicensed as MIT.
 
 1. This project's own code: MIT (LICENSE)
-   tools/, docs/, port/src/, port-nx/src/ outside port-nx/src/native/, port-nx/tools/, the
+   tools/, docs/, port/src/, port-nx/src/ outside port-nx/src/native/ and port-nx/src/d3d12/,
+   port-nx/tools/, the
    CMakeLists.txt files of port/, port-nx/ and port-files/, and the top-level files, except
    where a file's header says otherwise.
 
@@ -37,9 +38,21 @@ BSD code keeps its own terms: it isn't relicensed as MIT.
    - Parts of port-nx/src/native/ originate in Xenia (https://github.com/xenia-project/xenia,
      BSD-3-Clause), reached through ReXGlue and fear-nx; Xenia's notice applies to those parts as
      well as the GPL.
+   - Parts of port-nx/src/d3d12/ are ported from the ReXGlue SDK and, through it, from Xenia
+     (each file's header names them); ReXGlue's license, with Xenia's notice, applies to those
+     parts as well as the MIT terms in 4.
    - third_party/rexglue-sdk-nx (not tracked; tools/setup-sdk.ps1 recreates it) is ReXGlue
      c94f5eb with patches/rexglue-sdk-nx/ applied; ReXGlue's license and Xenia's notices apply,
      and the libraries in its thirdparty/ keep their own licenses.
+
+4. MIT, pgr4-native (port-nx/src/d3d12/LICENSE.pgr4-native)
+   - port-nx/src/d3d12/, the D3D12 renderer, is ported from GRAW 360 Recompiled's native/
+     (https://github.com/Juansolo457/graw360-recomp, commit 1b42337, MIT), which ports it from
+     pgr4-native (https://github.com/shaunsingh/pgr4-native, commit 8ea20d5, MIT). Its README.md
+     lists the changes; F.E.A.R.'s own front end is fear_d3d.h and fear_d3d_hooks.cpp.
+   - patches/rexglue-sdk-nx/0016-*.patch and 0017-*.patch are pgr4-native's SDK patches 0021 and
+     0022 (shader translator changes the renderer needs), as GRAW 360 Recompiled carries them, by
+     their author; their context lines are ReXGlue and Xenia code (3).
 
 Game material
 No game assets, executables, extracted or decrypted images, generated translations or other

@@ -30,29 +30,48 @@ Deck's default.
 
 ## F.E.A.R.'s Direct3D (August 2006 XDK, `0x82960000`-`0x829BFFFF`)
 
-From GRAW's `tools/scan_d3d.py` over the generated code (71 functions build type-3 packets):
+All in [port-nx/src/d3d12/fear_d3d.h](../port-nx/src/d3d12/fear_d3d.h). Found by pairing each of
+GRAW's D3D functions with its twin here by instruction shape, then aligning each pair instruction
+by instruction and reading the device offsets off the matching loads and stores (MakeSpace and the
+segment restore line up exactly). Functions (r3 = device):
 
-| Function | What it is | Evidence |
+| Function | Role | GRAW's |
 |---|---|---|
-| `sub_829873D8`, `sub_82987910`, `sub_82987F38`, `sub_82988340`, `sub_829887B8`, `sub_82988C50` | the draw entry points (GRAW has four) | predicated `DRAW_INDX` with `SET_BIN_MASK_LO` and predicated `EVENT_WRITE(_EXT)`; callers in the engine renderer (`8229A6F0`, `8229A7A0`, `822C0668`, ...) |
-| `sub_82984718` | Resolve or Clear | `IM_LOAD_IMMEDIATE`, predicated `DRAW_INDX_2`, `WAIT_REG_MEM`, `EVENT_WRITE` |
-| `sub_82985F80`, `sub_8298F8C0`, `sub_82993020`, `sub_829859E0` | internal rectangle draws | `DRAW_INDX_2` with immediate shaders |
-| `sub_8296D830`, `sub_82996910` | tiling: bin mask and select | `SET_BIN_MASK_*`, `SET_BIN_SELECT_*` |
-| `sub_82977798` | the tile replays | `INDIRECT_BUFFER(pred)`, `SET_BIN_SELECT_HI` |
-| `sub_82989CE8` | indirect buffer | `INDIRECT_BUFFER` |
-| `sub_829701E8` | occlusion query | `EVENT_WRITE_ZPD` |
-| `sub_82974598` | Swap | calls `VdGetSystemCommandBuffer` and `VdSwap` |
-| `sub_8298AF08` | ring buffer set-up | `VdInitializeRingBuffer`, `VdEnableRingBufferRPtrWriteBack`, `ME_INIT` |
-| `sub_8298D1E8` | device start-up | `VdSetGraphicsInterruptCallback` |
+| `sub_829873D8` | BeginVertices (prim, count, stride) | `sub_824C4578` |
+| `sub_82987890`, `sub_82987E60` | EndVertices, after each of the two Begins (GRAW has one) | `sub_824C4818` |
+| `sub_829878B0` | DrawVerticesUP (BeginVertices + copy + commit) | `sub_824C4838` |
+| `sub_82987910` | BeginIndexedVertices, returns an HRESULT | `sub_824C48C0` |
+| `sub_82987F38` | DrawVertices (prim, start, count) | `sub_824C4BF8` |
+| `sub_82988340` | DrawIndexedVertices (prim, base vertex, start index, count) | `sub_824C4E38` |
+| `sub_829872B0` / `sub_82986F00` | Clear / ClearF | `sub_824CDCC8` / `sub_824CD598` |
+| `sub_82984718` | Resolve | `sub_824D1960` |
+| `sub_82974598` | Swap (`VdSwap`) | `sub_824CC9C8` |
+| `sub_82979BD0` / `sub_8297A0C8` | BeginTiling / EndTiling | `sub_824D2868` / `sub_824D2CA0` |
+| `sub_8298A988` | MakeSpace (submits through `sub_8298A7E8`) | `sub_824D7E80` |
+| `sub_8298A620` / `sub_82989998` | wrap to the buffer start / restore a saved segment | `sub_824D7C08` / `sub_824D6F88` |
 
-Device, first look (`sub_829873D8`): five 64-bit masks cleared at `+0..+32` (PGR4 keeps its dirty
-masks at `+0..+40`; GRAW's start at `+16`), the flags at `+10432` (GRAW's too), the index buffer at
-`+12420` (GRAW `+12532`, PGR4 `+12428`). So the layout is its own, between the two. GRAW's front
-end needs only a few offsets (the push cursor, the segment functions, the surfaces), since it
-decodes the packets the Direct3D writes rather than its device. About 17 functions outside the
-Direct3D appear to write packets themselves (`ARCHITECTURE.md`; engine `82174980-821798B0`,
-ClientFX's particle batcher `sub_82BB65E0`; not checked one by one yet). If they write through the
-same push cursor, their packets are in the stream at the next hooked call and the decoder sees them.
+Not hooked: `sub_82987E80` (BeginIndexedVertices + copy + EndIndexedVertices, which the hooks
+see), and `sub_829887B8`, `sub_82988C50` (two more draw builders nothing calls directly; the
+tracker logs any draw packet no hooked call wrote).
+
+Device, against GRAW's: the push cursor at `+40` (GRAW `+0`, PGR4 `+48`), its segment end and
+MakeSpace limit at `+44`/`+48`; five dirty masks at `+0..+32` (GRAW `+16..+48`, with other bits:
+`kDirtyBits`, read from the draws' inline flush; GRAW's draws call a flush function); the
+constant shadows 128 bytes lower than GRAW's (fetch `+1024`, VS `+1792`, PS `+5888`, bool/loop
+`+9984`), the register shadow blocks 1,216 lower (0x2000 at `+10240`); flags at `+10808`; index
+buffer, colour and depth surfaces at `+12164`..`+12184`; the tile list at `+12472` with 8-byte
+tile origins as in PGR4's D3D (GRAW keeps 16; **to verify** at the first run, with the resolve
+oracle); BeginVertices' pending cursor at `+13076`. The resource header is 24 bytes, as in PGR4's
+XDK (GRAW's 12): textures' fetch constants at `+28`, an index buffer's address at `+24`.
+
+F.E.A.R.'s segment submit has a branch GRAW's lacks (flags `+10809` bit `0x40`: segments recorded
+into a list at `+13160` instead of submitted), probably the D3D's command buffer recording; to
+watch in the tracker's counters.
+
+About 17 functions outside the Direct3D appear to write packets themselves (`ARCHITECTURE.md`;
+engine `82174980-821798B0`, ClientFX's particle batcher `sub_82BB65E0`; not checked one by one
+yet). If they write through the same push cursor, their packets are in the stream at the next
+hooked call and the decoder sees them.
 
 ## What fear-nx does that the new renderer must do too
 
@@ -69,23 +88,29 @@ Before it can be the default, in both games:
 
 ## Steps (each ends in a measurement)
 
-1. **Measure the tile replays and today's cost.** `--fear_tile_stats=true` adds a line to the
-   10-second report: draws and register writes run per frame against the unique ones, draws
-   skipped outside their tile, bin selects and tiles. Run it with the existing renderer counters
-   in the same scenes on PC (4K) and the Deck: the baseline for step 5.
-2. **Map the Direct3D**: the draw entry points' arguments, Clear, Resolve, BeginTiling/EndTiling,
-   MakeSpace and the buffer wrap, the device's push cursor and surfaces (GRAW's `graw_d3d.h` table
-   is the model). Both games: F.E.A.R. Files' addresses differ.
-3. **Vendor and build.** GRAW's `native/` (pgr4-native `8ea20d5` plus GRAW's fixes: `k_10_11_11`
-   textures, SDR output, the push-buffer wrap, `BeginIndexedVertices`' HRESULT, the presenter
-   hand-back) as `port-nx/src/d3d12/`, its four SDK patches adapted to `rexglue-sdk-nx`, the
-   hooks in both manifests. `nx_renderer` gets a third value, `d3d12`. fear-nx's ring thread keeps
-   the fences, interrupts and swaps (as GRAW's Xenos plugin does with `gpu_skip_draws`) and skips
-   its own draws.
+1. **Measure the tile replays and today's cost.** Counters built (2026-10-25), not run yet.
+   `--fear_tile_stats=true` adds a line to the 10-second report: draws and register writes run per
+   frame against the unique ones, draws skipped outside their tile, bin selects and tiles. Run it
+   with the existing renderer counters in the same scenes on PC (4K) and the Deck: the baseline for
+   step 5.
+2. **Map the Direct3D.** F.E.A.R. done (above). F.E.A.R. Files' addresses differ: to do, the same
+   way.
+3. **Vendor and build.** Done for F.E.A.R. (2026-10-25), not run yet. GRAW's `native/`
+   (pgr4-native `8ea20d5` plus GRAW's fixes: `k_10_11_11` textures, SDR output, the push-buffer
+   wrap, `BeginIndexedVertices`' HRESULT, the presenter hand-back) as `port-nx/src/d3d12/`; the
+   two shader translator patches as `patches/rexglue-sdk-nx/0016`, `0017` (GRAW's other two are
+   for the Xenos plugin: fear-nx has its own `gpu_skip_draws` and gives the presenter its gamma
+   table); hooks that replace the Direct3D functions (`fear_d3d_hooks.cpp`, no manifest change).
+   - `--fear_d3d12`: a debug window beside fear-nx, which stays the game's output
+     (`tools/launch.ps1 -Nx -D3D12Side`).
+   - `--fear_d3d12_primary`: the D3D12 renderer draws into the game window, F9 back to fear-nx and
+     again (`-Nx -D3D12`). fear-nx's ring keeps the fences, interrupts, swaps and pacing and skips
+     its own draws (`gpu_skip_draws`), and draws again while one of F.E.A.R.'s panels (PC
+     Settings, the collection menu) is open, since those are ImGui in ReXGlue's presenter.
 4. **First runs**: side by side with fear-nx (capture pairs, PSNR), then primary with F9 back to
    fear-nx. Autopilot through the opening and Interval 2's heavy fights.
 5. **Parity and performance**: the list above, then PC and Deck against step 1.
 6. **Decide the default** per platform, then the smoke test and 1.0.
 
-Licensing: pgr4-native is MIT, its Xenia- and ReXGlue-derived parts BSD-3-Clause; the licence
-files and `LICENSES/PROVENANCE.md` come with the vendoring.
+Licensing: GRAW 360 Recompiled and pgr4-native are MIT, the Xenia- and ReXGlue-derived parts
+BSD-3-Clause: `port-nx/src/d3d12/README.md`, `NOTICE` (4) and `LICENSES/PROVENANCE.md`.

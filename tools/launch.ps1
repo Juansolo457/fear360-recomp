@@ -21,6 +21,8 @@
 # a flag wins over the saved value for that run.
 #
 #   ... -Collection -Invulnerable   # the smoke test (#55): both games, the player can't die
+#   ... -Nx -D3D12                  # F.E.A.R. drawn by the D3D12 renderer (F9: fear-nx's again)
+#   ... -Nx -D3D12Side              # fear-nx draws, the D3D12 renderer in a second window
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -58,6 +60,12 @@ param(
     # (fear_invulnerable: the PC's test console variable HealthTest, still in both 360 games;
     # port-nx/src/look_tuning.h).
     [switch]$Invulnerable,
+    # The D3D12 renderer (port-nx/src/d3d12, docs/NATIVE_RENDERER.md; F.E.A.R. only so far): it
+    # draws the game into the game window, F9 switching back and forth with fear-nx's renderer
+    # (-D3D12), or it draws in a debug window beside fear-nx's, which stays the game's output
+    # (-D3D12Side).
+    [switch]$D3D12,
+    [switch]$D3D12Side,
     [string]$Extra = '',  # more flags, space separated
     # Another F.E.A.R. program instead of the build's (port-nx; with -Collection, F.E.A.R.'s
     # entry): the A side of an A/B, e.g. private/ab/A-master-8db2298/fear.exe, with its own
@@ -107,6 +115,8 @@ if ($isNx) {
     if ($given.ContainsKey('LookRamp')) { $arguments += @('--fear_look_ramp', $LookRamp) }
     if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
     if ($Invulnerable) { $arguments += '--fear_invulnerable' }
+    if ($D3D12) { $arguments += '--fear_d3d12_primary' }
+    if ($D3D12Side) { $arguments += '--fear_d3d12' }
 }
 if ($Pack) {
     if (!$isNx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }

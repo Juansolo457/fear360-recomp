@@ -73,6 +73,15 @@ extern const rex::PPCImageInfo PPCImageConfig;
 // With predicated tiling the game's Direct3D records the frame once and replays it for each EDRAM
 // tile; a packet keeps its guest address in every replay, so counting the packets run against the
 // distinct addresses gives the replay factor an API-level renderer would not pay.
+// F.E.A.R.: the D3D12 renderer (port-nx/src/d3d12, docs/NATIVE_RENDERER.md) presents the game in
+// its primary mode, and sets this while it does: the ring then keeps the fences, write-backs,
+// interrupts, swap counts and pacing, and skips its own draws, resolves, shader loads and
+// presents. Named as the SDK patch the renderer was written for (pgr4-native 0031), which gives
+// ReXGlue's Xenos plugin the same switch.
+REXCVAR_DEFINE_BOOL(gpu_skip_draws, false, "F.E.A.R. NX",
+                    "Skip the native renderer's draws, resolves and presents (the D3D12 "
+                    "renderer draws the game)");
+
 REXCVAR_DEFINE_BOOL(fear_tile_stats, false, "F.E.A.R.",
                     "Count the draws and register writes the ring runs per frame against the "
                     "unique ones (tile replays), in the 10-second report");
@@ -126,6 +135,8 @@ constexpr uint32_t kOutputWidth = 1280;
 constexpr uint32_t kOutputHeight = 720;
 
 std::atomic<uint64_t> g_swaps_presented{0};
+// The graphics system's gamma ramp, for GammaRamp256 (the D3D12 renderer's presenter).
+std::atomic<const uint32_t*> g_gamma_ramp{nullptr};
 
 // Big-endian words of a command buffer. In the ring the position wraps around
 // (its size is a power of two); in an indirect buffer it does not.
@@ -184,6 +195,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       uint32_t value = i * 0x3FF / 0xFF;
       gamma_ramp_[i] = value | (value << 10) | (value << 20);
     }
+    g_gamma_ramp.store(gamma_ramp_, std::memory_order_release);
   }
   ~NativeGraphicsSystem() override { Shutdown(); }
 
@@ -1314,12 +1326,12 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
         if ((Register(rex::graphics::XE_GPU_REG_RB_MODECONTROL) & 0x7) ==
             uint32_t(xenos::EdramMode::kCopy)) {
           ++copies_;
-          if (renderer_ready_) {
+          if (renderer_ready_ && !REXCVAR_GET(gpu_skip_draws)) {
             renderer_.Resolve();
           }
         } else {
           ++draws_;
-          if (renderer_ready_) {
+          if (renderer_ready_ && !REXCVAR_GET(gpu_skip_draws)) {
             renderer_.Draw(immediate, immediate_words);
           }
         }
@@ -1333,7 +1345,8 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
         const uint32_t start_size = data.Read();
         const uint32_t dwords = start_size & 0xFFFF;
         const uint32_t address = address_type & ~uint32_t(0x3) & 0x1FFFFFFF;
-        if (renderer_ready_ && dwords && uint64_t(address) + dwords * 4 <= 0x20000000u) {
+        if (renderer_ready_ && dwords && uint64_t(address) + dwords * 4 <= 0x20000000u &&
+            !REXCVAR_GET(gpu_skip_draws)) {
           renderer_.LoadShader(xenos::ShaderType(address_type & 0x3),
                                memory_->TranslatePhysical<const uint32_t*>(address), dwords,
                                address);
@@ -1350,7 +1363,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
           // Kept in guest byte order, as the shader expects.
           shader_words_[i] = rex::byte_swap(data.Read());
         }
-        if (renderer_ready_ && dwords) {
+        if (renderer_ready_ && dwords && !REXCVAR_GET(gpu_skip_draws)) {
           renderer_.LoadShader(xenos::ShaderType(type & 0x3), shader_words_.data(), dwords, 0);
         }
         break;
@@ -1556,6 +1569,9 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
 #if defined(__SWITCH__)
     RexSwitchPerfCount(0);
 #endif
+    if (REXCVAR_GET(gpu_skip_draws)) {
+      return;  // the D3D12 renderer presented this frame from the game's Swap
+    }
     if (renderer_ready_) {
       renderer_.Swap(presenter_.get(), swap_frontbuffer_, swap_width_, swap_height_);
       return;
@@ -1839,6 +1855,8 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
 bool Enabled() { return REXCVAR_GET(nx_renderer) == "native"; }
 
 uint64_t SwapsPresented() { return g_swaps_presented.load(std::memory_order_relaxed); }
+
+const uint32_t* GammaRamp256() { return g_gamma_ramp.load(std::memory_order_acquire); }
 
 std::unique_ptr<rex::system::IGraphicsSystem> CreateGraphicsSystem() {
   return std::make_unique<NativeGraphicsSystem>();
