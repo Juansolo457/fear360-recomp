@@ -145,10 +145,19 @@ A launch option would pick the map, the two fighters and weapons, and the score 
 example `--fear_pitfight="InstantAction1;Soldier,<weapon>;HeavyArmor,<weapon>;5"`. The same
 object injection is also what the wave mode needs to place its spawners.
 
-## The mode: Last Stand (working name)
+## The mode: Battalion
 
 A Horde- or Firefight-style survival mode. It starts on the Instant Action maps, and campaign
 arenas come later.
+
+**The name** was chosen on 2026-10-25. Fettel commands a battalion of Replica soldiers, and the
+game's own dialogue says so. Inside the mode, other names come from the same lore:
+
+- **Sets** get Interval-style titles, like the campaign's chapters ("Interval 01 - Inception").
+- **Boss waves** are Synchronicity waves, after the game's "synchronicity event".
+- **Slow motion** keeps the game's own word, SlowMo.
+
+In code the mode is `battalion` (`port-nx/src/battalion.*`, the launch option `fear_battalion`).
 
 - **Waves and sets.** A set is five waves. Each wave brings more enemies, and tougher ones, than
   the last. The fifth wave is a boss wave: Heavy Armor, the REV2, or a pack of Assassins. Sets
