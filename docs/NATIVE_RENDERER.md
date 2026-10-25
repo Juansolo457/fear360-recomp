@@ -26,7 +26,8 @@ window), side by side with fear-nx (`--fear_d3d12`):
   1.1 ms of CPU a frame; the D3D12 renderer draws each once, about 0.26 ms of recording and 0.2 ms
   of present a frame, adding about 70 us to the game thread for the hooks.
 - Open: `k_5_6_5` resolves (no typed UAV store for B5G6R5), the primary mode (`-D3D12`) not run
-  yet, the parity list below, F.E.A.R. Files, the Steam Deck.
+  yet, the parity list below, F.E.A.R. Files, the Steam Deck, and what shipping D3D12 alone takes
+  (step 6).
 
 ## Where F.E.A.R. starts from
 
@@ -132,7 +133,18 @@ Before it can be the default, in both games:
 4. **First runs**: side by side with fear-nx (capture pairs, PSNR), then primary with F9 back to
    fear-nx. Autopilot through the opening and Interval 2's heavy fights.
 5. **Parity and performance**: the list above, then PC and Deck against step 1.
-6. **Decide the default** per platform, then the smoke test and 1.0.
+6. **D3D12 only** (decided 2026-10-25): the game ships with the D3D12 renderer alone, no fear-nx
+   or ReXGlue renderer and no switch. What that takes:
+   - F.E.A.R.'s panels (PC Settings, the quit confirmation, the collection menu, the shader
+     warm-up's progress) and any system dialog drawn by the D3D12 renderer: today they are ImGui
+     in ReXGlue's presenter, and the game goes back to fear-nx while one is open.
+   - The parity list above done in the D3D12 renderer, since nothing falls back to fear-nx.
+   - The Steam Deck: Direct3D 12 through vkd3d-proton is then the Deck's only path, so it is
+     tested and measured there early, before the rest is removed.
+   - fear-nx's ring kept for what it does besides drawing (fences, interrupts, swaps, pacing);
+     its Vulkan renderer, presenter and texture code, `nx_renderer`, the F9 switch and the
+     side-by-side window out of the shipped build.
+   - Then the smoke test (#55-#57) and 1.0.
 
 Licensing: GRAW 360 Recompiled and pgr4-native are MIT, the Xenia- and ReXGlue-derived parts
 BSD-3-Clause: `port-nx/src/d3d12/README.md`, `NOTICE` (4) and `LICENSES/PROVENANCE.md`.
