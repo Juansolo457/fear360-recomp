@@ -901,13 +901,13 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       REXLOG_INFO(
           "[native] tiles (fear_tile_stats), per frame over {} frames: draws {:.0f} run / {:.0f} "
           "unique (x{:.2f}), {:.0f} skipped outside their tile; register writes {:.0f} run / "
-          "{:.0f} unique (x{:.2f}); {:.1f} bin selects, {:.1f} tiles",
+          "{:.0f} unique (x{:.2f}); {:.1f} tiles",
           tile_sums_.frames, tile_sums_.draws / frames, tile_sums_.unique_draws / frames,
           double(tile_sums_.draws) / double(std::max<uint64_t>(tile_sums_.unique_draws, 1)),
           tile_sums_.skipped / frames, tile_sums_.registers / frames,
           tile_sums_.unique_registers / frames,
           double(tile_sums_.registers) / double(std::max<uint64_t>(tile_sums_.unique_registers, 1)),
-          tile_sums_.selects / frames, tile_sums_.tiles / frames);
+          tile_sums_.tiles / frames);
       tile_sums_ = {};
     }
   }
@@ -920,7 +920,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   std::unordered_set<uint64_t> tile_selects_;
   struct TileSums {
     uint64_t frames = 0, draws = 0, unique_draws = 0, skipped = 0, registers = 0,
-             unique_registers = 0, selects = 0, tiles = 0;
+             unique_registers = 0, tiles = 0;
   };
   TileSums tile_frame_, tile_sums_;
 
@@ -948,7 +948,6 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       tile_sums_.skipped += tile_frame_.skipped;
       tile_sums_.registers += tile_frame_.registers;
       tile_sums_.unique_registers += tile_frame_.unique_registers;
-      tile_sums_.selects += tile_frame_.selects;
       tile_sums_.tiles += tile_frame_.tiles;
     }
     tile_frame_ = {};

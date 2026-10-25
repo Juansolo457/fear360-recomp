@@ -844,8 +844,9 @@ void Resolver::BeginFrame(uint64_t frame, uint64_t frame_fence, uint64_t complet
 bool Resolver::Resolve(ID3D12GraphicsCommandList* list, const ResolveParams& p) {
   const bool depth = p.source == 4;
   if (!GetDestStorage(p.dest_format)) return false;
-  RenderTarget* rt = depth ? targets_->GetDepth(p.regs, uint32_t(std::max(p.y1, 0)))
-                           : targets_->GetColor(p.regs, p.source, uint32_t(std::max(p.y1, 0)));
+  const uint32_t rows = uint32_t(std::max(p.y1, 0)), columns = uint32_t(std::max(p.x1, 0));
+  RenderTarget* rt = depth ? targets_->GetDepth(p.regs, rows, columns)
+                           : targets_->GetColor(p.regs, p.source, rows, columns);
   if (!rt) {
     D3D12_LOG_FIRST(4, WARN, "D3D12 resolve: no host target for source {} (surface {:08X})",
                    p.source, p.regs.surface_info);
@@ -880,7 +881,7 @@ bool Resolver::Resolve(ID3D12GraphicsCommandList* list, const ResolveParams& p) 
     if (p.edram_x || p.edram_y)
       cp.edram_rects.push_back(
           {LONG(x0 - p.edram_x), LONG(y0 - p.edram_y), LONG(x1 - p.edram_x), LONG(y1 - p.edram_y)});
-    targets_->Clear(list, p.regs, 0xF, true, uint32_t(std::max(p.y1, 0)), cp);
+    targets_->Clear(list, p.regs, 0xF, true, rows, cp, columns);
   }
   return ok;
 }

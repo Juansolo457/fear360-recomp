@@ -795,7 +795,8 @@ void NativeRenderer::ExecuteClear(const ClearCall& c) {
   ++stats_.clears;
   if (gpu_timer_) gpu_timer_->Pass(device_->command_list(), GpuTimer::KeyClear(c));
   draw_->LogClear(c);
-  rt_->Clear(device_->command_list(), c.regs, c.bound_colors, c.depth_bound, c.height, c.p);
+  rt_->Clear(device_->command_list(), c.regs, c.bound_colors, c.depth_bound, c.height, c.p,
+             c.width);
   clear_ticks_ += Ticks() - t0;
 }
 

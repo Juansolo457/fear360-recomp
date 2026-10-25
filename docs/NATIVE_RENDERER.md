@@ -90,7 +90,7 @@ Before it can be the default, in both games:
 
 1. **Measure the tile replays and today's cost.** Counters built (2026-10-25), not run yet.
    `--fear_tile_stats=true` adds a line to the 10-second report: draws and register writes run per
-   frame against the unique ones, draws skipped outside their tile, bin selects and tiles. Run it
+   frame against the unique ones, draws skipped outside their tile and tiles. Run it
    with the existing renderer counters in the same scenes on PC (4K) and the Deck: the baseline for
    step 5.
 2. **Map the Direct3D.** F.E.A.R. done (above). F.E.A.R. Files' addresses differ: to do, the same

@@ -3483,10 +3483,11 @@ void DrawRenderer::Impl::Draw(const DrawState& s, const DrawPrep* prep) {
   ViewportInfo vp;
   HostViewportInfo(regs, ps && ps->writes_depth(), vp);
   const uint32_t height = std::clamp(scissor.offset[1] + scissor.extent[1], 1u, 2048u);
+  const uint32_t width = std::clamp(scissor.offset[0] + scissor.extent[0], 1u, 8192u);
   profile::Mark(profile::kSetup);
   BoundTargets targets;
   if (!r.render_targets().Bind(list, SurfaceRegsFromRegisters(s.regs), rt_mask, depth_used, height,
-                               &targets)) {
+                               &targets, width)) {
     D3D12_WARN_ONCE("D3D12 draw: RenderTargets::Bind failed (surface {:08X})",
                    regs[XE_GPU_REG_RB_SURFACE_INFO]);
     ++stats.failed;
