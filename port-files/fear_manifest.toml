@@ -210,6 +210,33 @@ address = 0x82340EB4
 registers = []
 jump_address_on_true = 0x82341D18
 
+# fear_full_detail_models (port-nx/src/look_tuning.h, #21): just before each of the camera's five
+# calls that set ModelLODDistanceScale (the value in f1; the setter is interface slot 0x108 here).
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x82389918
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x8238BAAC
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x8238BF54
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x8238DB44
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x8238E808
+registers = ["f1"]
+
 # PC Settings, Switch Game and Quit to Desktop in the main menu (port-nx/src/fear_menu.*), as in
 # F.E.A.R. CScreenMain::Build (sub_823EAAC0) ends at 0x823EAF24, where both its paths meet: add
 # our items after Options.

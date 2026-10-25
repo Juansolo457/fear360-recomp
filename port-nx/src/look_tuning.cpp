@@ -72,6 +72,14 @@ REXCVAR_DEFINE_STRING(fear_intro_videos, "all", "F.E.A.R.",
                       "monolith (Monolith's logo only), none (#19). F.E.A.R. only for now")
     .allowed({"all", "monolith", "none"})
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_letterbox, true, "F.E.A.R.",
+                    "Black bars in cutscenes, as shipped; off removes them (EchoPatch's disable "
+                    "letterboxing, #18)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_full_detail_models, false, "F.E.A.R.",
+                    "Characters and objects keep their full-detail models at any distance "
+                    "(EchoPatch's no model LOD bias, #21)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_BOOL(fear_bodies_stay, false, "F.E.A.R.",
                     "Bodies stay instead of fading once there are 10 (4 within 500 units), and in "
                     "F.E.A.R. broken glass stays (part of EchoPatch's persistent world state, #22)")
@@ -144,6 +152,11 @@ std::vector<std::pair<std::string, float>> OptionChanges() {
   if (REXCVAR_GET(fear_bodies_stay)) {
     changes.emplace_back("BodyCapTotalCount", 1000.0f);
     changes.emplace_back("BodyCapRadiusCount", 1000.0f);
+  }
+  // fear_letterbox (#18): the interface draws the cutscene bars unless the console variable
+  // LetterBoxDisabled is set (CInterfaceMgr's letterbox update; 0 as shipped).
+  if (!REXCVAR_GET(fear_letterbox)) {
+    changes.emplace_back("LetterBoxDisabled", 1.0f);
   }
   return changes;
 }
@@ -519,3 +532,47 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& r6, PPCRegister& f1) {
 }
 
 bool FearHealthTestNotice() { return REXCVAR_GET(fear_invulnerable); }
+
+namespace {
+
+uint32_t GuestWord(uint32_t address) {
+  uint32_t value;
+  std::memcpy(&value, rex::system::kernel_memory()->virtual_membase() + address, 4);
+  return std::byteswap(value);
+}
+
+uint8_t GuestByte(uint32_t address) {
+  return rex::system::kernel_memory()->virtual_membase()[address];
+}
+
+}  // namespace
+
+void FearModelLodScale(PPCRegister& f1) {
+  static const bool full = REXCVAR_GET(fear_full_detail_models);
+  // EchoPatch's value: small enough that every model stays on its first LOD, and 0 (which the
+  // game may mean as "off") is left alone.
+  if (full && f1.f64 > 0.0) f1.f64 = 0.003;
+}
+
+void FearSplashMovieCount(PPCRegister& r23, PPCRegister& r31) {
+  static const bool none = REXCVAR_GET(fear_intro_videos) == "none";
+  if (!none || !r31.u32) return;
+  // The interface's game state: 4 and 9 are the ones that play SplashMovies (the others, the
+  // attract loop's AttractMovies).
+  const uint32_t state = GuestWord(r31.u32 + 8);
+  if (state == 4 || state == 9) r23.u64 = 0;
+}
+
+void FearLogStateChange(PPCRegister& r3, PPCRegister& r4) {
+  if (!r3.u32) return;
+  const uint32_t from = GuestWord(r3.u32 + 8);
+  const uint32_t to = r4.u32;
+  const uint32_t ready = GuestByte(r3.u32 + 0x5958);
+  static std::mutex mutex;
+  static std::set<uint64_t> logged;
+  std::lock_guard<std::mutex> lock(mutex);
+  if (logged.insert(uint64_t(from) << 40 | uint64_t(to) << 8 | ready).second) {
+    REXLOG_INFO("F.E.A.R.: interface state {} -> {} asked for (interface ready: {})", from, to,
+                ready);
+  }
+}

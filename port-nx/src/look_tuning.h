@@ -52,6 +52,8 @@
 //   fear_infinite_flashlight  Client/Flashlight/Player_Narrow MaxCharge 30 -> 0            database
 //   fear_intro_videos         Client/Shared/Shared SplashMovies: skipped ones made ""      database
 //   fear_bodies_stay          BodyCapTotalCount 10, BodyCapRadiusCount 4 -> 1000           console
+//   fear_letterbox (off)      LetterBoxDisabled 0 -> 1 (no cutscene bars)                  console
+//   fear_full_detail_models   ModelLODDistanceScale -> 0.003 (FearModelLodScale, below)    hook
 //                             FX/ShatterType/* FadeOutStart, Lifetime -> 1e9 s (glass)     database
 // The database ones go into the same patched copy as the stick tuning; F.E.A.R. Files keeps its
 // database in uberCatalog.cat, so there only the console ones apply for now. The field of view
@@ -80,3 +82,24 @@ void FearConsoleVarDefault(PPCRegister& r5, PPCRegister& r6, PPCRegister& f1);
 // CInterfaceMgr::HandlePlayerEventMessage, at its case for the health test event: true (with
 // fear_invulnerable) jumps to the handler's exit, skipping the death effect.
 bool FearHealthTestNotice();
+
+// fear_full_detail_models (#21): the camera sets the console variable ModelLODDistanceScale at
+// five places, each through the engine's setter (g_pLTClient's console-variable float setter,
+// interface slot 0x104 in F.E.A.R., 0x108 in F.E.A.R. Files) with the value in f1. A hook just
+// before each call turns any positive value into 0.003, as EchoPatch's NoLODBias does.
+//                 F.E.A.R. calls                                F.E.A.R. Files calls
+//                 0x823B40E0 0x823B6284 0x823B673C               0x82389918 0x8238BAAC 0x8238BF54
+//                 0x823B8440 0x823B9110                          0x8238DB44 0x8238E808
+// (CameraFirstPersonLODBias, EchoPatch's other half, is already -1,000,000 on the 360.)
+void FearModelLodScale(PPCRegister& f1);
+
+// fear_intro_videos=none (#19), F.E.A.R. only: CInterfaceMgr's next-movie function (sub_82362C88)
+// just after it counts SplashMovies (r23), the interface manager in r31: the count becomes 0.
+// With the entries only blanked, the game tried to open the empty name (D:\Game\, a folder)
+// twice a frame, 2,080 times over 8.7 s on 2026-10-25, and the menu came that much later.
+void FearSplashMovieCount(PPCRegister& r23, PPCRegister& r31);
+
+// For #19: CInterfaceMgr::ChangeState (sub_82366558) at its entry, the manager in r3 and the
+// state asked for in r4. Logs each distinct change asked for once, with the flag the change
+// needs (CInterfaceMgr+0x5958, set when the interface has finished setting up).
+void FearLogStateChange(PPCRegister& r3, PPCRegister& r4);

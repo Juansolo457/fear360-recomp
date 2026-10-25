@@ -349,6 +349,47 @@ address = 0x8236AF28
 registers = []
 jump_address_on_true = 0x8236BD20
 
+# fear_intro_videos=none (src/look_tuning.h, #19): CInterfaceMgr's next-movie function
+# (sub_82362C88), just after it counts SplashMovies (mr r23,r3 at 0x82362D74): the count becomes
+# 0, so it no longer tries the blanked names every frame.
+[[entrypoint.midasm_hook]]
+name = "FearSplashMovieCount"
+address = 0x82362D78
+registers = ["r23", "r31"]
+
+# fear_full_detail_models (src/look_tuning.h, #21): just before each of the camera's five calls
+# that set ModelLODDistanceScale (the value in f1).
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x823B40E0
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x823B6284
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x823B673C
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x823B8440
+registers = ["f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearModelLodScale"
+address = 0x823B9110
+registers = ["f1"]
+
+# For #19: CInterfaceMgr::ChangeState (sub_82366558) at its entry, logged once per change asked.
+[[entrypoint.midasm_hook]]
+name = "FearLogStateChange"
+address = 0x82366558
+registers = ["r3", "r4"]
+
 # High-FPS fixes (src/high_fps.h): the AI's update delay (0.01 s) made shorter than a frame, so
 # enemies update every frame above 100 fps (a severed body keeps it). SetNextServerUpdate, at its
 # fmr f31,f1: the character in r3, the delay in f1.

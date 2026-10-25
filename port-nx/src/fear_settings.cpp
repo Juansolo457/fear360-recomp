@@ -195,6 +195,17 @@ std::vector<Setting> BuildSettings() {
                         false,
                         "The rating card and the Sierra, Day 1 and Monolith logos at startup."});
   }
+  settings.push_back({"Cutscene black bars",
+                      "fear_letterbox",
+                      {{"true", "On (as shipped)"}, {"false", "Off"}},
+                      false,
+                      "The letterbox bars at the top and bottom of the screen in cutscenes."});
+  settings.push_back({"Model detail",
+                      "fear_full_detail_models",
+                      {{"false", "As shipped"}, {"true", "Full at any distance"}},
+                      false,
+                      "Full: characters and objects keep their most detailed models far away, "
+                      "like EchoPatch's no model LOD bias. Costs some GPU."});
   settings.push_back({"Bodies and debris",
                       "fear_bodies_stay",
                       {{"false", "Fade (as shipped)"}, {"true", "Stay"}},
