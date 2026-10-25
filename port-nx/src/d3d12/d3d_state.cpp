@@ -393,6 +393,7 @@ bool GuestStateTracker::ReadDrawState(const uint8_t* base, const HookArgs& a, Dr
   s->index_endian = 0;
   s->base_vertex = 0;
   s->inline_vertices = 0;
+  s->tiled = (Load32(base, device + dev::kFlags) >> 24) & dev::kFlagTiling;
   // The call's first DRAW_INDX with an index buffer (source select 0, DMA).
   const bool dma = first_draw_valid_ && first_draw_op_ == 0x22 &&
                    ((first_draw_initiator_ >> 6) & 3) == 0 && first_draw_index_base_;

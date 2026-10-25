@@ -86,6 +86,11 @@ constexpr FormatEntry kFormats[] = {
     {TextureFormat::k_6_5_5,
      {DXGI_FORMAT_B5G6R5_UNORM, DXGI_FORMAT_B5G6R5_UNORM, DXGI_FORMAT_UNKNOWN,
       C::kR5G5B6ToB5G6R5WithRBGASwizzle, false, kRBGG}},
+    // F.E.A.R.: its fonts (the intro movie's subtitles) and some HUD textures. As ReXGlue's
+    // D3D12 cache: B4G4R4A4 with R and B swapped at load (texture_load_r4g4b4a4_b4g4r4a4).
+    {TextureFormat::k_4_4_4_4,
+     {DXGI_FORMAT_B4G4R4A4_UNORM, DXGI_FORMAT_B4G4R4A4_UNORM, DXGI_FORMAT_UNKNOWN,
+      C::kR4G4B4A4ToB4G4R4A4, false, kRGBA}},
     {TextureFormat::k_8_8_8_8,
      {DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_SNORM,
       C::kCopy, false, kRGBA}},
@@ -209,6 +214,14 @@ void Convert(TextureConversion conversion, uint8_t* row, uint32_t bytes) {
         uint16_t v;
         std::memcpy(&v, row + i, 2);
         v = uint16_t((v & 0x07E0) | ((v & 0x001F) << 11) | ((v & 0xF800) >> 11));
+        std::memcpy(row + i, &v, 2);
+      }
+      return;
+    case C::kR4G4B4A4ToB4G4R4A4:
+      for (uint32_t i = 0; i + 2 <= bytes; i += 2) {
+        uint16_t v;
+        std::memcpy(&v, row + i, 2);
+        v = uint16_t((v & 0xF0F0) | ((v & 0x000F) << 8) | ((v & 0x0F00) >> 8));
         std::memcpy(row + i, &v, 2);
       }
       return;

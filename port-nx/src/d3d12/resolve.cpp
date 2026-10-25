@@ -569,6 +569,17 @@ bool DecodeResolve(const uint8_t* base, const HookArgs& args, ResolveParams* out
           p.edram_x = int32_t(Load32(base, device + kDevTileOrigins + kDevTileOriginStride * i));
           p.edram_y =
               int32_t(Load32(base, device + kDevTileOrigins + kDevTileOriginStride * i + 4));
+          const int32_t tx0 = int32_t(Load32(base, r)), ty0 = int32_t(Load32(base, r + 4));
+          const int32_t tx1 = int32_t(Load32(base, r + 8)), ty1 = int32_t(Load32(base, r + 12));
+          for (uint32_t j = i + 1; j < tiles; ++j) {
+            const uint32_t n = device + kDevTileRects + 16 * j;
+            const int32_t nx0 = int32_t(Load32(base, n)), ny0 = int32_t(Load32(base, n + 4));
+            const int32_t nx1 = int32_t(Load32(base, n + 8)), ny1 = int32_t(Load32(base, n + 12));
+            if (nx0 > tx0 && nx0 < tx1 && ny0 <= ty0 && ny1 >= ty1)
+              p.clear_x1 = std::min(p.clear_x1, nx0);  // the next column of tiles
+            else if (ny0 > ty0 && ny0 < ty1 && nx0 <= tx0 && nx1 >= tx1)
+              p.clear_y1 = std::min(p.clear_y1, ny0);  // the next row
+          }
           break;
         }
       }
@@ -877,10 +888,11 @@ bool Resolver::Resolve(ID3D12GraphicsCommandList* list, const ResolveParams& p) 
     std::memcpy(cp.color, p.clear_color, sizeof(cp.color));
     cp.depth = p.clear_depth;
     cp.stencil = p.clear_stencil;
-    cp.rects.push_back({LONG(x0), LONG(y0), LONG(x1), LONG(y1)});
+    const int32_t cx1 = std::min(x1, p.clear_x1), cy1 = std::min(y1, p.clear_y1);
+    cp.rects.push_back({LONG(x0), LONG(y0), LONG(cx1), LONG(cy1)});
     if (p.edram_x || p.edram_y)
-      cp.edram_rects.push_back(
-          {LONG(x0 - p.edram_x), LONG(y0 - p.edram_y), LONG(x1 - p.edram_x), LONG(y1 - p.edram_y)});
+      cp.edram_rects.push_back({LONG(x0 - p.edram_x), LONG(y0 - p.edram_y), LONG(cx1 - p.edram_x),
+                                LONG(cy1 - p.edram_y)});
     targets_->Clear(list, p.regs, 0xF, true, rows, cp, columns);
   }
   return ok;

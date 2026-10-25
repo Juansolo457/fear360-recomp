@@ -59,7 +59,8 @@ constexpr uint32_t kShadow2280 = 10468;
 constexpr uint32_t kShadow2300 = 10552;
 constexpr uint32_t kShadow2380 = 10704;
 constexpr uint32_t kRingReadPtr = 10768;    // pointer to the GPU's write-back of its read pointer
-constexpr uint32_t kFlags = 10808;          // u8 (GRAW's +10432)
+constexpr uint32_t kFlags = 10808;          // u8 (GRAW's +10432); kFlagTiling
+constexpr uint8_t kFlagTiling = 0x20;       // in kFlags: from BeginTiling to EndTiling
 // Not GPU registers: the window scissor SetScissorRect (sub_8296CDA8) keeps in the two dwords
 // after block 0x2000's flushed ones (x | y << 16, 15-bit signed fields), as in GRAW's D3D.
 constexpr uint32_t kScissorTL = 10308;

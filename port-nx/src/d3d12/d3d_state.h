@@ -70,6 +70,9 @@ struct DrawState {
   uint32_t base_vertex = 0;   // = regs[0x2102] VGT_INDX_OFFSET
   // BeginVertices: the inline vertices (vertex fetch 93-95, fetch constant 31).
   uint32_t inline_vertices = 0;  // physical, 0 if none
+  // Between BeginTiling and EndTiling (dev::kFlagTiling). F.E.A.R.'s tiles are side by side, so
+  // the surface pitch is one tile's width there, not the width of the untiled draw.
+  bool tiled = false;
 
   ShaderRef vs, ps;
 };

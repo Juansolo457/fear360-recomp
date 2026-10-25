@@ -336,7 +336,9 @@ void HostViewportInfo(const RegisterFile& regs, bool pixel_shader_writes_depth, 
   }
 }
 
-void HostScissor(const RegisterFile& regs, Scissor& out) {
+// tiled: inside predicated tiling, where F.E.A.R.'s surface pitch is one tile's width (its tiles
+// are side by side) and the draw, drawn once untiled, reaches past it: no clamp to the pitch.
+void HostScissor(const RegisterFile& regs, Scissor& out, bool tiled = false) {
   auto tl = regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>();
   auto br = regs.Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
   int32_t tl_x = int32_t(tl.tl_x), tl_y = int32_t(tl.tl_y);
@@ -354,9 +356,11 @@ void HostScissor(const RegisterFile& regs, Scissor& out) {
   tl_y = std::max(tl_y, int32_t(stl.tl_y));
   br_x = std::min(br_x, int32_t(sbr.br_x));
   br_y = std::min(br_y, int32_t(sbr.br_y));
-  uint32_t pitch = regs.Get<reg::RB_SURFACE_INFO>().surface_pitch;
-  tl_x = std::min(tl_x, int32_t(pitch));
-  br_x = std::min(br_x, int32_t(pitch));
+  if (!tiled) {
+    uint32_t pitch = regs.Get<reg::RB_SURFACE_INFO>().surface_pitch;
+    tl_x = std::min(tl_x, int32_t(pitch));
+    br_x = std::min(br_x, int32_t(pitch));
+  }
   tl_x = std::max(tl_x, 0);
   tl_y = std::max(tl_y, 0);
   br_x = std::max(br_x, tl_x);
@@ -3479,7 +3483,7 @@ void DrawRenderer::Impl::Draw(const DrawState& s, const DrawPrep* prep) {
     return;
   }
   Scissor scissor;
-  HostScissor(regs, scissor);
+  HostScissor(regs, scissor, s.tiled);
   ViewportInfo vp;
   HostViewportInfo(regs, ps && ps->writes_depth(), vp);
   const uint32_t height = std::clamp(scissor.offset[1] + scissor.extent[1], 1u, 2048u);

@@ -91,6 +91,11 @@ struct ResolveParams {
   // edram_y) at the surface's EDRAM base, so that is where the clear lands in the EDRAM.
   uint32_t clear_flags = 0;
   int32_t edram_x = 0, edram_y = 0;
+  // F.E.A.R.: its tiles are side by side and overlap (the first 768 wide, the next from 640). The
+  // host target holds every tile at once, so a tile's clear would wipe the overlap before the
+  // next tile's resolve copies it: the clear stops where a later tile that spans the same rows
+  // (columns) begins, and that tile's own clear covers the rest. Exclusive ends.
+  int32_t clear_x1 = INT32_MAX, clear_y1 = INT32_MAX;
   float clear_color[4] = {};
   float clear_depth = 1.0f;
   uint8_t clear_stencil = 0;
