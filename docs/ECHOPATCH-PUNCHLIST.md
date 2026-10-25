@@ -25,11 +25,11 @@ Quick items first. Size means how much work: S is a few hours, M a day or two, L
 
 | # | Item | Issue | Kind | How on the 360 | Size |
 |---|---|---|---|---|---|
-| 1 | Weapon capacity | #23 | DB | `Arsenal/Global/Global` `MaxWeaponCapacity` 3 → an option. Check that the HUD's weapon list copes with more than 3 | S |
-| 2 | Infinite flashlight | #20 | DB | `Client/Flashlight/Player_Narrow` `MaxCharge` 30 (`RechargeRate` 5). The AI's flashlights use `MaxCharge` 0, likely "no battery"; try 0, else a huge charge | S |
-| 3 | Skip intros | #19 | DB | `Client/Shared/Shared` `SplashMovies`: ESRB, Sierra, Day 1 and Monolith. Empty the list, or keep only the ESRB card | S |
-| 4 | Bodies, glass and body marks stay | #22, part | DB | `Server/Limits` `BodyCapTotalCount` 10, `BodyCapRadiusCount` 4 (within `BodyCapRadius` 500) → unlimited; `FX/ShatterType` `Lifetime` 20/10 and `FadeOutStart` 15 → never; `FX/ModelDecal` `FadeDuration` 10 → never | S |
-| 5 | Gun model at wide FOV | #1, rest | cvar | `CameraAttachedOffsetZ` from the FOV, by EchoPatch's table (70° → 0, 80° → 5.75, 95° → 13, 128° → 23) | S |
+| 1 | Weapon capacity | #23 | DB | **Coded** (`fear_weapon_slots`, PC Settings "Weapon slots": 3 as shipped, 4, 5 or 10). Sets `Arsenal/Global/Global` `MaxWeaponCapacity`. Check that the HUD's weapon list copes with more than 3 | S |
+| 2 | Infinite flashlight | #20 | DB | **Coded** (`fear_infinite_flashlight`, "Flashlight"). Sets `Client/Flashlight/Player_Narrow` `MaxCharge` from 30 to 0. In the PC code the player's flashlight drains only while `MaxCharge` is above 0, and the HUD hides the battery bar at 0. The AI's flashlights already have 0 | S |
+| 3 | Skip intros | #19 | DB | **Coded** (`fear_intro_videos`, "Intro videos": all as shipped, Monolith logo only, or skip). Blanks entries of `Client/Shared/Shared` `SplashMovies` (ESRB, Sierra, Day 1, Monolith). The 360's splash loop, like the PC's, moves on from a movie that doesn't open | S |
+| 4 | Bodies and glass stay | #22, part | cvar + DB | **Coded** (`fear_bodies_stay`, "Bodies and debris"). `BodyCapTotalCount` 10 and `BodyCapRadiusCount` 4 are console variables seeded from `Server/Limits`, and a negative count means no cap: set to -1 in both games. Glass: `FX/ShatterType` `FadeOutStart` and `Lifetime` set to 1e9 s (F.E.A.R. only). Model decals need nothing: their `FadeDuration` is how long a fade takes, and they only go once over the limit | S |
+| 5 | Gun model at wide FOV | #1, rest | cvar | **Coded**. With `fear_fov` set off 70, `CameraAttachedOffsetZ` follows EchoPatch's table (70° → 0, 80° → 5.75, 95° → 13, 128° → 23), interpolated, in both games | S |
 | 6 | No model LOD bias | #21 | cvar + hook | `ModelLODDistanceScale` → 0.003 whenever positive. The camera sets it at five places (`docs/VISUALS.md`, table 2), so it needs a hook there | S |
 | 7 | Faster saves | #24 | cvar + code | `CheckPointOptimizeVideoMemory` → 0, and buffer the save's many small writes in our file layer. Check against #36 (input drops at every autosave), which may be the same cost | M |
 | 8 | Bullet holes, blood stains and shell casings stay | #22, rest | code | They fade by their effect keys, not the database. EchoPatch sets the lifetime of Decal, LTBModel and Sprite effects at creation | M |

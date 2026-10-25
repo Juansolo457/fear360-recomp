@@ -22,6 +22,7 @@
 #include "display_vblank.h"
 #include "fear_panel.h"
 #include "fear_process.h"
+#include "fear_title.h"
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -173,6 +174,35 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "Bullet hits leave blood and armour marks on enemies. The 360 version "
                       "starts with them off."});
+  // The database options (look_tuning.h): F.E.A.R. only until F.E.A.R. Files' database, inside its
+  // catalogue, can be changed too.
+  if (!fear::title::kFiles) {
+    settings.push_back({"Weapon slots",
+                        "fear_weapon_slots",
+                        {{"3", "3 (as shipped)"}, {"4", "4"}, {"5", "5"}, {"10", "10 (every weapon)"}},
+                        false,
+                        "How many weapons you can carry at once."});
+    settings.push_back({"Flashlight",
+                        "fear_infinite_flashlight",
+                        {{"false", "Battery (as shipped)"}, {"true", "Never runs out"}},
+                        false,
+                        "Never runs out also removes the battery bar from the HUD."});
+    settings.push_back({"Intro videos",
+                        "fear_intro_videos",
+                        {{"all", "All (as shipped)"},
+                         {"monolith", "Monolith logo only"},
+                         {"none", "Skip"}},
+                        false,
+                        "The rating card and the Sierra, Day 1 and Monolith logos at startup."});
+  }
+  settings.push_back({"Bodies and debris",
+                      "fear_bodies_stay",
+                      {{"false", "Fade (as shipped)"}, {"true", "Stay"}},
+                      false,
+                      fear::title::kFiles
+                          ? "Stay: bodies no longer fade away once there are more than 10."
+                          : "Stay: bodies no longer fade away once there are more than 10, and "
+                            "broken glass stays."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
                       {{"true", "Exact"}, {"false", "As shipped"}},

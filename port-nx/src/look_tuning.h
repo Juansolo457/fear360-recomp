@@ -45,6 +45,18 @@
 //
 // fear_body_marks (#47, on by default) starts ModelDecalPerformanceLevel at 3, the PC's Maximum, so
 // bullet hits leave blood and armour marks on characters; the 360 starts it at 1, which allows none.
+//
+// More of EchoPatch's options (docs/ECHOPATCH-PUNCHLIST.md). Each is a PC Settings choice, off
+// (as shipped) by default:
+//   fear_weapon_slots         Arsenal/Global/Global MaxWeaponCapacity (3)                  database
+//   fear_infinite_flashlight  Client/Flashlight/Player_Narrow MaxCharge 30 -> 0            database
+//   fear_intro_videos         Client/Shared/Shared SplashMovies: skipped ones made ""      database
+//   fear_bodies_stay          BodyCapTotalCount 10, BodyCapRadiusCount 4 -> -1 (no cap)    console
+//                             FX/ShatterType/* FadeOutStart, Lifetime -> 1e9 s (glass)     database
+// The database ones go into the same patched copy as the stick tuning; F.E.A.R. Files keeps its
+// database in uberCatalog.cat, so there only the console ones apply for now. The field of view
+// (fear_fov) also moves the first-person camera forward at wide angles (CameraAttachedOffsetZ, by
+// EchoPatch's table), so the gun keeps its place on screen.
 
 #pragma once
 
