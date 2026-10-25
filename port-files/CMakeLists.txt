@@ -53,6 +53,7 @@ set(FEAR_SOURCES
     ${HOST}/fear_settings.cpp
     ${HOST}/fx_debug.cpp
     ${HOST}/look_tuning.cpp
+    ${HOST}/pitfight.cpp
     ${HOST}/difficulty.cpp
     ${HOST}/shader_warmup.cpp
     ${HOST}/native/native_system.cpp

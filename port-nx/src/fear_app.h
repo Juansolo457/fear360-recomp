@@ -28,6 +28,7 @@
 #include "fear_settings.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
+#include "pitfight.h"
 #include "profiler.h"
 #include "shader_warmup.h"
 
@@ -133,6 +134,7 @@ class FearApp : public rex::ReXApp {
 
   void OnPostSetup() override {
     if (runtime()) fear::look_tuning::Apply(*runtime());
+    if (runtime()) fear::pitfight::Apply(*runtime());
     fear::profiler::Start();
 
     // The shader warm-up (shader_warmup.h): the shaders come from the game data; the renderer
