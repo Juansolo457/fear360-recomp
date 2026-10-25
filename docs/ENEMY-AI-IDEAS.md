@@ -54,9 +54,96 @@ public PC SDK game code. The SDK code was only read for reference; nothing is co
       objects.
   - It refers to a world named `PitFight00`, but no such world is on the disc.
   - It looks like Monolith's own tool for watching AI fight AI, which is the play-against-itself
-    idea. Look into this first.
+    idea. Looked into on 2026-10-25: see [PitFight](#pitfight) below.
 - **Instant Action** has four maps in F.E.A.R. and eight in F.E.A.R. Files. They were built for
   combat, with AI already placed.
+
+## PitFight
+
+Read on 2026-10-25 from F.E.A.R.'s 360 executable: its strings, its RTTI, and the disassembly of
+the PitFight code. Nothing was built or run.
+
+**It comes from Condemned, not F.E.A.R.** The menu's fighter list holds 39 entries, and they're
+the cast of Monolith's Condemned: Criminal Origins (Becker, Vanhorn, Rosa, the SKX killers, the
+addicts, mannequins and vagrants). The 360 F.E.A.R. was built on the same 360 engine code, so
+Condemned's melee test pit came along. Nothing in F.E.A.R. uses it.
+
+**How it works:**
+
+- **The arena:** a server object of class `PitFight`, which derives from `GameBase`. The menu
+  looks it up by the name `PitFight00`.
+- **Its commands** (the command manager's `msg PitFight00 (...)`):
+
+  | Command | Effect |
+  |---|---|
+  | `NUMTEAMS n` | Sets the number of teams. |
+  | `SCORETOWIN n` | Sets the score that wins the match. |
+  | `TEAMMODEL t model` | Sets team `t`'s character. |
+  | `TEAMWEAPON t weapon` | Sets team `t`'s weapon. |
+  | `CLEARTEAMS` | Clears the team setup. |
+  | `START` | Starts the match. |
+  | `END` | Sends `REMOVE` to every AI and every weapon item. |
+
+- **The fighters:**
+  - **Spawning:** `START` looks for one spawner per team, named `<model>_AISpawner_<tt>` (for
+    example `Soldier_AISpawner_00`). It sends that spawner `SPAWNFROM StartingPoint<tt>`, so each
+    team has one fighter at its own starting point.
+  - **`FIGHTERSPAWNED t`:** gives the new fighter its team's weapon
+    (`AddWeapon <weapon> RightHand`).
+  - **`FIGHTERDIED t`:** counts the kill and respawns that team's fighter a second later
+    (`delay 1 (msg <spawner> (SPAWNFROM StartingPoint<tt>))`).
+  - **Who sends these:** the fighters must send both messages themselves. In the original world
+    that was the job of each template AI's own commands: the AI's `Initial` command and its
+    `DeathCommand`.
+- **The menu:** an XUI scene (`PitFightScene`, with fighter and weapon lists for each team, score
+  text, and start and reset buttons). It sends `TEAMCOUNT`, then `TEAMMODEL` and `TEAMWEAPON` for
+  each team, then `START`.
+  - The arena doesn't register `TEAMCOUNT`. Its command is `NUMTEAMS`, so the menu and the arena
+    don't quite agree, which suggests the feature was unfinished in this branch.
+  - The scene itself would be in `global\ui\XUI\assets.xzp`, which the game asks for at startup
+    and the disc doesn't have.
+
+**What's missing in F.E.A.R.:**
+
+- the `PitFight00` world, or any world with these objects;
+- the menu scene;
+- characters for it: the Condemned names mean nothing here, but F.E.A.R.'s own models fit the
+  same scheme (`Soldier`, `HeavyArmor`, `Assassin`, `Powerarmor` and so on).
+
+The arena code itself is intact.
+
+**To see it run in F.E.A.R.:**
+
+1. **Map:** use an Instant Action map, which has AI navigation.
+2. **Objects:** give the map the objects PitFight expects. All of them are ordinary world
+   objects:
+   - a `PitFight` object named `PitFight00`;
+   - a template AI for each team, with a model, the weapon left to PitFight, and an alignment
+     that makes the two teams enemies. Each template's `Initial` command sends
+     `msg PitFight00 (FIGHTERSPAWNED t)`, and its `DeathCommand` sends
+     `msg PitFight00 (FIGHTERDIED t)`;
+   - an `AISpawner` for each team, named `<model>_AISpawner_<tt>`, aimed at that template;
+   - a `StartingPoint<tt>` object for each team.
+3. **Start:** send `NUMTEAMS`, `SCORETOWIN`, `TEAMMODEL` and `TEAMWEAPON` for each team, then
+   `START`.
+4. **Watch:** the player watches in god mode. The score and each kill go to the log, and later
+   to the HUD.
+
+**Getting the objects in:**
+
+- **A patched copy of the map's object file:** the most likely route. Write a patched copy of the
+  player's own `.wldsrvr` to `<user data>/overrides/` at startup and redirect the game to it,
+  as `look_tuning.cpp` already does for `Loki.gamedb`. The game files aren't changed and
+  nothing goes in the repo. The `.wldsrvr` object format has to be read first.
+- **Creating the objects while the game runs:** call the game's own object spawner. Our hooks
+  can only change registers, so this needs a way to call guest code first.
+- **Sending the commands:** the same patched map can carry them, as the `Initial` command of an
+  extra object. Otherwise our code passes the game's command manager a string at a point where
+  it already runs level commands.
+
+A launch option would pick the map, the two fighters and weapons, and the score to win, for
+example `--fear_pitfight="InstantAction1;Soldier,<weapon>;HeavyArmor,<weapon>;5"`. The same
+object injection is also what the wave mode needs to place its spawners.
 
 ## The mode: Last Stand (working name)
 
@@ -144,7 +231,7 @@ movement and aim. That's the largest piece, and it waits for #65.
 
 | Phase | What | Rough size |
 |---|---|---|
-| 0. Discovery | <ul><li>How PitFight is started, and whether it still works.</li><li>How Instant Action starts and ends a map.</li><li>How our code can send the game's commands (spawn, messages).</li><li>F.E.A.R. Files' roster.</li></ul> | small |
+| 0. Discovery | <ul><li>PitFight running in F.E.A.R.: read the `.wldsrvr` object format, then inject PitFight's objects (see [PitFight](#pitfight)).</li><li>How Instant Action starts and ends a map.</li><li>How our code can send the game's commands (spawn, messages).</li><li>F.E.A.R. Files' roster.</li></ul> | small |
 | 1. Telemetry | <ul><li>Logging of AI decisions and combat.</li><li>The AI lab's log reader.</li></ul> | small to medium |
 | 2. Wave prototype | One Instant Action map: <ul><li>waves spawned from its spawners;</li><li>a wave counter;</li><li>resupply.</li></ul> | medium |
 | 3. Tactics | Tuning first, then new behaviors where tuning isn't enough. | medium to large |
@@ -162,8 +249,9 @@ movement and aim. That's the largest piece, and it waits for #65.
 
 ## Open questions
 
-- Does PitFight's code still work, and what started it: a debug menu, a console command, or a
-  level script?
+- PitFight: the `.wldsrvr` object format, and how fighters of two models get hostile alignments
+  (`Character/Alignments` has `BadCharacter`, `GoodCharacter`, `NeutralCharacter`, `Player` and
+  others). F.E.A.R. Files has the same PitFight classes, unchecked beyond their names.
 - Can spawners be added while the game runs, or does a wave mode have to use each map's own
   spawners and template objects?
 - Does Instant Action's own scoring and end-of-map logic help a wave mode, or get in its way?
