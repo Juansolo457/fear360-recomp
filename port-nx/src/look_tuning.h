@@ -51,7 +51,7 @@
 //   fear_weapon_slots         Arsenal/Global/Global MaxWeaponCapacity (3)                  database
 //   fear_infinite_flashlight  Client/Flashlight/Player_Narrow MaxCharge 30 -> 0            database
 //   fear_intro_videos         Client/Shared/Shared SplashMovies: skipped ones made ""      database
-//   fear_bodies_stay          BodyCapTotalCount 10, BodyCapRadiusCount 4 -> -1 (no cap)    console
+//   fear_bodies_stay          BodyCapTotalCount 10, BodyCapRadiusCount 4 -> 1000           console
 //                             FX/ShatterType/* FadeOutStart, Lifetime -> 1e9 s (glass)     database
 // The database ones go into the same patched copy as the stick tuning; F.E.A.R. Files keeps its
 // database in uberCatalog.cat, so there only the console ones apply for now. The field of view

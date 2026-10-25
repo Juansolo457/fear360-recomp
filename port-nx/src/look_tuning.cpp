@@ -138,11 +138,12 @@ std::vector<std::pair<std::string, float>> OptionChanges() {
   std::vector<std::pair<std::string, float>> changes;
   // fear_bodies_stay (#22): the server fades the farthest bodies beyond BodyCapTotalCount (10 on
   // the 360) and beyond BodyCapRadiusCount (4) within BodyCapRadius of a new one. Both start from
-  // Server/Limits as console variables (CCharacter's body cap check), and a negative count is no
-  // cap.
+  // Server/Limits as console variables (CCharacter's body cap check). The check clamps a count to
+  // 0 or more before using it, so -1 is a cap of 0: tried first, every body faded about 3 s after
+  // its death (2026-10-25 recording). A cap no level reaches keeps them all.
   if (REXCVAR_GET(fear_bodies_stay)) {
-    changes.emplace_back("BodyCapTotalCount", -1.0f);
-    changes.emplace_back("BodyCapRadiusCount", -1.0f);
+    changes.emplace_back("BodyCapTotalCount", 1000.0f);
+    changes.emplace_back("BodyCapRadiusCount", 1000.0f);
   }
   return changes;
 }
