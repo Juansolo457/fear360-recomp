@@ -267,10 +267,18 @@ bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& value
 }
 
 // Starts the game again with this run's arguments, minus the flags for the settings (so the
-// saved ones apply), its log renamed, after this run has exited.
-bool Relaunch(const std::vector<Setting>& settings) {
+// saved ones apply), its log renamed, after this run has exited. With display_pacing, also
+// without a timer's pacing (tools/launch.ps1 -Timer: fear_vblank_source timer and
+// video_mode_refresh_rate), which the frame rate setting doesn't control: it caps the display's
+// vblank pacing. Kept, a frame rate changed here came back at the timer's (2026-10-25: 30 again
+// after choosing 120).
+bool Relaunch(const std::vector<Setting>& settings, bool display_pacing) {
   std::vector<std::string> managed = {"fear_texture_pack"};
   for (const Setting& setting : settings) managed.push_back(setting.cvar);
+  if (display_pacing) {
+    managed.push_back("fear_vblank_source");
+    managed.push_back("video_mode_refresh_rate");
+  }
   return fear::process::StartAfterThis(
       fear::process::OwnExecutable(),
       fear::process::WithoutFlags(fear::process::OwnArguments(), managed), fs::current_path());
@@ -348,6 +356,10 @@ class SettingsPanel final : public HostPanel {
           note += " This run: set by a command-line flag, which wins over the saved value; "
                   "Save and restart leaves it out.";
         }
+        if (setting.cvar == "fear_frame_rate_limit" && TimerPaced()) {
+          note += " This run is paced by a timer (a launch flag), not by this setting. Save and "
+                  "restart with another frame rate goes back to the display's pacing.";
+        }
         Dim(note.c_str());
       } else {
         Dim(selected_ == rows + 1
@@ -396,7 +408,7 @@ class SettingsPanel final : public HostPanel {
     if (action == 0 && Save()) {
       Finish();
     } else if (action == 1 && Save()) {
-      if (Relaunch(settings_)) {
+      if (Relaunch(settings_, FrameRateChanged())) {
         Finish();
         if (host_.later && host_.quit) host_.later(host_.quit);
       } else {
@@ -411,6 +423,15 @@ class SettingsPanel final : public HostPanel {
     closing_ = true;
     Close();
   }
+
+  bool FrameRateChanged() const {
+    for (size_t i = 0; i < settings_.size(); ++i) {
+      if (settings_[i].cvar == "fear_frame_rate_limit") return chosen_[i] != running_[i];
+    }
+    return false;
+  }
+
+  static bool TimerPaced() { return CvarValue("fear_vblank_source") == "timer"; }
 
   std::vector<Setting> settings_;
   std::vector<size_t> running_;  // the option in effect, by row
