@@ -152,17 +152,15 @@ foreach ($name in 'fear', 'fearfiles') {
 }
 
 if ($Collection) {
-    # Each game's texture pack, when it has been built (docs/TEXTURES.md).
+    # No texture packs: the D3D12 renderer has none yet (docs/NATIVE_RENDERER.md, punch list).
     $root = Join-Path $PSScriptRoot '..' | Resolve-Path
-    $packs = @{ nx = (Join-Path $root 'private\texture_pack'); files = (Join-Path $root 'private\files\texture_pack') }
     $titles = @(
         @{ Id = 'fear'; Title = 'nx'; Name = 'F.E.A.R.'; Subtitle = 'First Encounter Assault Recon' },
         @{ Id = 'files'; Title = 'files'; Name = 'F.E.A.R. Files'; Subtitle = 'Extraction Point and Perseus Mandate' })
     $toml = @('# The F.E.A.R. collection menu (port-nx/src/fear_collection.h), written by tools/launch.ps1 -Collection.')
     $runs = @{}
     foreach ($t in $titles) {
-        $pack = if (Test-Path (Join-Path $packs[$t.Title] 'index.tsv')) { $packs[$t.Title] } else { '' }
-        $run = Get-Run $t.Title $pack
+        $run = Get-Run $t.Title ''
         $runs[$t.Id] = $run
         $toml += '', '[[title]]', "id = '$($t.Id)'", "name = '$($t.Name)'", "subtitle = '$($t.Subtitle)'",
             "exe = '$($run.Executable)'", "working_dir = '$($run.Port)'",
