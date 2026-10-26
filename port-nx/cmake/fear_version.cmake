@@ -3,7 +3,8 @@
 # tag, the commit, local changes). Run as a script before each build of fear and fearfiles:
 #   cmake -DROOT=<repository> -DOUT=<header> -P fear_version.cmake
 # The header is rewritten only when its text changes, so an unchanged version recompiles nothing.
-# A source download without .git gets the release number alone.
+# A source download without .git gets the release number alone; a clone without the release's
+# tag (shallow or tagless) gets the number and the commit.
 
 file(STRINGS "${ROOT}/VERSION" number LIMIT_COUNT 1)
 string(STRIP "${number}" number)
@@ -12,11 +13,17 @@ set(text "${number}")
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${ROOT}/.git")
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${ROOT}" describe --tags --long --dirty --match "v*"
+        COMMAND "${GIT_EXECUTABLE}" -C "${ROOT}" describe --tags --long --dirty --always --match "v*"
         OUTPUT_VARIABLE described OUTPUT_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE failed ERROR_QUIET)
-    # v0.1.5-3-g121a788 or v0.1.5-3-g121a788-dirty
-    if(NOT failed AND described MATCHES "^v([^-]+)-([0-9]+)-g([0-9a-f]+)(-dirty)?$")
+    # v0.1.5-3-g121a788 or v0.1.5-3-g121a788-dirty; with no v* tag reachable (a shallow or
+    # tagless clone), --always gives the commit alone: 121a788 or 121a788-dirty.
+    if(NOT failed AND described MATCHES "^([0-9a-f]+)(-dirty)?$")
+        set(text "${text} ${CMAKE_MATCH_1}")
+        if(CMAKE_MATCH_2)
+            set(text "${text} modified")
+        endif()
+    elseif(NOT failed AND described MATCHES "^v([^-]+)-([0-9]+)-g([0-9a-f]+)(-dirty)?$")
         set(tag "${CMAKE_MATCH_1}")
         set(ahead "${CMAKE_MATCH_2}")
         set(commit "${CMAKE_MATCH_3}")
