@@ -93,6 +93,7 @@ docs/             progress, handoff, findings, plan, ripping
 
 ## Legal
 
+- Changes reach `master` only through reviewed pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
 - No assets, executables, generated code or proprietary code are distributed. Releases are source only: never attach builds, game files or the private test packages `tools/steamdeck/make_package.py` makes. Before pushing, run `python -I tools/audit_repo.py` (CI runs it too).
 - Three sets of terms, file by file in [NOTICE](NOTICE), full texts in [LICENSES/](LICENSES/):
   - **MIT** ([LICENSE](LICENSE)): our own tools, docs and glue.
