@@ -23,6 +23,7 @@
 #include "fear_panel.h"
 #include "fear_process.h"
 #include "fear_title.h"
+#include "fear_version.h"
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -216,6 +217,12 @@ std::vector<Setting> BuildSettings() {
                       "Above 30 fps the game slides on slopes, misses jump kicks, loses speed on "
                       "landing and leaving water, and its water and slow-mo meter misbehave. On "
                       "fixes them as EchoPatch does on PC."});
+  settings.push_back({"Version badge",
+                      "fear_version_badge",
+                      {{"launch", "At launch"}, {"always", "Always"}, {"off", "Off"}},
+                      false,
+                      "This build's version in the bottom right corner: for the first 30 seconds, "
+                      "all the time (for test runs and recordings), or never."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
                       {{"true", "Exact"}, {"false", "As shipped"}},
@@ -321,6 +328,8 @@ class SettingsPanel final : public HostPanel {
 
     if (BeginPanel("##fear_settings", 30.0f)) {
       ImGui::TextUnformatted("PC SETTINGS");
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", fear::version::Text());
       ImGui::Separator();
       if (ImGui::BeginTable("##settings", 2, ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_WidthStretch, 0.85f);

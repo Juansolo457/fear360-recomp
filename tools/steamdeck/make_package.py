@@ -169,6 +169,19 @@ def main():
                 'README-SteamDeck.txt')
         if not PROGRAMS_ONLY:
             z.writestr(f'{TOP}/collection.toml', '\n'.join(collection) + '\n')
+        # Which build each program is (port-nx/src/fear_version.h), as the game shows it.
+        versions = []
+        for folder, project, exe, *_ in GAMES:
+            header = os.path.join(REPO, project, 'out', 'build', 'win-amd64-relwithdebinfo',
+                                  'fear_version', 'fear_version_info.h')
+            text = 'unknown'
+            if os.path.exists(header):
+                for line in open(header, encoding='utf-8'):
+                    if line.startswith('#define FEAR_VERSION_TEXT '):
+                        text = line.split('"')[1]
+            versions.append(f'{exe}: {text}')
+        z.writestr(f'{TOP}/VERSION.txt', '\r\n'.join(versions) + '\r\n')
+        print('version: ' + '; '.join(versions))
         for folder, project, exe, pack, *_ in GAMES:
             build = os.path.join(REPO, project, 'out', 'build', 'win-amd64-relwithdebinfo')
             for f in (exe, 'rexruntimerd.dll', 'TracyClientrd.dll'):

@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <optional>
+#include <string>
 
 #include <imgui.h>
 #include <rex/cvar.h>
@@ -27,6 +28,8 @@
 #include "fear_menu.h"
 #include "fear_panel.h"
 #include "fear_settings.h"
+#include "fear_title.h"
+#include "fear_version.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
 #include "pipeline_warmup.h"
@@ -69,6 +72,20 @@ class FearApp : public rex::ReXApp {
   }
 
   void OnConfigureFonts(ImFontAtlas* atlas) override { fear::panel::AddFonts(atlas); }
+
+  // Which build this is (fear_version.h): the first line of the log, the window title and the
+  // corner badge, before the collection menu opens.
+  void OnPostInitLogging() override {
+    REXLOG_INFO("{} ({})", fear::version::Title(), fear::title::kFiles ? "F.E.A.R. Files" : "F.E.A.R.");
+  }
+
+  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+    if (window()) {
+      window()->SetTitle(std::string(fear::title::kFiles ? "F.E.A.R. Files" : "F.E.A.R.") +
+                         " - " + fear::version::Title());
+    }
+    fear::version::CreateBadge(drawer);
+  }
 
   // The collection menu (fear_collection.h), before any game loads: with the window and ImGui up,
   // no runtime yet. Picking this program's game resumes here.

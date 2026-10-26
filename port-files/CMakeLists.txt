@@ -44,6 +44,7 @@ set(FEAR_SOURCES
     ${HOST}/main.cpp
     ${HOST}/anim_timing.cpp
     ${HOST}/bloom.cpp
+    ${HOST}/fear_version.cpp
     ${HOST}/high_fps.cpp
     ${HOST}/weapon_fixes.cpp
     ${HOST}/profiler.cpp
@@ -68,6 +69,17 @@ set_source_files_properties(${HOST}/cpu_check.cpp PROPERTIES COMPILE_OPTIONS "-m
                             SKIP_PRECOMPILE_HEADERS ON)
 add_executable(fear WIN32 ${FEAR_SOURCES})
 set_target_properties(fear PROPERTIES OUTPUT_NAME fearfiles)
+# The build's version (src/fear_version.h): port-nx's cmake/fear_version.cmake turns the repository's VERSION file
+# and `git describe` into fear_version_info.h before every build, rewriting it only when it changes.
+set(FEAR_VERSION_DIR "${CMAKE_CURRENT_BINARY_DIR}/fear_version")
+add_custom_target(fear_version
+    COMMAND "${CMAKE_COMMAND}" "-DROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
+            "-DOUT=${FEAR_VERSION_DIR}/fear_version_info.h" -P "${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/cmake/fear_version.cmake"
+    BYPRODUCTS "${FEAR_VERSION_DIR}/fear_version_info.h"
+    COMMENT "F.E.A.R. version"
+    VERBATIM)
+add_dependencies(fear fear_version)
+target_include_directories(fear PRIVATE "${FEAR_VERSION_DIR}")
 # Which game the host code is built for (port-nx/src/fear_title.h): the menu hooks' addresses.
 target_compile_definitions(fear PRIVATE FEAR_TITLE_FILES)
 
