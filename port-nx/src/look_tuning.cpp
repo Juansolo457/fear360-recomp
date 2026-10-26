@@ -641,5 +641,9 @@ void FearCreateFxKey(PPCRegister& r4, PPCRegister& r6) {
 
 bool FearShellCasingStays() {
   static const bool stay = REXCVAR_GET(fear_bodies_stay);
+  if (stay) {
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) REXLOG_INFO("F.E.A.R.: bodies and debris stay: shell casings stay");
+  }
   return stay;
 }

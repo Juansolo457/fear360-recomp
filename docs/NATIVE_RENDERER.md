@@ -68,6 +68,7 @@ videos, cutscene bars, Sharp AI, bloom) need nothing: they are hooks on the game
 | 8 | PC textures (texture pack) | parity | the pack's replacement in the D3D12 texture cache; row removed until then |
 | 9 | `k_5_6_5` resolves | gap | no typed UAV store for B5G6R5 (logged once) |
 | 10 | Bodies flung when bullet time ends (#62, #4) | game | not the renderer: high frame rates (seen toward 100 fps) |
+| 11 | Load in slow-mo firefights | performance | PC run 2026-10-25 18:36 (RTX 4090, 120 fps, MSAA on, 16x anisotropic, "Bodies and debris: Stay" on): the user saw GPU use go from under 10% to over 20% in slow-mo fights with explosions. The log: draws per frame went from 150-700 to 1,100-2,100 (18:39:25-18:39:48, 18:40:51-54, 18:41:02), frames from 8.33 to 9.3-10.9 ms, the game's GPU waits from 8-10 s to 2.9 s per 10 s, and the game thread's time in the guest D3D from 0.3 to 1.7 ms a frame. So those frames were held up on the CPU side; the GPU's share isn't measured yet. Next: the same fight with `--fear_d3d12_gpu_timing` and `--fear_d3d12_csv`, once with "Bodies and debris" on Stay and once on Fade (lasting debris adds draws), then the laptop test with everything turned up |
 
 Then, as planned: a Deck run with every option on (a Deck `settings.toml` that turns them all on),
 a performance check against the first runs, the smoke test (#55-#57) and 1.0.

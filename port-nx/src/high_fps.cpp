@@ -268,9 +268,19 @@ void FearFrictionFrameTime(PPCRegister& f1) {
   f1.f64 = kStep;
 }
 
-bool FearSkipLandingDamping() { return Fixes(); }
+bool FearSkipLandingDamping() {
+  if (!Fixes()) return false;
+  static std::atomic<bool> logged{false};
+  LogOnce(logged, "landing speed kept (camera-height damping skipped)");
+  return true;
+}
 
-bool FearSkipSurfaceStop() { return Fixes(); }
+bool FearSkipSurfaceStop() {
+  if (!Fixes()) return false;
+  static std::atomic<bool> logged{false};
+  LogOnce(logged, "upward speed kept on the water's surface");
+  return true;
+}
 
 void FearWaveFrameCall() { t_wave_frame_call = true; }
 
