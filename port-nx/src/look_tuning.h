@@ -52,9 +52,12 @@
 //   fear_infinite_flashlight  Client/Flashlight/Player_Narrow MaxCharge 30 -> 0            database
 //   fear_intro_videos         Client/Shared/Shared SplashMovies: skipped ones made ""      database
 //   fear_bodies_stay          BodyCapTotalCount 10, BodyCapRadiusCount 4 -> 1000           console
+//                             FX/ShatterType/* FadeOutStart, Lifetime -> 1e9 s (glass)     database
+//                             effect keys and shell casings that fade (FearCreateFxKey,    hook
+//                             FearShellCasingStays, below)
 //   fear_letterbox (off)      LetterBoxDisabled 0 -> 1 (no cutscene bars)                  console
 //   fear_full_detail_models   ModelLODDistanceScale -> 0.003 (FearModelLodScale, below)    hook
-//                             FX/ShatterType/* FadeOutStart, Lifetime -> 1e9 s (glass)     database
+//   fear_fast_checkpoints     CheckPointOptimizeVideoMemory 1 -> 0 (on by default)         console
 // The database ones go into the same patched copy as the stick tuning; F.E.A.R. Files keeps its
 // database in uberCatalog.cat, so there only the console ones apply for now. The field of view
 // (fear_fov) also moves the first-person camera forward at wide angles (CameraAttachedOffsetZ, by
@@ -103,3 +106,29 @@ void FearSplashMovieCount(PPCRegister& r23, PPCRegister& r31);
 // state asked for in r4. Logs each distinct change asked for once, with the flag the change
 // needs (CInterfaceMgr+0x5958, set when the interface has finished setting up).
 void FearLogStateChange(PPCRegister& r3, PPCRegister& r4);
+
+// fear_bodies_stay (#22), the effects: bullet holes, blood splats and debris are ClientFX keys
+// that end with their key's time. CClientFXMgr::CreateFXKey (F.E.A.R. sub_8234C538, F.E.A.R. Files
+// sub_82320B50) at its entry, with the create struct in r4 (CLIENTFX_CREATESTRUCT, the effect's
+// name first) and the key in r6 (its FX_REF, whose first word is the type's create function, and
+// its props). For the keys EchoPatch's persistent world state keeps (every decal, every model but
+// a rocket's debris, the stone bullet-hole, debris and Flesh_splat6 sprites), the props' end and
+// lifetime (+8 and +12, as CBaseFXProps::SetLifetime writes them: F.E.A.R. sub_82BAC498, F.E.A.R.
+// Files sub_82B6C5B0) become FLT_MAX before the key is made, as EchoPatch does on the PC's
+// CreateFX. (On the 360, CreateFX takes the FX_REF instead of the type's name; its caller still
+// has the name.)
+void FearCreateFxKey(PPCRegister& r4, PPCRegister& r6);
+
+// fear_all_intervals: the interval select (Campaign > Interval) lists the intervals the profile
+// has reached, CXProfile's count of them (vtable slot 63: F.E.A.R. sub_823F87E8, F.E.A.R. Files
+// sub_823D9508). That count is every mission in the database when the signed-in gamertag is the
+// 360's unlock code (F3ARDAY1; TIME4FEAR in F.E.A.R. Files: sub_82395ED8, sub_823A6608), and
+// ReXGlue's gamertag is always "User". Just after that check returns (F.E.A.R. 0x823F880C,
+// F.E.A.R. Files 0x823D9528), r3 becomes 1, for the count alone: the main menu and the Instant
+// Action summary make the same check and keep the real answer.
+void FearAllIntervals(PPCRegister& r3);
+
+// fear_bodies_stay (#22), shell casings: CShellCasingFX::Update (F.E.A.R. sub_824060E8, F.E.A.R.
+// Files sub_823F6B58) counts m_fDieTime (+112) down by the frame time and removes the casing at 0.
+// True skips that fsubs, as EchoPatch skips the PC's, so casings stay.
+bool FearShellCasingStays();

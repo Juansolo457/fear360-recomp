@@ -1,8 +1,9 @@
-# fear (port-nx): F.E.A.R. on fear-nx's patched ReXGlue SDK with its Vulkan Xenos renderer.
+# fear (port-nx): F.E.A.R. on fear-nx's patched ReXGlue SDK with the Direct3D 12 renderer.
 #
 # Differences from port/: the SDK is built from source (REXSDK_DIR, see
 # tools/build-nx.ps1), the Xenos GPU plugin is linked into the executable whole
-# instead of loaded as a DLL, and src/native/ (fear-nx, GPL-3.0) is compiled in.
+# instead of loaded as a DLL, src/native/ (fear-nx's GPU ring, GPL-3.0) and src/d3d12/ (the
+# Direct3D 12 renderer, MIT) are compiled in, and it builds for Windows only.
 # SDK boilerplate lives in generated/rexglue.cmake.
 
 cmake_minimum_required(VERSION 3.25)
@@ -16,6 +17,10 @@ if(NOT REXSDK_DIR)
 endif()
 if(NOT REXGLUE_GPU_XENOS_STATIC)
     message(FATAL_ERROR "port-nx links the Xenos plugin into fear.exe: pass -DREXGLUE_GPU_XENOS_STATIC=ON.")
+endif()
+if(NOT WIN32)
+    message(FATAL_ERROR "port-nx builds for Windows only: the game draws with the Direct3D 12 renderer "
+        "(src/d3d12/). Linux runs the Windows build through Proton (#74).")
 endif()
 
 # No floating-point contraction: built for x86-64-v3 (tools/build-nx.ps1), clang's default
@@ -40,13 +45,10 @@ if(REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
         PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
 endif()
 
-# fear-nx's renderer (unchanged copy; see src/native/UPSTREAM.md). The tests
-# next to it need their own harness and are not built.
+# fear-nx's graphics system (src/native/UPSTREAM.md): the GPU ring and ReXGlue's D3D12 presenter.
+# Its Vulkan renderer is gone (D3D12 only, docs/NATIVE_RENDERER.md; in git history).
 set(FEAR_NATIVE_SOURCES
     src/native/native_system.cpp
-    src/native/native_renderer.cpp
-    src/native/native_textures.cpp
-    src/native/native_geometry_shaders.cpp
 )
 
 set(FEAR_SOURCES
@@ -54,9 +56,9 @@ set(FEAR_SOURCES
     src/anim_timing.cpp
     src/bloom.cpp
     src/high_fps.cpp
+    src/weapon_fixes.cpp
     src/profiler.cpp
     src/cpu_check.cpp
-    src/texture_pack.cpp
     src/crash_report.cpp
     src/display_vblank.cpp
     src/fear_collection.cpp
@@ -67,7 +69,7 @@ set(FEAR_SOURCES
     src/fx_debug.cpp
     src/look_tuning.cpp
     src/difficulty.cpp
-    src/shader_warmup.cpp
+    src/pipeline_warmup.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 
@@ -88,20 +90,24 @@ if(WIN32)
     target_link_libraries(fear PRIVATE dxgi)      # the display's vblank (src/display_vblank.cpp)
 endif()
 target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
+# The D3D12 renderer (src/d3d12/, docs/NATIVE_RENDERER.md; GRAW 360's, from pgr4-native), the
+# game's only renderer. An object library: its hooks (REX_HOOK_RAW) override the generated Direct3D
+# functions only when its objects are linked in. The SDK's shader translator and texture tables it
+# uses are already in the static Xenos plugin (REXGLUE_USE_D3D12) and rexcore; the translator
+# carries the two pgr4-native patches the renderer needs (patches/rexglue-sdk-nx/0016, 0017).
+# port-files builds it too, for its own Direct3D (FEAR_TITLE_FILES, src/d3d12/fear_d3d.h).
+if(WIN32)
+    file(GLOB FEAR_D3D12_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/d3d12/*.cpp")
+    add_library(fear_d3d12 OBJECT ${FEAR_D3D12_SOURCES})
+    target_include_directories(fear_d3d12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/d3d12"
+        $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>)
+    rexglue_apply_target_settings(fear_d3d12)
+    target_link_libraries(fear_d3d12 PRIVATE rex::runtime xxHash::xxhash)
+    target_link_libraries(fear PRIVATE fear_d3d12 d3d12 dxguid)
+endif()
 set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
-# The shader warm-up list (src/shader_warmup.h): generated locally into warmup/ by
-# tools/make_warmup.py and not tracked. Each build copies it, or an empty list, to the build tree.
-add_custom_target(fear_warmup_list
-    COMMAND "${CMAKE_COMMAND}" "-DSRC=${CMAKE_CURRENT_SOURCE_DIR}/warmup/shader_warmup.inc"
-            "-DDST=${CMAKE_CURRENT_BINARY_DIR}/warmup/shader_warmup.inc"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/warmup_list.cmake"
-    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/warmup/shader_warmup.inc"
-    COMMENT "Shader warm-up list")
-add_dependencies(fear fear_warmup_list)
 target_include_directories(fear PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}/warmup"   # shader_warmup.inc, the list above
     "${REXSDK_DIR}/src/graphics"
-    "${REXSDK_DIR}/thirdparty/glslang"
     "${REXSDK_DIR}/thirdparty/renderdoc"   # rex/ui/renderdoc_api.h, private to the plugin
     "${REXSDK_DIR}/thirdparty/stb"         # stb_image.h's zlib, for the game's catalog
     $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>

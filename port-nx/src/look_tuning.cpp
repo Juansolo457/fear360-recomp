@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -81,8 +83,18 @@ REXCVAR_DEFINE_BOOL(fear_full_detail_models, false, "F.E.A.R.",
                     "(EchoPatch's no model LOD bias, #21)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_BOOL(fear_bodies_stay, false, "F.E.A.R.",
-                    "Bodies stay instead of fading once there are 10 (4 within 500 units), and in "
-                    "F.E.A.R. broken glass stays (part of EchoPatch's persistent world state, #22)")
+                    "Bodies stay instead of fading once there are 10 (4 within 500 units), and so "
+                    "do bullet holes, blood splats, debris and shell casings; in F.E.A.R. broken "
+                    "glass too (EchoPatch's persistent world state, #22)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_all_intervals, false, "F.E.A.R.",
+                    "Campaign > Interval lists every interval, not just the ones this profile has "
+                    "reached (the 360's own unlock, which it gives a gamertag of F3ARDAY1, or "
+                    "TIME4FEAR in F.E.A.R. Files)");
+REXCVAR_DEFINE_BOOL(fear_fast_checkpoints, true, "F.E.A.R.",
+                    "Checkpoint saves skip the game's video memory clean-up "
+                    "(CheckPointOptimizeVideoMemory 0, as EchoPatch's faster saves); off = as "
+                    "shipped (#24)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace fear::look_tuning {
@@ -157,6 +169,12 @@ std::vector<std::pair<std::string, float>> OptionChanges() {
   // LetterBoxDisabled is set (CInterfaceMgr's letterbox update; 0 as shipped).
   if (!REXCVAR_GET(fear_letterbox)) {
     changes.emplace_back("LetterBoxDisabled", 1.0f);
+  }
+  // fear_fast_checkpoints (#24): at a checkpoint save the client calls the interface's
+  // DoOptimizeVideoMemory while the save message is built (CClientSaveLoadMgr's save, as in the
+  // PC SDK), unless CheckPointOptimizeVideoMemory (1) is 0. EchoPatch's faster saves set it to 0.
+  if (REXCVAR_GET(fear_fast_checkpoints)) {
+    changes.emplace_back("CheckPointOptimizeVideoMemory", 0.0f);
   }
   return changes;
 }
@@ -575,4 +593,68 @@ void FearLogStateChange(PPCRegister& r3, PPCRegister& r4) {
     REXLOG_INFO("F.E.A.R.: interface state {} -> {} asked for (interface ready: {})", from, to,
                 ready);
   }
+}
+
+namespace {
+
+// Each ClientFX type's create function, the first word of its FX_REF (the type tables at
+// 0x830F2850 in F.E.A.R. and 0x831E4488 in F.E.A.R. Files: name, create, delete and the props').
+#if defined(FEAR_TITLE_FILES)
+constexpr uint32_t kCreateSprite = 0x82B48C28, kCreateLtbModel = 0x82B48C98,
+                   kCreateDecal = 0x82B49188;
+#else
+constexpr uint32_t kCreateSprite = 0x82B8ED20, kCreateLtbModel = 0x82B8ED90,
+                   kCreateDecal = 0x82B8F210;
+#endif
+
+// Whether a key of this type, in the effect of this name, stays: EchoPatch's choice (#22). Every
+// decal (bullet holes, scorch and blood on walls); every model but a rocket's debris; and the
+// sprites of stone bullet holes, the debris chunks (electronics, wood, mugs, vases) and the
+// Flesh_splat6 blood.
+bool KeyStays(uint32_t create, std::string_view effect) {
+  if (create == kCreateDecal) return true;
+  if (create == kCreateLtbModel) return !(effect.size() >= 10 && effect.substr(2, 8) == "ocket_De");
+  if (create != kCreateSprite) return false;
+  for (const char* prefix : {"Stone_bu", "Debris_E", "Debris_W", "Debris_M", "Debris_V"}) {
+    if (effect.starts_with(prefix)) return true;
+  }
+  return effect.size() >= 12 && effect.substr(4, 8) == "h_splat6";
+}
+
+}  // namespace
+
+void FearCreateFxKey(PPCRegister& r4, PPCRegister& r6) {
+  static const bool stay = REXCVAR_GET(fear_bodies_stay);
+  if (!stay || !r4.u32 || !r6.u32) return;
+  const uint32_t ref = GuestWord(r6.u32);
+  const uint32_t props = GuestWord(r6.u32 + 4);
+  if (!ref || !props) return;
+  const auto* name = reinterpret_cast<const char*>(
+      rex::system::kernel_memory()->virtual_membase() + r4.u32);
+  if (!KeyStays(GuestWord(ref), std::string_view(name, strnlen(name, 128)))) return;
+  // CBaseFXProps' m_tmEnd (+8) and m_tmLifetime (+12), shared by every instance of the key.
+  const uint32_t never = std::byteswap(std::bit_cast<uint32_t>(FLT_MAX));
+  std::memcpy(rex::system::kernel_memory()->virtual_membase() + props + 8, &never, 4);
+  std::memcpy(rex::system::kernel_memory()->virtual_membase() + props + 12, &never, 4);
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    REXLOG_INFO("F.E.A.R.: bodies and debris stay: effects like {} no longer fade",
+                std::string_view(name, strnlen(name, 128)));
+  }
+}
+
+void FearAllIntervals(PPCRegister& r3) {
+  if (!REXCVAR_GET(fear_all_intervals)) return;
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) REXLOG_INFO("F.E.A.R.: interval select lists every interval");
+  r3.u64 = 1;
+}
+
+bool FearShellCasingStays() {
+  static const bool stay = REXCVAR_GET(fear_bodies_stay);
+  if (stay) {
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) REXLOG_INFO("F.E.A.R.: bodies and debris stay: shell casings stay");
+  }
+  return stay;
 }

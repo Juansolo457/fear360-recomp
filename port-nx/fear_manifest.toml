@@ -398,6 +398,70 @@ name = "FearAiNextUpdate"
 address = 0x8263D2B8
 registers = ["r3", "f1"]
 
+# The rest of EchoPatch's high-FPS fixes (src/high_fps.h, fear_high_fps_fixes); the jump kick,
+# wave, splash and slow-mo ones replace whole functions there (REX_HOOK_RAW).
+# Sliding on slopes (#12): CMoveMgr::UpdateNormalFriction (sub_82391710), right after its
+# GetTimerElapsedS, the frame time in f1.
+[[entrypoint.midasm_hook]]
+name = "FearFrictionFrameTime"
+address = 0x8239190C
+registers = ["f1"]
+
+# Momentum on landing (#9): CMoveMgr::UpdateVelocity (sub_82392A28), the camera-height damping
+# block (taken when the smoothing offset is over 1 unit), skipped.
+[[entrypoint.midasm_hook]]
+name = "FearSkipLandingDamping"
+address = 0x82392FF0
+registers = []
+jump_address_on_true = 0x823930D8
+
+# Jumping out of water (#8): CMoveMgr::UpdateInLiquid (sub_8238CB18), swimming on the surface and
+# moving: the zeroing of the upward velocity and acceleration, skipped.
+[[entrypoint.midasm_hook]]
+name = "FearSkipSurfaceStop"
+address = 0x8238CC48
+registers = []
+jump_address_on_true = 0x8238CCB4
+
+# Water waves (#5): CPolyGridFX::Update's call of UpdateWaveProp (sub_82407820) for the frame.
+[[entrypoint.midasm_hook]]
+name = "FearWaveFrameCall"
+address = 0x824094AC
+registers = []
+
+# Slow-mo meter (#13): CPlayerMgr::EnterSlowMo (sub_8237CBB8) and ::UpdateSlowMo (sub_82382148) at
+# their entries.
+[[entrypoint.midasm_hook]]
+name = "FearSlowMoEnter"
+address = 0x8237CBB8
+registers = ["r3", "r7", "f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearSlowMoUpdate"
+address = 0x82382148
+registers = ["r3"]
+
+# Bodies and debris stay (src/look_tuning.h, fear_bodies_stay, #22): CClientFXMgr::CreateFXKey
+# (sub_8234C538) at its entry, the create struct (the effect's name first) in r4 and the key in r6;
+# and CShellCasingFX::Update (sub_824060E8), its fsubs that counts the casing's time down, skipped.
+[[entrypoint.midasm_hook]]
+name = "FearCreateFxKey"
+address = 0x8234C538
+registers = ["r4", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearShellCasingStays"
+address = 0x8240616C
+registers = []
+jump_address_on_true = 0x82406170
+
+# Interval select lists every interval (src/look_tuning.h, fear_all_intervals): CXProfile's count of
+# intervals reached (sub_823F87E8), just after its check of the unlock gamertag (sub_82395ED8).
+[[entrypoint.midasm_hook]]
+name = "FearAllIntervals"
+address = 0x823F880C
+registers = ["r3"]
+
 # Normal difficulty as on PC (src/difficulty.h, #3): CServerDB::GetDifficultyFactor (sub_825DB5B0)
 # and ::GetDamageAdjustment (sub_825DB620), right after the database lookup, the value in f1.
 [[entrypoint.midasm_hook]]

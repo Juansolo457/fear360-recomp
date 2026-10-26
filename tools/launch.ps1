@@ -5,10 +5,9 @@
 #   pwsh -NoProfile -File tools/launch.ps1                # 3x = 3840x2160 internal, fullscreen, auto fps
 #   ... -Nx -FrameRate 30 -Timer                                               # the console's pacing
 #   pwsh -NoProfile -File tools/launch.ps1 -Scale 2 -Windowed -FrameRate 60
-#   pwsh -NoProfile -File tools/launch.ps1 -Nx -Extra '--nx_renderer native'   # port-nx build
-#   ... -Nx -TexturePack private/texture_pack -Extra '--nx_renderer native'    # with PC textures
-#   ... -Files -Extra '--nx_renderer native'      # F.E.A.R. Files (port-files, port-nx's host code)
-#   ... -Collection -Extra '--nx_renderer native' # the collection menu: F.E.A.R. and F.E.A.R. Files
+#   pwsh -NoProfile -File tools/launch.ps1 -Nx          # port-nx: F.E.A.R. (the D3D12 renderer)
+#   ... -Files                    # F.E.A.R. Files (port-files, port-nx's host code)
+#   ... -Collection               # the collection menu: F.E.A.R. and F.E.A.R. Files
 #
 # -Collection writes private/collection.toml with both games (each its own data, user and cache
 # folders, log, and texture pack when one is built: private/texture_pack, private/files/
@@ -17,10 +16,14 @@
 #
 # port-nx and port-files keep their settings in <user data>/settings.toml, written by PC Settings
 # in the game's main menu (port-nx/src/fear_settings.h). For them this script passes a setting
-# (-Scale, -Windowed, -FrameRate, -TexturePack, -LookRamp, -NoSoftLock) only when it is given:
+# (-Windowed, -FrameRate, -LookRamp, -NoSoftLock) only when it is given:
 # a flag wins over the saved value for that run.
 #
 #   ... -Collection -Invulnerable   # the smoke test (#55): both games, the player can't die
+#
+# port-nx and port-files draw with the D3D12 renderer only (docs/NATIVE_RENDERER.md), which has no
+# resolution scale or texture pack yet: -Scale applies to port only, and -TexturePack is refused
+# (no build reads a pack now; tools/texture_pack.py still builds one).
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -65,8 +68,7 @@ param(
     # tools/analysis/abcompare.py.
     [string]$Exe = '',
     # Each game's cache folder (shaders and the driver's pipelines), in its port folder. A name
-    # not used before starts empty, as on a new PC: e.g. -Cache cache-new1 to watch the shader
-    # warm-up (#53, port-nx/src/shader_warmup.h).
+    # not used before starts empty, as on a new PC: e.g. -Cache cache-new1.
     [ValidatePattern('^[\w.-]+$')][string]$Cache = 'cache',
     # Each game's user folder (saves, profile, settings.toml), in its port folder, the same way: a
     # new name is a new player (first-run settings, no saves), e.g. -User user-run1 -Cache
@@ -102,17 +104,16 @@ if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
 }
 if ($isNx) {
-    # fear-nx's renderer has its own scale cvar (its images are Scale x the game's 1280x720).
-    if ($given.ContainsKey('Scale')) { $arguments += @('--nx_native_resolution_scale', "$Scale") }
+    # The D3D12 renderer's anisotropic filtering: samples, where the SDK's enum has 5 = 16x.
+    if ($given.ContainsKey('Anisotropic')) {
+        $arguments += @('--fear_d3d12_anisotropy', "$(if ($Anisotropic -gt 0) { [math]::Pow(2, $Anisotropic - 1) } else { 1 })")
+    }
     if ($given.ContainsKey('LookRamp')) { $arguments += @('--fear_look_ramp', $LookRamp) }
     if ($NoSoftLock) { $arguments += '--no-fear_aim_softlock' }
     if ($Invulnerable) { $arguments += '--fear_invulnerable' }
 }
 if ($Pack) {
-    if (!$isNx) { throw '-TexturePack needs -Nx (the texture pack hooks are in the port-nx renderer).' }
-    $resolved = Resolve-Path $Pack
-    if (!(Test-Path (Join-Path $resolved 'index.tsv'))) { throw "No index.tsv in $resolved." }
-    $arguments += @('--fear_texture_pack', ($resolved.Path -replace '\\', '/'))
+    throw "-TexturePack: no build reads a texture pack yet; the D3D12 renderer gets one later (docs/NATIVE_RENDERER.md)."
 }
 if ($isNx -and !$Timer) {
     # The game reports the rate it picked in its log ("vblank from the display").
@@ -149,17 +150,15 @@ foreach ($name in 'fear', 'fearfiles') {
 }
 
 if ($Collection) {
-    # Each game's texture pack, when it has been built (docs/TEXTURES.md).
+    # No texture packs: the D3D12 renderer has none yet (docs/NATIVE_RENDERER.md, punch list).
     $root = Join-Path $PSScriptRoot '..' | Resolve-Path
-    $packs = @{ nx = (Join-Path $root 'private\texture_pack'); files = (Join-Path $root 'private\files\texture_pack') }
     $titles = @(
         @{ Id = 'fear'; Title = 'nx'; Name = 'F.E.A.R.'; Subtitle = 'First Encounter Assault Recon' },
         @{ Id = 'files'; Title = 'files'; Name = 'F.E.A.R. Files'; Subtitle = 'Extraction Point and Perseus Mandate' })
     $toml = @('# The F.E.A.R. collection menu (port-nx/src/fear_collection.h), written by tools/launch.ps1 -Collection.')
     $runs = @{}
     foreach ($t in $titles) {
-        $pack = if (Test-Path (Join-Path $packs[$t.Title] 'index.tsv')) { $packs[$t.Title] } else { '' }
-        $run = Get-Run $t.Title $pack
+        $run = Get-Run $t.Title ''
         $runs[$t.Id] = $run
         $toml += '', '[[title]]', "id = '$($t.Id)'", "name = '$($t.Name)'", "subtitle = '$($t.Subtitle)'",
             "exe = '$($run.Executable)'", "working_dir = '$($run.Port)'",
