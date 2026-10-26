@@ -53,6 +53,7 @@ set(FEAR_SOURCES
     ${HOST}/fx_debug.cpp
     ${HOST}/look_tuning.cpp
     ${HOST}/difficulty.cpp
+    ${HOST}/pipeline_warmup.cpp
     ${HOST}/native/native_system.cpp
 )
 

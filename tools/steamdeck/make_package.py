@@ -65,8 +65,9 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  "# Deck baseline (#28): SDL's HIDAPI drivers off (the controls come through Steam\n"
                  "# Input's pad, the usual Proton path; #29) and the profiler on for the logs\n"
                  '# (about 6% of a core). Saving PC Settings in the game rewrites this file\n'
-                 '# without them. (The D3D12 renderer draws at 1280x720 with the game\'s MSAA: it\n'
-                 '# has no render scale or MSAA switch yet, docs/NATIVE_RENDERER.md.)\n'
+                 '# without them. No MSAA (the game\'s 2x/4x costs the Deck\'s GPU; PC Settings >\n'
+                 '# Anti-aliasing).\n'
+                 'fear_d3d12_msaa = false\n'
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
                  'fear_profile_hz = 200\n')

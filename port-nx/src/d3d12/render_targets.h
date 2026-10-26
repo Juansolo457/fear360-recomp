@@ -65,6 +65,11 @@ inline uint32_t SurfaceSamples(uint32_t surface_info) {
   return msaa >= 2 ? 4 : msaa == 1 ? 2 : 1;
 }
 
+// The host targets' samples: the guest's (SurfaceSamples), or 1 with --no-fear_d3d12_msaa
+// (render_targets.cpp), which draws the game without its 2x/4x MSAA. The guest's count still
+// sizes the EDRAM layout (RenderTarget::guest_samples).
+uint32_t HostSamples(uint32_t surface_info);
+
 // The guest D3D device fields this module reads (fear_d3d.h). The register shadow blocks are
 // the ones the draws' inline flush sends; the surfaces are what SetRenderTarget /
 // SetDepthStencilSurface bind and Resolve (sub_82984718) reads.
@@ -104,7 +109,8 @@ struct RenderTarget {
   bool depth = false;
   uint32_t edram_base = 0;  // tiles
   uint32_t pitch = 0;       // pixels (RB_SURFACE_INFO surface_pitch)
-  uint32_t samples = 1;     // 1, 2 or 4
+  uint32_t samples = 1;     // 1, 2 or 4: the host resource's (HostSamples)
+  uint32_t guest_samples = 1;  // the guest's, for the EDRAM layout
   uint32_t width = 0, height = 0;
   uint32_t guest_format = 0;  // last xenos::ColorRenderTargetFormat / DepthRenderTargetFormat
   DXGI_FORMAT resource_format = DXGI_FORMAT_UNKNOWN;

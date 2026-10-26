@@ -83,6 +83,9 @@ struct NativeRenderer::Csv {
   // Window for the log summary.
   uint64_t frames = 0, draws = 0, draw_ns = 0, swap_ns = 0, frame_ns = 0, hook_ns = 0,
            hook_wait_ns = 0;
+  // The draws the renderer dropped, and why (DrawRenderer::Stats), over the window.
+  uint64_t skipped = 0, failed = 0, unsupported = 0, pso_pending = 0, textures_missing = 0,
+           watch_faults = 0;
   // Profile: the window's stage ticks.
   uint64_t stage_ticks[profile::kStageCount] = {}, track_calls = 0;
   TextureCache::Stats tex_prev;                  // texture counters at the previous CSV row
@@ -897,6 +900,15 @@ void NativeRenderer::AddToStatsLog(const FrameStats& s, uint64_t frame_ns) {
   w.frame_ns += frame_ns;
   w.hook_ns += s.hook_ns;
   w.hook_wait_ns += s.hook_wait_ns;
+  {
+    const DrawRenderer::Stats& ds = draw_->stats();
+    w.skipped += ds.skipped;
+    w.failed += ds.failed;
+    w.unsupported += ds.unsupported;
+    w.pso_pending += ds.pso_pending;
+    w.textures_missing += ds.textures_missing;
+    w.watch_faults += ds.watch_faults;
+  }
   if (profile::On()) {
     for (uint32_t i = 0; i < profile::kStageCount; ++i) w.stage_ticks[i] += profile::g.ticks[i];
     w.track_calls += profile::g.track_calls;
@@ -911,6 +923,12 @@ void NativeRenderer::AddToStatsLog(const FrameStats& s, uint64_t frame_ns) {
       frame_index_, w.draws / n, w.draw_ns / 1000.0 / n,
       w.draws ? w.draw_ns / 1000.0 / double(w.draws) : 0.0, w.swap_ns / 1000.0 / n,
       w.frame_ns / 1e6 / n, w.hook_ns / 1000.0 / n, w.hook_wait_ns / 1000.0 / n);
+  REXLOG_INFO(
+      "D3D12 draws dropped, per frame: {:.1f} skipped (nothing to draw or write), {:.1f} failed, "
+      "{:.1f} unsupported, {:.1f} waiting for a pipeline; {:.1f} textures missing, {:.1f} page "
+      "watch faults",
+      w.skipped / n, w.failed / n, w.unsupported / n, w.pso_pending / n, w.textures_missing / n,
+      w.watch_faults / n);
   if (profile::On() && w.draws) {
     // ns per draw for each stage (the hook-side ones are per draw too, for comparison).
     std::string line;
@@ -932,6 +950,7 @@ void NativeRenderer::AddToStatsLog(const FrameStats& s, uint64_t frame_ns) {
                   draw_->ShaderDisassembly(hash));
   }
   w.frames = w.draws = w.draw_ns = w.swap_ns = w.frame_ns = w.hook_ns = w.hook_wait_ns = 0;
+  w.skipped = w.failed = w.unsupported = w.pso_pending = w.textures_missing = w.watch_faults = 0;
 }
 
 void NativeRenderer::ResetFrameCounters() {

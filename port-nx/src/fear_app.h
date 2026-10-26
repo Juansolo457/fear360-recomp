@@ -29,6 +29,7 @@
 #include "fear_settings.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
+#include "pipeline_warmup.h"
 #include "profiler.h"
 
 // The runtime signs in only player 1 (a local profile; Xbox Live is gone), and gives controllers
@@ -104,6 +105,13 @@ class FearApp : public rex::ReXApp {
   void OnPostSetup() override {
     if (runtime()) fear::look_tuning::Apply(*runtime());
     fear::profiler::Start();
+
+    // The pipeline warm-up (pipeline_warmup.h): the D3D12 renderer runs it before the game's
+    // first draw; the panel shows on the UI thread.
+    fear::pipeline_warmup::SetBeginCallback([this] {
+      app_context().CallInUIThreadDeferred(
+          [this] { fear::pipeline_warmup::OpenPanel(imgui_drawer()); });
+    });
 
     // The game gets no input while a panel (or an SDK overlay under the mouse) has it.
     if (auto* input = runtime() ? static_cast<rex::input::InputSystem*>(runtime()->input_system())

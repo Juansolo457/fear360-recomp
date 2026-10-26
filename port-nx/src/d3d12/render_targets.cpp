@@ -6,12 +6,19 @@
 #include "hook_args.h"
 #include "log.h"
 
+#include <rex/cvar.h>
 #include <rex/graphics/xenos.h>
 #include <rex/logging.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+
+REXCVAR_DEFINE_BOOL(fear_d3d12_msaa, true, "F.E.A.R. D3D12",
+                    "Draw with the multisampling the game asks for (its 2x or 4x MSAA); off: "
+                    "one sample per pixel, which costs the GPU much less (the Steam Deck's "
+                    "baseline)")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace fear::d3d12 {
 namespace {
@@ -77,8 +84,8 @@ struct EdramGrid {
 EdramGrid GridOf(const RenderTarget& rt) {
   EdramGrid g;
   g.base = rt.edram_base;
-  g.dx = (rt.samples >= 4 ? 2 : 1) * (!rt.depth && Is64bpp(rt.guest_format) ? 2 : 1);
-  g.dy = rt.samples >= 2 ? 2 : 1;
+  g.dx = (rt.guest_samples >= 4 ? 2 : 1) * (!rt.depth && Is64bpp(rt.guest_format) ? 2 : 1);
+  g.dy = rt.guest_samples >= 2 ? 2 : 1;
   g.pitch = std::max(1u, (rt.pitch * g.dx + 79) / 80);
   return g;
 }
@@ -156,6 +163,12 @@ void Record(ID3D12GraphicsCommandList* list, RenderTarget* rt, const ClearValue&
 }
 
 }  // namespace
+
+// --no-fear_d3d12_msaa (render_targets.h).
+uint32_t HostSamples(uint32_t surface_info) {
+  static const bool msaa = REXCVAR_GET(fear_d3d12_msaa);
+  return msaa ? SurfaceSamples(surface_info) : 1;
+}
 
 SurfaceRegs SurfaceRegsFromRegisters(const uint32_t* regs) {
   SurfaceRegs s;
@@ -292,7 +305,9 @@ bool RenderTargets::Create(RenderTarget* rt, uint32_t width, uint32_t height) {
 RenderTarget* RenderTargets::Get(bool depth, uint32_t surface_info, uint32_t info,
                                  uint32_t height, uint32_t width) {
   const uint32_t pitch = surface_info & 0x3FFF;
+  // The key and the EDRAM layout take the guest's samples, the resource the host's.
   const uint32_t samples = SurfaceSamples(surface_info);
+  const uint32_t host_samples = HostSamples(surface_info);
   const uint32_t base = info & 0xFFF;
   DXGI_FORMAT resource, view, srv, stencil_srv = DXGI_FORMAT_UNKNOWN;
   uint32_t guest_format;
@@ -345,7 +360,8 @@ RenderTarget* RenderTargets::Get(bool depth, uint32_t surface_info, uint32_t inf
     rt->depth = depth;
     rt->edram_base = base;
     rt->pitch = pitch;
-    rt->samples = samples;
+    rt->samples = host_samples;
+    rt->guest_samples = samples;
     rt->resource_format = resource;
     rt->view_format = view;
     rt->srv_format = srv;
@@ -396,7 +412,7 @@ bool RenderTargets::Bind(ID3D12GraphicsCommandList* list, const SurfaceRegs& reg
                          uint32_t color_mask, bool depth_used, uint32_t height, BoundTargets* out,
                          uint32_t width) {
   *out = BoundTargets{};
-  const uint32_t samples = SurfaceSamples(regs.surface_info);
+  const uint32_t samples = HostSamples(regs.surface_info);
   out->samples = samples;
   out->width = UINT32_MAX;
   out->height = UINT32_MAX;

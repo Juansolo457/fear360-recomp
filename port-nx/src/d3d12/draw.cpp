@@ -22,6 +22,7 @@
 #include "shader_translate.h"
 #include "textures.h"
 #include "upload_pool.h"
+#include "../pipeline_warmup.h"
 
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/graphics/register_file.h>
@@ -61,6 +62,12 @@
 REXCVAR_DEFINE_BOOL(fear_d3d12_async_pipelines, true, "F.E.A.R. D3D12",
                     "Compile new pipeline states on worker threads, the frame's draws that need "
                     "them skipped, instead of compiling each at its draw");
+REXCVAR_DEFINE_BOOL(fear_d3d12_warmup, true, "F.E.A.R. D3D12",
+                    "Before the game's first draw, build every pipeline earlier runs stored, on "
+                    "all the pipeline threads, while a panel shows the progress "
+                    "(src/pipeline_warmup.h); off: a slice of them per frame in the background, "
+                    "which the first scenes can still wait for")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(fear_d3d12_pipeline_threads, 0, "F.E.A.R. D3D12",
                      "Pipeline compile threads with --fear_d3d12_async_pipelines (0: a quarter "
                      "of the hardware threads, 1 to 4)");
@@ -1178,8 +1185,12 @@ struct DrawRenderer::Impl {
   // `saves`: this worker saves the library when the workers have been idle for a while.
   // `on_wait`: this worker compiles only while WaitForPipelines waits.
   void PipelineWorker(bool saves, bool on_wait);
+  // Translates and queues the stored pipelines (prewarm), for at most `budget` per call.
   // Per frame: translates and queues stored pipelines from earlier runs for up to ~2 ms.
-  void Prewarm();
+  void Prewarm(std::chrono::milliseconds budget = std::chrono::milliseconds(2));
+  // fear_d3d12_warmup, once before the first draw: every stored pipeline translated and built by
+  // all the pipeline threads (the wait workers too, as while a frame waits) before it returns.
+  void WarmUp();
 
   // A watched page may be unwatched once its valid bit is clear: the next request copies it
   // again and re-arms the watch. Unless the range must be exact, the pages around it that hold
@@ -1556,8 +1567,57 @@ bool DrawRenderer::Impl::Initialize() {
       SetThreadDescription(pso_threads.back().native_handle(), name);
     }
   }
-  Prewarm();  // the first slice before the first frame, which needs some of them
+  if (REXCVAR_GET(fear_d3d12_warmup) && !pso_threads.empty())
+    WarmUp();
+  else
+    Prewarm();  // the first slice before the first frame, which needs some of them
   return true;
+}
+
+void DrawRenderer::Impl::WarmUp() {
+  const size_t total = store.loaded_pipelines().size();
+  if (!total) return;
+  const auto t0 = std::chrono::steady_clock::now();
+  fear::pipeline_warmup::Begin(uint32_t(total));
+  while (prewarm_next < total) Prewarm(std::chrono::hours(1));
+  const auto t1 = std::chrono::steady_clock::now();
+  size_t built = 0, failed = 0, queued = 0;
+  {
+    std::unique_lock<std::mutex> lock(pso_mutex);
+    // Every queued one to the queue the wait workers take from too, and wake them all.
+    std::vector<Pipeline*> targets;
+    targets.reserve(prewarm_jobs.size());
+    for (PipelineJob& job : prewarm_jobs) {
+      job.target->prewarm = false;
+      targets.push_back(job.target);
+      pso_jobs.push_back(job);
+    }
+    prewarm_jobs.clear();
+    queued = targets.size();
+    pso_waiting = true;
+    pso_cv.notify_all();
+    pso_wait_cv.notify_all();
+    for (;;) {
+      built = failed = 0;
+      for (Pipeline* t : targets) {
+        const uint8_t state = t->state.load(std::memory_order_acquire);
+        built += state == kReady;
+        failed += state == kFailed;
+      }
+      // The ones translated but not queued (failed translations) count as done for the panel.
+      fear::pipeline_warmup::Advance(uint32_t(total - queued + built + failed));
+      if (built + failed == queued) break;
+      pso_ready_cv.wait_for(lock, std::chrono::milliseconds(50));
+    }
+    pso_waiting = false;
+  }
+  fear::pipeline_warmup::End();
+  const auto ms = [](auto d) { return std::chrono::duration<double, std::milli>(d).count(); };
+  REXLOG_INFO(
+      "D3D12 pipelines: warm-up built {} of {} stored pipelines ({} failed, {} not translated) in "
+      "{:.0f} ms ({:.0f} ms translating), on {} threads",
+      built, total, failed, total - queued, ms(std::chrono::steady_clock::now() - t0),
+      ms(t1 - t0), pso_threads.size());
 }
 
 void DrawRenderer::Impl::PipelineWorker(bool saves, bool on_wait) {
@@ -2447,7 +2507,7 @@ DrawRenderer::Impl::Pipeline* DrawRenderer::Impl::CreatePipeline(uint64_t hash,
   return p;
 }
 
-void DrawRenderer::Impl::Prewarm() {
+void DrawRenderer::Impl::Prewarm(std::chrono::milliseconds budget) {
   const std::vector<PipelineStore::Pipeline>& list = store.loaded_pipelines();
   if (prewarm_next >= list.size()) return;
   const auto t0 = std::chrono::steady_clock::now();
@@ -2483,8 +2543,7 @@ void DrawRenderer::Impl::Prewarm() {
     key.ps = pst;
     const uint64_t hash = XXH3_64bits(&key, sizeof(key));
     if (!pipelines.count(hash)) CreatePipeline(hash, key, *vst, pst, true);
-  } while (prewarm_next < list.size() &&
-           std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(2));
+  } while (prewarm_next < list.size() && std::chrono::steady_clock::now() - t0 < budget);
   prewarm_ms +=
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   ++prewarm_frames;
@@ -3266,8 +3325,10 @@ void DrawRenderer::Impl::FillSystemConstants(const DrawState& s, const RegisterF
       if ((f[4] >> 12) & 0x3FF) ++diag.fetch_classes[6];
     }
   }
-  sys.sample_count_log2[0] = surface_info.msaa_samples >= xenos::MsaaSamples::k4X ? 1 : 0;
-  sys.sample_count_log2[1] = surface_info.msaa_samples >= xenos::MsaaSamples::k2X ? 1 : 0;
+  // The host targets' samples (HostSamples: 1 with --no-fear_d3d12_msaa), as fear-nx did.
+  const uint32_t host_samples = HostSamples(surface_info.value);
+  sys.sample_count_log2[0] = host_samples >= 4 ? 1 : 0;
+  sys.sample_count_log2[1] = host_samples >= 2 ? 1 : 0;
   sys.alpha_test_reference = regs.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
   sys.alpha_to_mask = colorcontrol.alpha_to_mask_enable ? (colorcontrol.value >> 24) | (1 << 8) : 0;
   for (uint32_t i = 0; i < 4; ++i) {

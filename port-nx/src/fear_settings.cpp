@@ -92,6 +92,12 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "Each frame is shown for a whole number of your display's refreshes, the "
                       "fewest that keep it at or under the limit."});
+  settings.push_back({"Anti-aliasing",
+                      "fear_d3d12_msaa",
+                      {{"true", "The game's MSAA (as shipped)"}, {"false", "Off"}},
+                      false,
+                      "The game's own 2x or 4x multisampling. Off costs the GPU much less: the "
+                      "Steam Deck runs faster without it."});
   settings.push_back({"Texture filtering",
                       "fear_d3d12_anisotropy",
                       {{"1", "Off"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}},

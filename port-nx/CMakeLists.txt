@@ -63,6 +63,7 @@ set(FEAR_SOURCES
     src/fx_debug.cpp
     src/look_tuning.cpp
     src/difficulty.cpp
+    src/pipeline_warmup.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 
