@@ -16,13 +16,14 @@
 #
 # port-nx and port-files keep their settings in <user data>/settings.toml, written by PC Settings
 # in the game's main menu (port-nx/src/fear_settings.h). For them this script passes a setting
-# (-Scale, -Windowed, -FrameRate, -TexturePack, -LookRamp, -NoSoftLock) only when it is given:
+# (-Windowed, -FrameRate, -LookRamp, -NoSoftLock) only when it is given:
 # a flag wins over the saved value for that run.
 #
 #   ... -Collection -Invulnerable   # the smoke test (#55): both games, the player can't die
 #
 # port-nx and port-files draw with the D3D12 renderer only (docs/NATIVE_RENDERER.md), which has no
-# resolution scale or texture pack yet: -Scale and -TexturePack apply to port only.
+# resolution scale or texture pack yet: -Scale applies to port only, and -TexturePack is refused
+# (no build reads a pack now; tools/texture_pack.py still builds one).
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -112,10 +113,7 @@ if ($isNx) {
     if ($Invulnerable) { $arguments += '--fear_invulnerable' }
 }
 if ($Pack) {
-    if ($isNx) { throw "-TexturePack: the D3D12 renderer has no texture pack yet (docs/NATIVE_RENDERER.md)." }
-    $resolved = Resolve-Path $Pack
-    if (!(Test-Path (Join-Path $resolved 'index.tsv'))) { throw "No index.tsv in $resolved." }
-    $arguments += @('--fear_texture_pack', ($resolved.Path -replace '\\', '/'))
+    throw "-TexturePack: no build reads a texture pack yet; the D3D12 renderer gets one later (docs/NATIVE_RENDERER.md)."
 }
 if ($isNx -and !$Timer) {
     # The game reports the rate it picked in its log ("vblank from the display").

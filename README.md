@@ -6,7 +6,7 @@ The Xbox 360 F.E.A.R. and *F.E.A.R. Files*, running natively on PC. A native Dir
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v0.1.5](https://github.com/Juansolo457/fear360-recomp/releases/tag/v0.1.5)**, source only and early: both games boot and play on the new Direct3D 12 renderer, with EchoPatch's high-frame-rate fixes. **Next: 1.0**, once every level of both games has been played to the end without a crash ([Road to 1.0](#road-to-10)).
+**Latest release: [v0.1.5](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only and early: both games boot and play on the new Direct3D 12 renderer, with EchoPatch's high-frame-rate fixes. **Next: 1.0**, once every level of both games has been played to the end without a crash ([Road to 1.0](#road-to-10)).
 
 ## Why
 
@@ -65,7 +65,7 @@ Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent ha
 
 ## Build and run (Windows)
 
-Releases are source only: you build the game from your own discs ([v0.1.5](https://github.com/Juansolo457/fear360-recomp/releases/tag/v0.1.5) is the latest). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
+Releases are source only: you build the game from your own discs ([the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest)). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
 
 ```powershell
 pwsh -NoProfile -File tools/setup-sdk.ps1                      # the patched ReXGlue SDK

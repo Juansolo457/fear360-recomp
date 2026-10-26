@@ -1,8 +1,9 @@
-# fear (port-nx): F.E.A.R. on fear-nx's patched ReXGlue SDK with its Vulkan Xenos renderer.
+# fear (port-nx): F.E.A.R. on fear-nx's patched ReXGlue SDK with the Direct3D 12 renderer.
 #
 # Differences from port/: the SDK is built from source (REXSDK_DIR, see
 # tools/build-nx.ps1), the Xenos GPU plugin is linked into the executable whole
-# instead of loaded as a DLL, and src/native/ (fear-nx, GPL-3.0) is compiled in.
+# instead of loaded as a DLL, src/native/ (fear-nx's GPU ring, GPL-3.0) and src/d3d12/ (the
+# Direct3D 12 renderer, MIT) are compiled in, and it builds for Windows only.
 # SDK boilerplate lives in generated/rexglue.cmake.
 
 cmake_minimum_required(VERSION 3.25)
@@ -16,6 +17,10 @@ if(NOT REXSDK_DIR)
 endif()
 if(NOT REXGLUE_GPU_XENOS_STATIC)
     message(FATAL_ERROR "port-nx links the Xenos plugin into fear.exe: pass -DREXGLUE_GPU_XENOS_STATIC=ON.")
+endif()
+if(NOT WIN32)
+    message(FATAL_ERROR "port-nx builds for Windows only: the game draws with the Direct3D 12 renderer "
+        "(src/d3d12/). Linux runs the Windows build through Proton (#74).")
 endif()
 
 # No floating-point contraction: built for x86-64-v3 (tools/build-nx.ps1), clang's default

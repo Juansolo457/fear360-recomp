@@ -199,8 +199,8 @@ Before it can be the default, in both games:
    - The parity list above done in the D3D12 renderer, since nothing falls back to fear-nx.
    - The Steam Deck: Direct3D 12 through vkd3d-proton is then the Deck's only path, so it is
      tested and measured there next.
-   - `tools/steamdeck/make_package.py` still writes fear-nx's options (harmless: unknown options
-     are ignored) and the Deck's MSAA-off choice has no D3D12 equivalent yet.
+   - `tools/steamdeck/make_package.py` keeps the Deck's baseline of no MSAA, now as
+     `fear_d3d12_msaa = false` (PC Settings > Anti-aliasing).
    - Then the smoke test (#55-#57) and 1.0.
 
 Licensing: GRAW 360 Recompiled and pgr4-native are MIT, the Xenia- and ReXGlue-derived parts

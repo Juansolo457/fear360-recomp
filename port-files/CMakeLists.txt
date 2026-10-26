@@ -1,5 +1,5 @@
 # fearfiles (port-files): F.E.A.R. Files (Extraction Point + Perseus Mandate) on the same host
-# code as port-nx: fear-nx's patched SDK and Vulkan Xenos renderer, our fixes and options. Only
+# code as port-nx: fear-nx's patched SDK, the Direct3D 12 renderer, our fixes and options. Only
 # the translation (generated/default, from fear_manifest.toml) is this title's own. The project
 # keeps the name "fear" so generated/rexglue.cmake applies unchanged; the binary is fearfiles.exe.
 
@@ -14,6 +14,10 @@ if(NOT REXSDK_DIR)
 endif()
 if(NOT REXGLUE_GPU_XENOS_STATIC)
     message(FATAL_ERROR "port-files links the Xenos plugin in: pass -DREXGLUE_GPU_XENOS_STATIC=ON.")
+endif()
+if(NOT WIN32)
+    message(FATAL_ERROR "port-files builds for Windows only: the game draws with the Direct3D 12 renderer "
+        "(src/d3d12/). Linux runs the Windows build through Proton (#74).")
 endif()
 
 # No floating-point contraction: built for x86-64-v3 (tools/build-nx.ps1), clang's default
