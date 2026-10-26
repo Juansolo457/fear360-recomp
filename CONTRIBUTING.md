@@ -30,9 +30,3 @@ pushes, and the branch can't be deleted.
 3. **Releases are source only:** never attach builds, game files or the private test packages
    `tools/steamdeck/make_package.py` makes. Players build from their own discs
    ([docs/SETUP.md](docs/SETUP.md)).
-
-## When the rules are in the way
-
-The protection settings are under Settings → Branches → `master` on GitHub. If an emergency ever
-needs a direct push, switch the rule off for that push and back on straight after, and say so in
-the commit.
