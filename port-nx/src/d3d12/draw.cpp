@@ -2611,6 +2611,12 @@ DxbcShader* DrawRenderer::Impl::LoadShader(ShaderMemo* table, ShaderMemo*& last,
   if (last && last->shader && last->ucode == ref.ucode && last->dwords == ref.dwords &&
       last->immediate_seq == ref.immediate_seq && last->binding == ref.binding)
     return last->shader;
+  // A ucode past the 512 MB of physical memory (an address the tracker didn't mask) isn't read.
+  if (!ref.immediate && uint64_t(ref.ucode) + uint64_t(ref.dwords) * 4 > 0x20000000u) {
+    D3D12_WARN_ONCE("D3D12 draw: shader ucode {:08X} ({} dwords) outside physical memory",
+                    ref.ucode, ref.dwords);
+    return nullptr;
+  }
   // Declaration-patched vertex shaders (IM_LOAD_IMMEDIATE) come from the tracker's copy.
   const uint32_t* ucode =
       ref.immediate ? ref.immediate : reinterpret_cast<const uint32_t*>(membase + ref.ucode);

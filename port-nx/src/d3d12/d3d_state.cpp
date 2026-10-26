@@ -273,7 +273,10 @@ void GuestStateTracker::HandlePacket(const uint8_t* base) {
       break;
     }
     case 0x27:  // IM_LOAD: type (0 vertex, 1 pixel) in the address's low bits
-      if (pkt_.size() >= 2) LoadShader(pkt_[0] & 3, pkt_[0] & ~3u, pkt_[1] & 0xFFFF);
+      // The GPU takes the address's low 29 bits, as Xenia's command processor does: F.E.A.R.
+      // once wrote 0xFFCA4718 here (2026-10-25, Interval 04), and the renderer read the ucode at
+      // the physical base plus all 32 bits, past the 512 MB it maps.
+      if (pkt_.size() >= 2) LoadShader(pkt_[0] & 3, pkt_[0] & 0x1FFFFFFCu, pkt_[1] & 0xFFFF);
       break;
     case 0x2B: {  // IM_LOAD_IMMEDIATE: type, size, then the ucode
       if (pkt_.size() < 2) break;
