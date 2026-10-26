@@ -15,6 +15,7 @@
 
 #include "fear_process.h"
 #include "fear_title.h"
+#include "fear_version.h"
 
 REXCVAR_DEFINE_STRING(fear_collection, "", "F.E.A.R.",
                       "Collection file (tools/launch.ps1 -Collection writes it): show the menu of "
@@ -104,6 +105,8 @@ class CollectionMenu final : public Panel {
       PushFont(1.3f);
       ImGui::TextUnformatted("F.E.A.R. COLLECTION");
       PopFont();
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", fear::version::Text());
       ImGui::Separator();
       for (int i = 0; i < int(titles_.size()); ++i) {
         const Title& title = titles_[i];

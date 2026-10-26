@@ -55,6 +55,7 @@ set(FEAR_SOURCES
     src/main.cpp
     src/anim_timing.cpp
     src/bloom.cpp
+    src/fear_version.cpp
     src/high_fps.cpp
     src/weapon_fixes.cpp
     src/profiler.cpp
@@ -78,6 +79,17 @@ set(FEAR_SOURCES
 set_source_files_properties(src/cpu_check.cpp PROPERTIES COMPILE_OPTIONS "-march=x86-64-v2"
                             SKIP_PRECOMPILE_HEADERS ON)
 add_executable(fear WIN32 ${FEAR_SOURCES})
+# The build's version (src/fear_version.h): cmake/fear_version.cmake turns the repository's VERSION file
+# and `git describe` into fear_version_info.h before every build, rewriting it only when it changes.
+set(FEAR_VERSION_DIR "${CMAKE_CURRENT_BINARY_DIR}/fear_version")
+add_custom_target(fear_version
+    COMMAND "${CMAKE_COMMAND}" "-DROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
+            "-DOUT=${FEAR_VERSION_DIR}/fear_version_info.h" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fear_version.cmake"
+    BYPRODUCTS "${FEAR_VERSION_DIR}/fear_version_info.h"
+    COMMENT "F.E.A.R. version"
+    VERBATIM)
+add_dependencies(fear fear_version)
+target_include_directories(fear PRIVATE "${FEAR_VERSION_DIR}")
 
 rexglue_setup_target(fear)
 
