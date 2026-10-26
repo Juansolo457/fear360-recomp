@@ -66,7 +66,7 @@ Quick items first. Size means how much work: S is a few hours, M a day or two, L
 Then quick testing, and the full smoke test of both games.
 
 **Batch 3 (2026-10-25, on the D3D12 build, `native-renderer`):** items 7 (the console-variable
-half), 8, 12 to 17 and #16 of item 20, written for both games and not yet built or run. What to
+half), 8, 12 to 17 and #16 of item 20, for both games: built 2026-10-25 (18:32 and 18:34), not run yet. What to
 try in play, at 120 fps: a jump kick (jump, then melee in the air); walking down a slope and
 stopping; jumping and landing while running; jumping out of water onto a ledge; water surfaces
 with things falling in (waves calm, splashes not repeated); slow-mo until the meter empties (the
