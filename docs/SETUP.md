@@ -12,7 +12,7 @@ The first build takes 20–40 minutes. After that, rebuilds take a minute or two
 **Hardware**
 - A 64-bit CPU with AVX2 and FMA: Intel Haswell (2013) or AMD Excavator (2015) and newer. The
   game stops with a message on older CPUs.
-- A GPU with a current Vulkan driver (NVIDIA, AMD or Intel).
+- A Direct3D 12 GPU with a current driver (NVIDIA, AMD or Intel).
 - About 15 GB free disk space for both games (toolchain, SDK, two builds, two extracted discs).
 
 **Software**
@@ -47,8 +47,7 @@ pwsh -NoProfile -File tools/setup-sdk.ps1
 ```
 
 `setup-sdk.ps1` clones the [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) at v0.10.0,
-applies this project's patches (`patches/rexglue-sdk-nx/`: fear-nx's Vulkan renderer support,
-then ours), checks the result against the exact source the release was built from, and fetches
+applies this project's patches (`patches/rexglue-sdk-nx/`: fear-nx's GPU support, then ours), checks the result against the exact source the release was built from, and fetches
 the SDK's own dependencies. It puts everything in `third_party/rexglue-sdk-nx`.
 
 ## 3. Dump your discs
@@ -97,15 +96,17 @@ once so it has focus. On Windows the games read controllers through XInput, so o
 (PlayStation, Switch) need Steam Input or another XInput wrapper, or the SDL setting under
 *When something goes wrong*.
 
-In each game's main menu, **PC Settings** sets the resolution scale, frame rate limit, texture
-filtering, field of view, aim assist, right-stick feel and more. Saves and settings stay in each
+In each game's main menu, **PC Settings** sets the frame rate limit, anti-aliasing, texture
+filtering and sharpness, field of view, aim assist, right-stick feel, EchoPatch's options and
+more. Saves and settings stay in each
 game's `user` folder.
 
-Useful launcher options: `-Scale 1..3` (internal resolution; 3 = 3840×2160), `-FrameRate <n>`
-(a frame rate limit), `-Windowed`. All of them are described at the top of `tools/launch.ps1`.
+Useful launcher options: `-FrameRate <n>` (a frame rate limit), `-Windowed`. The game draws at
+the 360's 1280×720 for now and is scaled to your screen; resolution scaling comes back to the
+Direct3D 12 renderer later. All of them are described at the top of `tools/launch.ps1`.
 
-**Optional: PC textures.** If you also own the PC version, you can build a pack of its
-higher-resolution textures once and use them in both games: [TEXTURES.md](TEXTURES.md).
+**PC textures.** If you also own the PC version, you can build a pack of its higher-resolution
+textures ([TEXTURES.md](TEXTURES.md)), but the Direct3D 12 renderer can't use it yet.
 
 **Steam Deck:** experimental. Build on a Windows PC as above, then package and copy it over:
 `tools/steamdeck/README-SteamDeck.txt`.

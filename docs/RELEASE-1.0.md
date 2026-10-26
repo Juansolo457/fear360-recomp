@@ -13,9 +13,10 @@ You build it on your own PC from your own Xbox 360 discs: [SETUP.md](SETUP.md) w
 *Switch Game* in each game's main menu returns to it.
 
 **Graphics**
-- fear-nx's native Vulkan renderer for the Xbox 360 GPU, with integer resolution scaling up to 3×
-  (3840×2160 from the console's 1280×720), the game's own 2×/4× MSAA and up to 16× anisotropic
-  filtering.
+- A native Direct3D 12 renderer (ported from GRAW 360 Recompiled, after pgr4-native) that draws
+  the game's own Direct3D calls once per draw, with the game's own 2×/4× MSAA (or off), up to 16×
+  anisotropic filtering and sharper textures. Resolution scaling up to 3× (3840×2160 from the
+  console's 1280×720) and the PC texture pack come back to it before 1.0.
 - Bloom off by default, as on PC: the 360 version's screen bloom spread a grey haze near bright
   lights (#38). PC Settings can turn it back on.
 - Optional: the PC version's higher-resolution textures, built from your own PC copy into a local
@@ -38,8 +39,9 @@ places; fixed so far:
 - Bullet tracers no longer stick in mid-air (#27).
 
 **PC Settings** in each game's main menu: resolution scale, window mode, frame rate limit,
-texture filtering and sharpness, field of view (#1), aim assist, right-stick feel (the 360's turn
-ramp off by default), enemy AI, blood marks, animation timing, PC textures and bloom. *Quit to
+anti-aliasing, texture filtering and sharpness, field of view (#1), aim assist, right-stick feel
+(the 360's turn ramp off by default), enemy AI, blood marks, EchoPatch's options and high frame
+rate fixes, the interval select, animation timing, PC textures and bloom. *Quit to
 Desktop* is there too.
 
 **Performance.** The recompiled code keeps PowerPC registers in CPU registers where it can (#34):
@@ -61,7 +63,7 @@ on a Deck OLED in testing, with the heaviest scenes around 74. Packaging steps:
 ## Requirements
 
 Windows 10 or 11 (64-bit), a CPU with AVX2 and FMA (Intel Haswell / AMD Excavator or newer), a
-Vulkan GPU, an Xbox controller, and your own discs. Building needs Visual Studio 2022's C++
+Direct3D 12 GPU, an Xbox controller, and your own discs. Building needs Visual Studio 2022's C++
 workload, LLVM 20, CMake, Ninja, Git, PowerShell 7 and Python: see [SETUP.md](SETUP.md).
 
 ## Known issues
@@ -86,8 +88,11 @@ Report problems on GitHub with the crash report or log from `port-nx/logs` or `p
 
 - [ReXGlue](https://github.com/rexglue/rexglue-sdk): the static recompilation SDK (BSD-3-Clause,
   derived in part from [Xenia](https://github.com/xenia-project/xenia)).
-- [fear-nx](https://github.com/infriker/fear-nx): the native Vulkan Xenos renderer and SDK patch
-  (GPL-3.0-or-later), adapted from Project8Recomp and nfsmw-nx.
+- [pgr4-native](https://github.com/shaunsingh/pgr4-native): the Direct3D 12 renderer (MIT), by way of
+  GRAW 360 Recompiled.
+- [fear-nx](https://github.com/infriker/fear-nx): the GPU ring, the native Vulkan Xenos renderer
+  the game used up to 0.1.1, and the SDK patch (GPL-3.0-or-later), adapted from Project8Recomp
+  and nfsmw-nx.
 - [EchoPatch](https://github.com/Wemino/EchoPatch): the PC version's fixes, the standard this
   project measures itself against.
 

@@ -87,6 +87,10 @@ REXCVAR_DEFINE_BOOL(fear_bodies_stay, false, "F.E.A.R.",
                     "do bullet holes, blood splats, debris and shell casings; in F.E.A.R. broken "
                     "glass too (EchoPatch's persistent world state, #22)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_all_intervals, false, "F.E.A.R.",
+                    "Campaign > Interval lists every interval, not just the ones this profile has "
+                    "reached (the 360's own unlock, which it gives a gamertag of F3ARDAY1, or "
+                    "TIME4FEAR in F.E.A.R. Files)");
 REXCVAR_DEFINE_BOOL(fear_fast_checkpoints, true, "F.E.A.R.",
                     "Checkpoint saves skip the game's video memory clean-up "
                     "(CheckPointOptimizeVideoMemory 0, as EchoPatch's faster saves); off = as "
@@ -637,6 +641,13 @@ void FearCreateFxKey(PPCRegister& r4, PPCRegister& r6) {
     REXLOG_INFO("F.E.A.R.: bodies and debris stay: effects like {} no longer fade",
                 std::string_view(name, strnlen(name, 128)));
   }
+}
+
+void FearAllIntervals(PPCRegister& r3) {
+  if (!REXCVAR_GET(fear_all_intervals)) return;
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) REXLOG_INFO("F.E.A.R.: interval select lists every interval");
+  r3.u64 = 1;
 }
 
 bool FearShellCasingStays() {

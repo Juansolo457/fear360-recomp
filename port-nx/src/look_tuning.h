@@ -119,6 +119,15 @@ void FearLogStateChange(PPCRegister& r3, PPCRegister& r4);
 // has the name.)
 void FearCreateFxKey(PPCRegister& r4, PPCRegister& r6);
 
+// fear_all_intervals: the interval select (Campaign > Interval) lists the intervals the profile
+// has reached, CXProfile's count of them (vtable slot 63: F.E.A.R. sub_823F87E8, F.E.A.R. Files
+// sub_823D9508). That count is every mission in the database when the signed-in gamertag is the
+// 360's unlock code (F3ARDAY1; TIME4FEAR in F.E.A.R. Files: sub_82395ED8, sub_823A6608), and
+// ReXGlue's gamertag is always "User". Just after that check returns (F.E.A.R. 0x823F880C,
+// F.E.A.R. Files 0x823D9528), r3 becomes 1, for the count alone: the main menu and the Instant
+// Action summary make the same check and keep the real answer.
+void FearAllIntervals(PPCRegister& r3);
+
 // fear_bodies_stay (#22), shell casings: CShellCasingFX::Update (F.E.A.R. sub_824060E8, F.E.A.R.
 // Files sub_823F6B58) counts m_fDieTime (+112) down by the frame time and removes the casing at 0.
 // True skips that fsubs, as EchoPatch skips the PC's, so casings stay.

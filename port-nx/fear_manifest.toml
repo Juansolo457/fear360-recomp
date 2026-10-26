@@ -455,6 +455,13 @@ address = 0x8240616C
 registers = []
 jump_address_on_true = 0x82406170
 
+# Interval select lists every interval (src/look_tuning.h, fear_all_intervals): CXProfile's count of
+# intervals reached (sub_823F87E8), just after its check of the unlock gamertag (sub_82395ED8).
+[[entrypoint.midasm_hook]]
+name = "FearAllIntervals"
+address = 0x823F880C
+registers = ["r3"]
+
 # Normal difficulty as on PC (src/difficulty.h, #3): CServerDB::GetDifficultyFactor (sub_825DB5B0)
 # and ::GetDamageAdjustment (sub_825DB620), right after the database lookup, the value in f1.
 [[entrypoint.midasm_hook]]

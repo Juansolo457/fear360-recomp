@@ -197,6 +197,12 @@ std::vector<Setting> BuildSettings() {
                           : "Stay: bodies no longer fade away once there are more than 10, and "
                             "bullet holes, blood splats, debris, shell casings and broken glass "
                             "stay. A long fight leaves a lot behind."});
+  settings.push_back({"Interval select",
+                      "fear_all_intervals",
+                      {{"false", "Reached (as shipped)"}, {"true", "Every interval"}},
+                      true,
+                      "Campaign > Interval: every interval, not just the ones this profile has "
+                      "reached (the 360 version's own unlock)."});
   settings.push_back({"Checkpoint saves",
                       "fear_fast_checkpoints",
                       {{"true", "Fast"}, {"false", "As shipped"}},
