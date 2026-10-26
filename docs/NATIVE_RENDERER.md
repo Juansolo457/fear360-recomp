@@ -29,6 +29,49 @@ window), side by side with fear-nx (`--fear_d3d12`):
   yet, the parity list below, F.E.A.R. Files, the Steam Deck, and what shipping D3D12 alone takes
   (step 6).
 
+## Steam Deck run, D3D12 only (2026-10-25, the first four levels)
+
+What the user saw, and what the log (`fear_031.log`) adds:
+- **Good:** the black bars are gone, the subtitles show, the briefing screen is steady (#66),
+  the bullet impact sparks and dust show (missing in every fear-nx build), animation looks like the
+  360's, the Sharp AI fights well. The renderer came up on vkd3d-proton (RADV) with no warnings or
+  errors in the whole session.
+- **The run was the 360 baseline already:** the Deck's `user/settings.toml` (the Deck package's)
+  sets none of the PC Settings options, so field of view, model detail, bodies, glass, weapon
+  slots and the rest were as shipped. They are game hooks and work with any renderer; only blood
+  marks and the Sharp AI default on.
+- **Frame time:** median 8.4 ms, p90 13.2 ms; windows over 500 draws median 15.4 ms. The game
+  thread is the limit in the heavy scenes (84-88% of a core), and part of it is the D3D12
+  renderer's guest memory watch under Proton: page protection calls (6-10% of the game thread),
+  the exception dispatch of the writes it catches (2-3%) and its "D3D12 watches" thread (12% of a
+  core). fear-nx hashed instead of watching pages.
+- **The spikes when shooting enemies:** first-run pipeline builds, 40 ms median and up to 175 ms
+  each on the Deck, which a draw waits for (`fear_d3d12_pipeline_wait`): the blood, sparks and
+  decals appear the first time something is shot. 622 pipelines were stored in
+  `cache/fear-d3d12/pipelines.d3d12lib`, so the next run should hitch far less.
+
+## Native punch list
+
+The features that were fear-nx's, and what the Deck run turned up. The game-side PC Settings
+options (FOV and gun position, model detail, bodies and glass, weapon slots, flashlight, intro
+videos, cutscene bars, Sharp AI, bloom) need nothing: they are hooks on the game's code.
+
+| # | Item | Kind | Notes |
+|---|---|---|---|
+| 1 | Blood and armour marks on enemies (#47) | bug | `ModelDecalPerformanceLevel = 3` is applied (log), but the D3D12 renderer doesn't show the model decals: find their draws (draw log in a firefight) |
+| 2 | Subtitles disappear when the opening scene is paused | bug | check fear-nx's and the 360's behaviour first; likely the pause screen's copy of the frame |
+| 3 | MSAA off (the Deck's baseline before) | parity | the D3D12 renderer draws the game's own 2x/4x; an option to draw 1x |
+| 4 | Pipeline hitches on first sight | parity | pre-build the stored pipelines at start (the old warm-up's job), or draw without the missing pipeline instead of waiting |
+| 5 | Guest memory watch cost under Proton | performance | the page-protection watch: batch it, or hash like fear-nx on Proton |
+| 6 | Resolution scale (PC: 4K) | parity | PC Settings row removed until then |
+| 7 | Texture sharpness (#50, mip bias) | parity | a sampler LOD bias; PC Settings row removed until then |
+| 8 | PC textures (texture pack) | parity | the pack's replacement in the D3D12 texture cache; row removed until then |
+| 9 | `k_5_6_5` resolves | gap | no typed UAV store for B5G6R5 (logged once) |
+| 10 | Bodies flung when bullet time ends (#62, #4) | game | not the renderer: high frame rates (seen toward 100 fps) |
+
+Then, as planned: a Deck run with every option on (a Deck `settings.toml` that turns them all on),
+a performance check against the first runs, the smoke test (#55-#57) and 1.0.
+
 ## Where F.E.A.R. starts from
 
 GRAW replaced ReXGlue's Xenos plugin (Xenia's emulated GPU, its command processor and register
