@@ -266,6 +266,60 @@ name = "FearAiNextUpdate"
 address = 0x8266F638
 registers = ["r3", "f1"]
 
+# The rest of EchoPatch's high-FPS fixes (port-nx/src/high_fps.h, fear_high_fps_fixes), at the
+# same places as in F.E.A.R.; the jump kick, wave, splash and slow-mo ones replace whole functions
+# there (REX_HOOK_RAW).
+# Sliding on slopes (#12): CMoveMgr::UpdateNormalFriction (sub_82368360), after GetTimerElapsedS.
+[[entrypoint.midasm_hook]]
+name = "FearFrictionFrameTime"
+address = 0x82368554
+registers = ["f1"]
+
+# Momentum on landing (#9): CMoveMgr::UpdateVelocity (sub_82369640), the camera-height damping.
+[[entrypoint.midasm_hook]]
+name = "FearSkipLandingDamping"
+address = 0x82369C18
+registers = []
+jump_address_on_true = 0x82369D00
+
+# Jumping out of water (#8): CMoveMgr::UpdateInLiquid (sub_82363750), the surface zeroing.
+[[entrypoint.midasm_hook]]
+name = "FearSkipSurfaceStop"
+address = 0x82363868
+registers = []
+jump_address_on_true = 0x823638D4
+
+# Water waves (#5): CPolyGridFX::Update's call of UpdateWaveProp (sub_823F8268) for the frame.
+[[entrypoint.midasm_hook]]
+name = "FearWaveFrameCall"
+address = 0x823FA2AC
+registers = []
+
+# Slow-mo meter (#13): CPlayerMgr::EnterSlowMo (sub_82353460) and ::UpdateSlowMo (sub_82358580).
+[[entrypoint.midasm_hook]]
+name = "FearSlowMoEnter"
+address = 0x82353460
+registers = ["r3", "r7", "f1"]
+
+[[entrypoint.midasm_hook]]
+name = "FearSlowMoUpdate"
+address = 0x82358580
+registers = ["r3"]
+
+# Bodies and debris stay (port-nx/src/look_tuning.h, fear_bodies_stay, #22):
+# CClientFXMgr::CreateFXKey (sub_82320B50) at its entry, and CShellCasingFX::Update's (sub_823F6B58)
+# count-down fsubs, skipped.
+[[entrypoint.midasm_hook]]
+name = "FearCreateFxKey"
+address = 0x82320B50
+registers = ["r4", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearShellCasingStays"
+address = 0x823F6BDC
+registers = []
+jump_address_on_true = 0x823F6BE0
+
 # Normal difficulty as on PC (port-nx/src/difficulty.h, #3): CServerDB::GetDifficultyFactor
 # (sub_82628648) and ::GetDamageAdjustment (sub_826286B8), right after the database lookup, the
 # value in f1.

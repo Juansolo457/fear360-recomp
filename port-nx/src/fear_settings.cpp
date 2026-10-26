@@ -103,6 +103,12 @@ std::vector<Setting> BuildSettings() {
                       {{"1", "Off"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}},
                       false,
                       "Anisotropic filtering: sharper floors and walls at an angle."});
+  settings.push_back({"Texture sharpness",
+                      "fear_mip_bias",
+                      {{"0", "As shipped"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
+                      false,
+                      "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
+                      "sharpest setting can shimmer on fine patterns."});
   settings.push_back({"Right stick at its edge",
                       "fear_look_ramp",
                       {{"off", "No boost"},
@@ -128,8 +134,8 @@ std::vector<Setting> BuildSettings() {
                        {"90", "90"},
                        {"95", "95"}},
                       false,
-                      "Vertical, in degrees. The gun isn't corrected for wide angles yet (EchoPatch "
-                      "does that on PC), so it can look stretched at the higher settings."});
+                      "Vertical, in degrees. Above 70 the gun moves forward to keep its place on "
+                      "screen, as EchoPatch does on PC."});
   settings.push_back({"Bloom",
                       "fear_bloom_intensity",
                       {{"0", "Off (the PC's)"}, {"-1", "On (the 360's)"}},
@@ -186,9 +192,24 @@ std::vector<Setting> BuildSettings() {
                       {{"false", "Fade (as shipped)"}, {"true", "Stay"}},
                       false,
                       fear::title::kFiles
-                          ? "Stay: bodies no longer fade away once there are more than 10."
+                          ? "Stay: bodies no longer fade away once there are more than 10, and "
+                            "bullet holes, blood splats, debris and shell casings stay."
                           : "Stay: bodies no longer fade away once there are more than 10, and "
-                            "broken glass stays."});
+                            "bullet holes, blood splats, debris, shell casings and broken glass "
+                            "stay. A long fight leaves a lot behind."});
+  settings.push_back({"Checkpoint saves",
+                      "fear_fast_checkpoints",
+                      {{"true", "Fast"}, {"false", "As shipped"}},
+                      false,
+                      "Fast skips the video memory clean-up the game does at each checkpoint, as "
+                      "EchoPatch's faster saves do on PC."});
+  settings.push_back({"High frame rate fixes",
+                      "fear_high_fps_fixes",
+                      {{"true", "On (EchoPatch's)"}, {"false", "Off (as shipped)"}},
+                      true,
+                      "Above 30 fps the game slides on slopes, misses jump kicks, loses speed on "
+                      "landing and leaving water, and its water and slow-mo meter misbehave. On "
+                      "fixes them as EchoPatch does on PC."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
                       {{"true", "Exact"}, {"false", "As shipped"}},

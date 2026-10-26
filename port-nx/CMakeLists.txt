@@ -51,6 +51,7 @@ set(FEAR_SOURCES
     src/anim_timing.cpp
     src/bloom.cpp
     src/high_fps.cpp
+    src/weapon_fixes.cpp
     src/profiler.cpp
     src/cpu_check.cpp
     src/crash_report.cpp

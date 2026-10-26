@@ -109,6 +109,12 @@ REXCVAR_DEFINE_INT32(fear_d3d12_draw_log_frames, 1, "F.E.A.R. D3D12",
 REXCVAR_DEFINE_INT32(fear_d3d12_anisotropy, 1, "F.E.A.R. D3D12",
                      "Anisotropic filtering of the game's linearly filtered textures with mips, "
                      "at least this many samples per pixel (2, 4, 8 or 16; 1: the game's own)");
+// The name fear-nx's renderer had, so a settings file keeps its choice.
+REXCVAR_DEFINE_DOUBLE(fear_mip_bias, -0.5, "F.E.A.R. D3D12",
+                      "Texture sharpness (#50, EchoPatch's improved mipmap bias): a mip level bias "
+                      "added to every sampler, on top of the game's own; below 0 = sharper distant "
+                      "textures (at some cost in shimmer), 0 = as shipped")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DECLARE(std::string, fear_d3d12_capture_dir);
 
 namespace fear::d3d12 {
@@ -569,6 +575,10 @@ D3D12_SAMPLER_DESC SamplerDesc(const SamplerKey& k) {
     default:
       break;
   }
+  // --fear_mip_bias, added to the bias the translated shader applies (the fetch constant's and
+  // the instruction's); a texture without mips has nothing to choose from.
+  static const float mip_bias = float(std::clamp(REXCVAR_GET(fear_mip_bias), -4.0, 4.0));
+  d.MipLODBias = mip_bias;
   d.MinLOD = float(k.mip_min_level);
   if (k.mip_base_map) {
     d.MaxLOD = d.MinLOD;

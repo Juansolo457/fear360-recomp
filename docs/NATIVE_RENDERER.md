@@ -58,13 +58,13 @@ videos, cutscene bars, Sharp AI, bloom) need nothing: they are hooks on the game
 
 | # | Item | Kind | Notes |
 |---|---|---|---|
-| 1 | Blood and armour marks on enemies (#47) | bug | `ModelDecalPerformanceLevel = 3` is applied (log), but the D3D12 renderer doesn't show the model decals. Ruled out by reading: the depth bias (same sign and size as fear-nx's), float24 depth (fear-nx didn't convert either: its flag only feeds the interlock path), draws through the two unhooked draw builders (nothing builds their addresses). Next: the draws of a frame with marks (F12 draw log), and the new per-150-frame "D3D12 draws dropped" line |
+| 1 | Blood and armour marks on enemies (#47) | bug | Deck only: on the PC (2026-10-25, 17:28) the marks show, with 0 draws dropped. On the Deck `ModelDecalPerformanceLevel = 3` is applied (log) but no marks showed. Ruled out by reading: the depth bias (same sign and size as fear-nx's), float24 depth (fear-nx didn't convert either: its flag only feeds the interlock path), draws through the two unhooked draw builders (nothing builds their addresses). Suspect: how AMD's driver under Proton applies the depth bias. Next: a Deck F12 draw log of a frame with a fresh mark, against a PC one |
 | 2 | Subtitles disappear when the opening scene is paused | bug | check fear-nx's and the 360's behaviour first; likely the pause screen's copy of the frame |
 | 3 | MSAA off (the Deck's baseline before) | parity | done, not run: `fear_d3d12_msaa` (PC Settings > Anti-aliasing), host targets with one sample, the EDRAM layout still the guest's; the Deck package's settings turn it off |
 | 4 | Pipeline hitches on first sight | parity | done, not run: `fear_d3d12_warmup` builds every stored pipeline before the first draw on all the pipeline threads, with the "PREPARING SHADERS" panel (`src/pipeline_warmup.*`) |
 | 5 | Guest memory watch cost under Proton | performance | the page-protection watch: batch it, or hash like fear-nx on Proton |
 | 6 | Resolution scale (PC: 4K) | parity | PC Settings row removed until then |
-| 7 | Texture sharpness (#50, mip bias) | parity | a sampler LOD bias; PC Settings row removed until then |
+| 7 | Texture sharpness (#50, mip bias) | parity | done, not run: `fear_mip_bias` again (fear-nx's name, so a settings file keeps its choice; -0.5 by default), each sampler's `MipLODBias` (`draw.cpp`), on top of the bias the translated shaders apply; the PC Settings row is back |
 | 8 | PC textures (texture pack) | parity | the pack's replacement in the D3D12 texture cache; row removed until then |
 | 9 | `k_5_6_5` resolves | gap | no typed UAV store for B5G6R5 (logged once) |
 | 10 | Bodies flung when bullet time ends (#62, #4) | game | not the renderer: high frame rates (seen toward 100 fps) |
