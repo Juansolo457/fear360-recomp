@@ -13,7 +13,15 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   Files (the program switch Switch Game uses), F.E.A.R. through its intro and briefing, F.E.A.R.
   Files into gameplay with the HUD and gun. Errors in the logs: the same ones as on Windows.
   `tools/autoplay-linux.sh` is the unattended run.
-- Not tested yet: the controller in the panels (no gamepad in WSL), audio, the Deck itself.
+- The first Deck test (2026-10-27): no controller in the game. The panels had opened SDL's
+  gamepad subsystem before the runtime, so SDL announced the controllers to them only and the
+  SDK's driver never saw one. The collection menu now releases its gamepads before the game
+  starts (`fear::panel::ReleaseControllers`), and the panels latch SDL's button presses (a tap
+  between frames, or a pad opened mid-press). Checked in WSL with a virtual Xbox 360 pad (uinput):
+  the menu, then the game past Press Start, in both games.
+- Frame rate: the launcher runs at 120 fps by default (`FEAR_FPS=60` for 60), with mailbox
+  presentation.
+- Not tested yet: audio, the Deck itself.
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
   `README-SteamDeck-Linux.txt`.
