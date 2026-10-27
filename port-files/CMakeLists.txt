@@ -93,6 +93,8 @@ fear_link_plugin_whole()
 fear_stage_runtime_libraries()
 if(WIN32)
     target_link_libraries(fear PRIVATE dbghelp dxgi)
+else()
+    target_link_libraries(fear PRIVATE SDL3::SDL3)  # the panels' controllers (fear_panel.cpp)
 endif()
 # The renderer, for F.E.A.R. Files' Direct3D (port-nx/cmake/fear_common.cmake).
 fear_add_renderer("${HOST}" FILES)
