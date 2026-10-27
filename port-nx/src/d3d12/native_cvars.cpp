@@ -18,8 +18,9 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_pipeline_wait, true, "F.E.A.R. D3D12",
                     "show it without those draws)");
 REXCVAR_DEFINE_BOOL(fear_d3d12_pipeline_cache, true, "F.E.A.R. D3D12",
                     "Keep the shaders and pipelines the native renderer creates under "
-                    "<cache_root>\\pgr4-native and compile them at start-up in later runs "
-                    "(prewarm, plus a D3D12 pipeline library)");
+                    "<cache_root>/fear-d3d12 (Vulkan: fear-d3d12-vulkan; -gradients with "
+                    "--no-fear_d3d12_implicit_gradients) and compile them at start-up in later "
+                    "runs (prewarm, plus a D3D12 pipeline library)");
 REXCVAR_DEFINE_STRING(fear_d3d12_watch_trace, "", "F.E.A.R. D3D12",
                       "Binary log of vertex write-watch events (arms and faults, one 64-bit "
                       "record each, see WatchTrace) for offline analysis of the watch policy");

@@ -3,11 +3,16 @@
 
 #include "log.h"
 
+#include <rex/cvar.h>
 #include <rex/graphics/xenos.h>
 #include <rex/logging.h>
 
 #include <algorithm>
 #include <cstring>
+
+REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_d24_as_float, false, "F.E.A.R. D3D12",
+                    "With --fear_d3d12_api=vulkan, debug: 24-bit depth on a 32-bit float buffer even "
+                    "where the GPU has D24, as on GPUs without it (AMD's, the Steam Deck's)");
 
 namespace fear::d3d12 {
 
@@ -83,7 +88,8 @@ bool VulkanRenderTargets::Initialize(VulkanMemory& memory) {
   VkFormatProperties p{};
   device_.fn().vkGetPhysicalDeviceFormatProperties(device_.physical_device(),
                                                    VK_FORMAT_D24_UNORM_S8_UINT, &p);
-  d24s8_ = (p.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+  d24s8_ = (p.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) &&
+                   !REXCVAR_GET(fear_d3d12_vulkan_d24_as_float)
                ? VK_FORMAT_D24_UNORM_S8_UINT
                : VK_FORMAT_D32_SFLOAT_S8_UINT;
   REXLOG_INFO("D3D12 Vulkan: render targets: D24S8 depth as {}",

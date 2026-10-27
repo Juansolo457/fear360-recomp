@@ -55,8 +55,9 @@ fail=0
 for f in "$root/$build_rel"/*; do
   [[ -f "$f" && ( -x "$f" || "$f" == *.so ) ]] || continue
   file -b "$f" | grep -q '^ELF' || continue
-  need=$(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
-  cxx=$(objdump -T "$f" | grep -o 'GLIBCXX_[0-9.]*' | sort -uV | tail -1)
+  # (grep finds nothing in a binary without these symbol versions: not an error.)
+  need=$(objdump -T "$f" | { grep -o 'GLIBC_[0-9.]*' || true; } | sed 's/GLIBC_//' | sort -uV | tail -1)
+  cxx=$(objdump -T "$f" | { grep -o 'GLIBCXX_[0-9.]*' || true; } | sort -uV | tail -1)
   if [[ -n "$need" && "$(printf '%s\n%s\n' "$need" "$glibc_max" | sort -V | tail -1)" != "$glibc_max" ]]; then
     echo "$(basename "$f"): needs glibc $need, above $glibc_max" >&2
     fail=1

@@ -318,7 +318,8 @@ void VulkanBackend::Prepare(const DrawState& state, uint64_t upload_tag, DrawPre
   mirror_.preparing = true;
   mirror_.segment_conflict = false;
   mirror_.draw_reads.clear();
-  prep->upload_ok = indexed_ok && mirror_.RequestVertices(state, *prep->vs, *copies);
+  // Fans draw natively, their indices read from shared memory: copied like any other's.
+  prep->upload_ok = indexed_ok && mirror_.RequestVertices(state, *prep->vs, *copies, false);
   mirror_.preparing = false;
   if (mirror_.segment_conflict ||
       mirror_.segment_exact.size() >= GuestMemoryMirror::kSegmentExactLimit) {
@@ -412,7 +413,7 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   if (!prep) {
     mirror_.upload_fence = device_->frame_fence();
     copies_.clear();
-    const bool ok = mirror_.RequestVertices(state, *vs, copies_);
+    const bool ok = mirror_.RequestVertices(state, *vs, copies_, false);
     // The copies made before a failed range go out: their pages are marked valid already.
     RecordCopies(copies_.data(), copies_.size());
     if (!ok) {
@@ -730,8 +731,9 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   // it. Plain vkCmdSetDepthBias lets the driver scale it by up to 2 (NVIDIA's D24 does), which
   // turned the guns' -0.5 offset (their view model drawn in front of the world) into -1 and
   // their depth into 0; exact depth bias keeps D3D's scale.
-  const float depth_bias = float(rex::graphics::draw_util::GetD3D10IntegerPolygonOffset(
-      regs.Get<reg::RB_DEPTH_INFO>().depth_format, poly_offset));
+  const xenos::DepthRenderTargetFormat guest_depth = regs.Get<reg::RB_DEPTH_INFO>().depth_format;
+  const float depth_bias =
+      float(rex::graphics::draw_util::GetD3D10IntegerPolygonOffset(guest_depth, poly_offset));
   const float slope_bias = poly_offset_scale * xenos::kPolygonOffsetScaleSubpixelUnit;
   if (fn.vkCmdSetDepthBias2EXT) {
     VkDepthBiasRepresentationInfoEXT representation{
@@ -741,6 +743,15 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
     representation.depthBiasExact = VK_TRUE;
     VkDepthBiasInfoEXT bias{VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT, &representation};
     bias.depthBiasConstantFactor = depth_bias;
+    // 24-bit unorm depth on a 32-bit float buffer (GPUs without D24: AMD's, the Deck's): a float
+    // format's r follows the depth's exponent, far below D24's 2^-24 near 0, where the view model
+    // is. In depth units (r = 1) the bias is D24's own step at every depth.
+    if (device_->shader_caps().depth_bias_float &&
+        guest_depth == xenos::DepthRenderTargetFormat::kD24S8 && bound.depth &&
+        bound.depth->format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
+      representation.depthBiasRepresentation = VK_DEPTH_BIAS_REPRESENTATION_FLOAT_EXT;
+      bias.depthBiasConstantFactor = depth_bias * (1.0f / float(1u << 24));
+    }
     bias.depthBiasSlopeFactor = slope_bias;
     fn.vkCmdSetDepthBias2EXT(cmd, &bias);
   } else {

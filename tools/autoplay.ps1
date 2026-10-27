@@ -84,8 +84,12 @@ try {
             [AutoInput]::Tap([uint16]$thenVk); $nextKey += $KeyEvery
         }
         if ($elapsed -ge $nextCapture) {
-            # A minimized window can't be captured; the run goes on.
-            try { & (Join-Path $PSScriptRoot 'capture_window.ps1') -ProcessId $process.Id -Out $captures | Out-Null } catch {}
+            # A failed capture (a minimized window can't be captured) is reported; the run goes on.
+            try {
+                & (Join-Path $PSScriptRoot 'capture_window.ps1') -ProcessId $process.Id -Out $captures | Out-Null
+            } catch {
+                Write-Warning ("capture at {0:N0} s failed: {1}" -f $elapsed, $_.Exception.Message)
+            }
             $nextCapture += $CaptureEvery
         }
         Start-Sleep -Milliseconds 250

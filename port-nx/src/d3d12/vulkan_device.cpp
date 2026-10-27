@@ -89,17 +89,19 @@ bool VulkanDevice::Initialize(rex::ui::vulkan::VulkanProvider& provider) {
     fn_.vkCmdSetDepthBias2EXT = reinterpret_cast<PFN_vkCmdSetDepthBias2EXT>(
         fn_.vkGetDeviceProcAddr(device_, "vkCmdSetDepthBias2EXT"));
     caps_.depth_bias_exact = fn_.vkCmdSetDepthBias2EXT != nullptr;
+    caps_.depth_bias_float = caps_.depth_bias_exact && p.depthBiasFloatRepresentation;
   }
   REXLOG_INFO(
       "D3D12 Vulkan: shader caps: clip {} cull {} vertex stores {} fragment stores {} "
       "sample rate {} demote {} | float32 signed-zero/inf/nan {} denorm-ftz {} rte {} | max "
-      "storage buffer {} MB | BC {} storage write without format {} | exact depth bias {}",
+      "storage buffer {} MB | BC {} storage write without format {} | exact depth bias {} (float {})",
       caps_.clip_distance, caps_.cull_distance, caps_.vertex_pipeline_stores_and_atomics,
       caps_.fragment_stores_and_atomics, caps_.sample_rate_shading,
       caps_.demote_to_helper_invocation, caps_.signed_zero_inf_nan_preserve_float32,
       caps_.denorm_flush_to_zero_float32, caps_.rounding_mode_rte_float32,
       caps_.max_storage_buffer_range >> 20, caps_.texture_compression_bc,
-      caps_.storage_image_write_without_format, caps_.depth_bias_exact);
+      caps_.storage_image_write_without_format, caps_.depth_bias_exact,
+      caps_.depth_bias_float);
   if (!caps_.texture_compression_bc) {
     REXLOG_ERROR("D3D12 Vulkan: the device has no BC texture compression (the game's textures)");
     return false;

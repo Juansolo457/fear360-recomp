@@ -77,7 +77,7 @@ bool GuestMemoryMirror::InSharedMemory(uint32_t start, uint32_t length) {
 }
 
 bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics::Shader& vs,
-                                        std::vector<VertexCopy>& out) {
+                                        std::vector<VertexCopy>& out, bool fans_converted) {
   namespace xenos = rex::graphics::xenos;
   const auto& regs = *reinterpret_cast<const rex::graphics::RegisterFile*>(s.regs);
   const rex::graphics::Shader::ConstantRegisterMap& vmap = vs.constant_register_map();
@@ -102,7 +102,7 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
   if (coherency) coherency->slot = 0xFF;
   if (!s.indexed) return true;
   const uint32_t index_bytes = s.count * (s.index_32bit ? 4u : 2u);
-  if (xenos::PrimitiveType(s.primitive) == xenos::PrimitiveType::kTriangleFan)
+  if (fans_converted && xenos::PrimitiveType(s.primitive) == xenos::PrimitiveType::kTriangleFan)
     return InSharedMemory(s.index_address, index_bytes);
   return RequestRange(s.index_address, index_bytes, true, out);
 }

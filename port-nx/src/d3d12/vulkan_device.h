@@ -134,6 +134,8 @@ class VulkanDevice {
     // VK_EXT_depth_bias_control's depthBiasExact: the constant depth bias in exactly the depth
     // format's r, as D3D does, not up to twice that as Vulkan otherwise allows.
     bool depth_bias_exact = false;
+    // ... and its floatRepresentation: a bias in depth units (r = 1).
+    bool depth_bias_float = false;
   };
 
   // What the last EndFrame did (the frame CSV's swap columns).
