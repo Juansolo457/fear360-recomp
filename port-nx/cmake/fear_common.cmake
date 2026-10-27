@@ -21,7 +21,8 @@ function(fear_add_renderer host)
         target_compile_definitions(fear_d3d12 PRIVATE FEAR_TITLE_FILES)
     endif()
     target_include_directories(fear_d3d12 PRIVATE "${host}/d3d12"
-        $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>
+        "${REXSDK_DIR}/thirdparty/renderdoc")  # the SDK's Vulkan headers include it
     rexglue_apply_target_settings(fear_d3d12)
     # The Vulkan backend's headers: Vulkan, VMA and glslang's SPIR-V builder (the SDK's SPIR-V
     # translator includes it); the plugin links the libraries.
