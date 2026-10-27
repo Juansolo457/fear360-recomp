@@ -9,6 +9,7 @@
 #include <filesystem>
 
 #include <imgui.h>
+#include <rex/logging.h>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -58,16 +59,18 @@ constexpr uint16_t XINPUT_GAMEPAD_B = 0x2000;
 // (Navigator::Poll); the input thread (GameGetsInput) only reads the opened pads, which SDL locks.
 std::mutex g_sdl_mutex;
 std::vector<SDL_Gamepad*> g_sdl_pads;
+bool g_sdl_initialized = false;  // UI thread
 
 void UpdateSdlPads() {
-  static bool initialized = false, failed = false;
+  static bool failed = false;
   if (failed) return;
-  if (!initialized) {
+  if (!g_sdl_initialized) {
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+      REXLOG_WARN("F.E.A.R. panels: SDL gamepads unavailable: {}", SDL_GetError());
       failed = true;
       return;
     }
-    initialized = true;
+    g_sdl_initialized = true;
   }
   SDL_UpdateGamepads();
   int count = 0;
@@ -82,7 +85,11 @@ void UpdateSdlPads() {
   for (int i = 0; ids && i < count; ++i) {
     SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
     if (pad && std::find(g_sdl_pads.begin(), g_sdl_pads.end(), pad) != g_sdl_pads.end()) continue;
-    if ((pad = SDL_OpenGamepad(ids[i]))) g_sdl_pads.push_back(pad);
+    if ((pad = SDL_OpenGamepad(ids[i]))) {
+      g_sdl_pads.push_back(pad);
+      REXLOG_INFO("F.E.A.R. panels: controller '{}' ({:04x}:{:04x})", SDL_GetGamepadName(pad),
+                  SDL_GetGamepadVendor(pad), SDL_GetGamepadProduct(pad));
+    }
   }
   SDL_free(ids);
 }
@@ -288,6 +295,19 @@ void AddFonts(ImFontAtlas* atlas) {
       if (g_font) return;
     }
   }
+}
+
+void ReleaseControllers() {
+#if !defined(_WIN32)
+  if (!g_sdl_initialized) return;
+  {
+    std::lock_guard<std::mutex> lock(g_sdl_mutex);
+    for (SDL_Gamepad* pad : g_sdl_pads) SDL_CloseGamepad(pad);
+    g_sdl_pads.clear();
+  }
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+  g_sdl_initialized = false;
+#endif
 }
 
 bool GameGetsInput() {

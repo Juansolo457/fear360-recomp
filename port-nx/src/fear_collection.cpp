@@ -139,9 +139,15 @@ class CollectionMenu final : public Panel {
     }
     const Title& title = titles_[row];
     if (title.id == fear::title::kId) {
-      // This program's game: carry on starting it, after this frame.
+      // This program's game: carry on starting it, after this frame, with the controllers left
+      // for the runtime's driver (fear_panel.h).
       Finish();
-      if (host_.later) host_.later(start_);
+      if (host_.later) {
+        host_.later([start = start_] {
+          fear::panel::ReleaseControllers();
+          start();
+        });
+      }
       return;
     }
     if (!installed_[row]) return;

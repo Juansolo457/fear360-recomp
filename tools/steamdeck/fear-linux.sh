@@ -46,6 +46,11 @@ args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_
   fi
   echo "display: DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
   echo "fps: $fps"
+  # The controllers: what Steam Input tells SDL, and the input devices the game can open.
+  echo "--- controller environment"
+  env | grep -E '^(SDL_|SteamVirtualGamepadInfo|SteamAppId|SteamGameId|SteamDeck)' | cut -c1-300
+  echo "--- /dev/input"
+  ls -l /dev/input 2>&1
   for program in "$here/fear/fear" "$here/fearfiles/fearfiles"; do
     echo "--- ldd $program"
     ldd "$program" 2>&1
