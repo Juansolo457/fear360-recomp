@@ -40,7 +40,7 @@ What to test
     smoothness. The Linux cache is separate from Proton's (cache/fear-d3d12-vulkan).
 
 Logs (copy them back to the PC)
-  fear/logs/fear_NNN.log, fearfiles/logs/fearfiles_NNN.log   the games' logs, one per run
+  fear/logs/fear_NNN.log, fearfiles/logs/fear_NNN.log   the games' logs, one per run
   fear/logs/system-<time>.txt   SteamOS, glibc and libstdc++ versions and the libraries found
   fear/logs/stdout-<time>.txt   anything the program printed outside its log (a crash's last words)
 

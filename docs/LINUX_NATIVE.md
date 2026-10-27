@@ -1,8 +1,22 @@
-# The native Linux and Steam Deck build: the plan (parked)
+# The native Linux and Steam Deck build
 
-Parked on 2026-10-27, on branch `linux-native` (off `vulkan-linux`, PR #78), until the user picks
-it up again. The goal: F.E.A.R. and F.E.A.R. Files as native Linux programs on the Vulkan backend
-([VULKAN_RENDERER.md](VULKAN_RENDERER.md)), and no Proton for Linux or the Steam Deck at all.
+Started 2026-10-27 on branch `linux-native`. The goal: F.E.A.R. and F.E.A.R. Files as native
+Linux programs on the Vulkan backend ([VULKAN_RENDERER.md](VULKAN_RENDERER.md)), and no Proton for
+Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no renderer choice there.
+
+## Status
+- Phases 1 to 4 done: both games build in the Deck container (`tools/build-deck.sh`; glibc 2.35
+  and `GLIBCXX_3.4.32` at most) after SDK patch 0022 (the fear-nx patch's chrono shims clashed
+  with libstdc++ 13). The panels read SDL3's gamepads on Linux (`fear_panel.cpp`).
+- WSL run (llvmpipe), from the package unpacked over a copy of the game data on ext4 (a
+  case-sensitive file system), started by `fear-linux.sh`: the collection menu, picking F.E.A.R.
+  Files (the program switch Switch Game uses), F.E.A.R. through its intro and briefing, F.E.A.R.
+  Files into gameplay with the HUD and gun. Errors in the logs: the same ones as on Windows.
+  `tools/autoplay-linux.sh` is the unattended run.
+- Not tested yet: the controller in the panels (no gamepad in WSL), audio, the Deck itself.
+- The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
+  the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
+  `README-SteamDeck-Linux.txt`.
 
 ## Where it starts
 - `tools/setup-sdk.sh`, `tools/build-linux.sh` and `tools/build-deck.sh` (podman, Ubuntu 22.04,
