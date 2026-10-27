@@ -15,7 +15,7 @@ sdk="${FEAR_SDK_DIR:-$root/third_party/rexglue-sdk-nx}"
 source=https://github.com/rexglue/rexglue-sdk.git
 base=c94f5ebdcb3c9d1a460ca48e04f9758448f8d518        # ReXGlue v0.10.0
 fear_nx_tree=c7fb3c0f1a588b268115bf0dceb24f0c26eb1ae0 # after patch 0000
-expected_tree=02f13abf9eb4e80938dc15caeb4042aa7b22ccf7 # after the last patch (as setup-sdk.ps1)
+expected_tree=d328d7dce23f62f4359563bb3477c88a93cc7678 # after the last patch (as setup-sdk.ps1)
 force=0
 submodules=1
 while [[ $# -gt 0 ]]; do
