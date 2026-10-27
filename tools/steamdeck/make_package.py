@@ -172,9 +172,7 @@ def main_linux():
                     if line.startswith('#define FEAR_VERSION_TEXT '):
                         text = line.split('"')[1]
             versions.append(f'{program} (Linux): {text}')
-        z.writestr(f'{TOP}/VERSION-linux.txt', '
-'.join(versions) + '
-')
+        z.writestr(f'{TOP}/VERSION-linux.txt', '\n'.join(versions) + '\n')
     print('version: ' + '; '.join(versions))
     print(f'{OUT}: {count} files, {total / 2**20:.0f} MB before compression')
 
