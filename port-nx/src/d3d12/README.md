@@ -26,6 +26,17 @@ fixes in its docs/NATIVE_RENDERER.md (`k_10_11_11` textures, SDR output, the pus
 - GRAW's separate build of the SDK's shader translator (`shader_xlate.cmake`, `sdk_cvar_shim.h`)
   is not needed: F.E.A.R. links the Xenos plugin, translator included, into the executable.
 
+Updated to GRAW's commit `0377b6c` (2026-10-26, its Vulkan renderer, graw360-recomp#44): the GPU API
+behind `backend.h` (`d3d12_backend.*`, `vulkan_*.*`), the API-free code moved out of the D3D12
+files (`surfaces.*`, `resolve_params.*`, `present_swap.cpp`, `guest_draw_state.*`,
+`guest_memory_mirror.*`, `gamma_ramp.*`, `native_cvars.cpp`, ...) and the Vulkan backend's own
+shaders (`shaders/`, GLSL, built by `tools/vulkan_shaders.py`). F.E.A.R.'s changes to it
+(docs/VULKAN_RENDERER.md has the list): both backends record on ReXGlue's presenter's device and
+hand it the frames (GRAW's own swapchain, game window and F9 switch are not ported:
+`game_window.*`, `sdk_linux_shim.cpp`), the F.E.A.R. fixes above carried into the Vulkan backend
+(side-by-side tiles, MSAA off, mip bias and anisotropy, `k_4_4_4_4`, the shader bound, the
+pipeline warm-up), and the gamma ramp from fear-nx's ring.
+
 pgr4-native ports code from the ReXGlue SDK and, through it, from Xenia (BSD-3-Clause; the
 ported functions are named in each file's header): among others `draw`, `render_targets`,
 `resolve`, `geometry_shader` and the texture code. The ReXGlue SDK's license, with Xenia's

@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 19:09:26 -0700
+Subject: [PATCH 18/21] Vulkan: enable textureCompressionBC and
+ shaderStorageImageWriteWithoutFormat
+
+With GPU emulation the device enables the features the Vulkan command
+processor uses, but not these two. F.E.A.R.'s renderer records on the
+presenter's device (port-nx/src/d3d12/vulkan_device.h) and needs both:
+BC1-BC5 textures uploaded as they are, and its color resolve shader,
+which writes the destination's texel bits through a uint storage view
+of an image with no format in the shader.
+
+Enable them where the GPU supports them, and record them in the
+device's Properties like the other enabled features. Nothing in the SDK
+reads them, so its own renderer is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/ui/vulkan/device.h  | 2 ++
+ src/ui/vulkan/vulkan_device.cpp | 4 ++++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/include/rex/ui/vulkan/device.h b/include/rex/ui/vulkan/device.h
+index 3bd17dc..adf6847 100644
+--- a/include/rex/ui/vulkan/device.h
++++ b/include/rex/ui/vulkan/device.h
+@@ -113,6 +113,8 @@ class VulkanDevice {
+     bool shaderCullDistance = false;
+     bool sparseBinding = false;
+     bool sparseResidencyBuffer = false;
++    bool textureCompressionBC = false;
++    bool shaderStorageImageWriteWithoutFormat = false;
+ 
+     // VK_KHR_sampler_mirror_clamp_to_edge (#15, promoted to 1.2)
+ 
+diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
+index f2e5f50..1ee4225 100644
+--- a/src/ui/vulkan/vulkan_device.cpp
++++ b/src/ui/vulkan/vulkan_device.cpp
+@@ -655,6 +655,10 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     XE_UI_VULKAN_FEATURE(shaderCullDistance)
+     XE_UI_VULKAN_FEATURE(sparseBinding)
+     XE_UI_VULKAN_FEATURE(sparseResidencyBuffer)
++    // F.E.A.R.'s renderer on this device (port-nx/src/d3d12/vulkan_device.h): BC textures, and
++    // the color resolve shader's storage writes to a uint view of the destination.
++    XE_UI_VULKAN_FEATURE(textureCompressionBC)
++    XE_UI_VULKAN_FEATURE(shaderStorageImageWriteWithoutFormat)
+   }
+ 
+   if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+-- 
+2.53.0.windows.1
+

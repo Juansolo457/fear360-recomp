@@ -181,7 +181,9 @@ Before it can be the default, in both games:
    fear-nx. Autopilot through the opening and Interval 2's heavy fights.
 5. **Parity and performance**: the list above, then PC and Deck against step 1.
 6. **D3D12 only** (decided 2026-10-25, done in the code the same day, not built yet): the game
-   ships with the D3D12 renderer alone, no fear-nx or ReXGlue renderer and no switch.
+   ships with the D3D12 renderer alone, no fear-nx or ReXGlue renderer and no switch. (Amended
+   2026-10-26: the same renderer gets a Vulkan backend for a native Linux and Steam Deck build;
+   D3D12 stays the Windows default, [VULKAN_RENDERER.md](VULKAN_RENDERER.md).)
    - fear-nx's graphics system (`port-nx/src/native/native_system.*`) keeps the GPU ring and owns
      ReXGlue's **D3D12 presenter** instead of its Vulkan one. The D3D12 renderer records on the
      presenter's device and queue and hands it each frame (`Presenter::HandToPresenter`: the

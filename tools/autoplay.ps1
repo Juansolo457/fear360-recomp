@@ -11,6 +11,9 @@ param(
     [ValidateRange(0,900)][int]$KeysUntil = 0,      # stop tapping after this many seconds (0 = never)
     # From KeysUntil on, tap this key instead (E = right trigger: fire at whatever is in front).
     [string]$ThenKey = '',
+    # Switch to ThenKey once the renderer's stats line in the log reports more than this many
+    # draws per frame (gameplay, past the menus and cutscenes), whenever that is (0 = off).
+    [ValidateRange(0,100000)][int]$ThenWhenDraws = 0,
     [ValidateRange(1,120)][int]$CaptureEvery = 15,
     [string]$Tag = 'run',
     [string]$Extra = '',
@@ -60,6 +63,7 @@ $arguments = @('--no-fullscreen', '--mnk_mode', '--resolution', '720p', '--headl
 $process = Start-Process -FilePath $executable -WorkingDirectory $port -ArgumentList $arguments -PassThru
 $start = Get-Date
 $nextKey = 5; $nextCapture = $CaptureEvery
+$switched = $false; $nextDrawsCheck = 2
 try {
     while (!$process.HasExited) {
         $elapsed = ((Get-Date) - $start).TotalSeconds
@@ -69,13 +73,23 @@ try {
             [AutoInput]::GetForegroundWindow() -ne $process.MainWindowHandle) {
             [AutoInput]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
         }
-        if ($elapsed -ge $nextKey -and ($KeysUntil -eq 0 -or $elapsed -lt $KeysUntil)) {
+        if ($ThenWhenDraws -and !$switched -and $elapsed -ge $nextDrawsCheck -and (Test-Path $log)) {
+            $nextDrawsCheck += 2
+            $line = Select-String -Path $log -Pattern 'per frame: draws ([0-9.]+)' | Select-Object -Last 1
+            if ($line -and [double]$line.Matches[0].Groups[1].Value -gt $ThenWhenDraws) { $switched = $true }
+        }
+        if ($elapsed -ge $nextKey -and !$switched -and ($KeysUntil -eq 0 -or $elapsed -lt $KeysUntil)) {
             [AutoInput]::Tap([uint16]$vk); $nextKey += $KeyEvery
         } elseif ($elapsed -ge $nextKey -and $thenVk) {
             [AutoInput]::Tap([uint16]$thenVk); $nextKey += $KeyEvery
         }
         if ($elapsed -ge $nextCapture) {
-            & (Join-Path $PSScriptRoot 'capture_window.ps1') -ProcessId $process.Id -Out $captures | Out-Null
+            # A failed capture (a minimized window can't be captured) is reported; the run goes on.
+            try {
+                & (Join-Path $PSScriptRoot 'capture_window.ps1') -ProcessId $process.Id -Out $captures | Out-Null
+            } catch {
+                Write-Warning ("capture at {0:N0} s failed: {1}" -f $elapsed, $_.Exception.Message)
+            }
             $nextCapture += $CaptureEvery
         }
         Start-Sleep -Milliseconds 250

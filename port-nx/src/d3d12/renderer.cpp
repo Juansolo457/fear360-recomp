@@ -1,28 +1,25 @@
-// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see native/README.md): NativeRenderer host.
+// D3D12 renderer (ported from pgr4-native 8ea20d5, MIT; see README.md): NativeRenderer host.
 #include "renderer.h"
 
 #include "async_file.h"
+#include "backend.h"
 #include "clock.h"
-#include "d3d12_device.h"
+#if defined(_WIN32)
+#include "d3d12_backend.h"
+#endif
+#include "vulkan_backend.h"
 #include "d3d_state.h"
-#include "draw.h"
 #include "frame_pacer.h"
-#include "gpu_timer.h"
 #include "present.h"
 #include "profile.h"
-#include "render_targets.h"
-#include "resolve.h"
-#include "textures.h"
+#include "native_thread.h"
+#include "resolve_params.h"
+#include "surfaces.h"
 
-#include <rex/kernel/xam/module.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
 #include <rex/system/interfaces/graphics.h>
 #include <rex/system/kernel_state.h>
-#include <rex/ui/d3d12/d3d12_provider.h>
-#include <rex/ui/keybinds.h>
-#include <rex/ui/window.h>
-#include <rex/ui/windowed_app_context.h>
 
 #include <algorithm>
 #include <atomic>
@@ -74,6 +71,13 @@ REXCVAR_DEFINE_INT32(
     "registers against the game thread's, and the shared memory each draw reads "
     "against guest memory as it was when the draw was queued (0: off)");
 REXCVAR_DECLARE(int32_t, fear_d3d12_stats_frames);
+// Not in the settings panel: Vulkan is the Linux build's only API, and on Windows a comparison
+// with the D3D12 default (docs/VULKAN_RENDERER.md, Decisions).
+REXCVAR_DEFINE_STRING(fear_d3d12_api, "", "F.E.A.R. D3D12",
+                      "GPU API of the renderer: d3d12 or vulkan (docs/VULKAN_RENDERER.md; empty: "
+                      "d3d12 on Windows, vulkan elsewhere). Vulkan on Windows is for comparing the "
+                      "two only")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DECLARE(bool, fear_d3d12_luma_probe);
 
 namespace fear::d3d12 {
@@ -83,12 +87,12 @@ struct NativeRenderer::Csv {
   // Window for the log summary.
   uint64_t frames = 0, draws = 0, draw_ns = 0, swap_ns = 0, frame_ns = 0, hook_ns = 0,
            hook_wait_ns = 0;
-  // The draws the renderer dropped, and why (DrawRenderer::Stats), over the window.
+  // The draws the renderer dropped, and why (DrawStats, backend.h), over the window.
   uint64_t skipped = 0, failed = 0, unsupported = 0, pso_pending = 0, textures_missing = 0,
            watch_faults = 0;
   // Profile: the window's stage ticks.
   uint64_t stage_ticks[profile::kStageCount] = {}, track_calls = 0;
-  TextureCache::Stats tex_prev;                  // texture counters at the previous CSV row
+  TextureStats tex_prev;                         // texture counters at the previous CSV row
   uint64_t evicted_prev = 0, evict_ns_prev = 0;  // the same for every row (tex_prev: profile)
   bool luma = false;                             // --fear_d3d12_luma_probe columns
   std::string line;                              // the row being written
@@ -192,7 +196,7 @@ struct NativeRenderer::Queue {
     // Guest-thread numbers of the frame, added to the render thread's before its CSV row.
     uint64_t hook_ns, hook_wait_ns, hook_max_ns, state_fail, track_calls, pad;
     uint64_t guest_begin_ns, guest_swap_ns, pace_wait_ns;
-    DrawRenderer::PrepareCounters prep;
+    PrepareCounters prep;
     uint64_t ticks[profile::kStageCount];
     uint32_t log_frames;  // a marked Swap with --fear_d3d12_mark_audit: the frames to log
   };
@@ -224,7 +228,7 @@ struct NativeRenderer::Queue {
   std::deque<std::unique_ptr<Batch>> pending;  // guest -> render thread
   std::vector<std::unique_ptr<Batch>> spare;   // render -> guest thread
   uint64_t frames_done = 0;                    // Swaps the render thread finished (mutex)
-  // Frames whose fence the GPU reached (render thread writes; DrawRenderer::Prepare's tags).
+  // Frames whose fence the GPU reached (render thread writes; Backend::Prepare's tags).
   std::atomic<uint64_t> gpu_frames_done{0};
   std::thread thread;
 
@@ -275,6 +279,16 @@ struct NativeRenderer::Queue {
   }
 };
 
+std::string RendererApi() {
+  std::string api = REXCVAR_GET(fear_d3d12_api);
+#if defined(_WIN32)
+  if (api.empty()) api = "d3d12";
+#else
+  if (api.empty()) api = "vulkan";
+#endif
+  return api;
+}
+
 NativeRenderer* NativeRenderer::Get() {
   if (g_failed) return nullptr;
   // Never destroyed: the process exits with the game, and the guest thread may still be in a
@@ -296,39 +310,26 @@ NativeRenderer* NativeRenderer::Get() {
 NativeRenderer::~NativeRenderer() = default;
 
 bool NativeRenderer::Initialize() {
-  // On ReXGlue's D3D12 presenter's device and queue: the presenter takes each frame there
-  // (Presenter::HandToPresenter) and keeps the window (d3d12_device.h). fear-nx's graphics system
-  // (../native/native_system.h) creates it before the game's first D3D call.
-  rex::Runtime* runtime = rex::Runtime::instance();
-  rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
-  auto* provider =
-      graphics ? static_cast<rex::ui::d3d12::D3D12Provider*>(graphics->provider()) : nullptr;
-  if (!provider) {
-    REXLOG_ERROR("D3D12: no D3D12 provider (the graphics system has not set up presentation)");
+  // The backend records on ReXGlue's presenter's device and queue: the presenter takes each frame
+  // there and keeps the window. fear-nx's graphics system (../native/native_system.h) creates the
+  // presenter for the same API before the game's first D3D call.
+  Backend::Options options;
+  options.gpu_timing = REXCVAR_GET(fear_d3d12_gpu_timing);
+  options.gpu_timing_shaders = REXCVAR_GET(fear_d3d12_gpu_timing_shaders);
+  options.texture_capture_order = REXCVAR_GET(fear_d3d12_texture_capture_order);
+  const std::string api = RendererApi();
+  if (api == "vulkan") {
+    backend_ = std::make_unique<VulkanBackend>();
+#if defined(_WIN32)
+  } else if (api == "d3d12") {
+    backend_ = std::make_unique<D3D12Backend>();
+#endif
+  } else {
+    REXLOG_ERROR("D3D12: unknown --fear_d3d12_api={} (d3d12 or vulkan)", api);
     return false;
   }
-  device_ = std::make_unique<D3D12Device>();
-  if (!device_->Initialize(provider->GetDevice(), provider->GetDirectQueue())) return false;
-  if (REXCVAR_GET(fear_d3d12_gpu_timing)) {
-    if (device_->EnableGpuTimer()) {
-      gpu_timer_ = device_->gpu_timer();
-      gpu_timer_->set_per_shader(REXCVAR_GET(fear_d3d12_gpu_timing_shaders));
-    } else
-      REXLOG_ERROR("D3D12: GPU timing unavailable");
-  }
-  rt_ = std::make_unique<RenderTargets>();
-  if (!rt_->Initialize(device_->device())) return false;
-  resolver_ = std::make_unique<Resolver>();
-  if (!resolver_->Initialize(device_->device(), rt_.get(), device_->command_queue())) return false;
-  resolver_->set_gpu_timer(gpu_timer_);
-  textures_ = std::make_unique<TextureCache>(device_->device(), rex::system::kernel_memory());
-  textures_->SetResolvedLookup([this](uint32_t a) { return resolver_->Find(a); });
-  textures_->SetCaptureOrder(REXCVAR_GET(fear_d3d12_texture_capture_order));
-  resolver_->SetChangedCallback([this](uint32_t a) { textures_->OnResolved(a); });
-  draw_ = std::make_unique<DrawRenderer>(*this);
-  if (!draw_->Initialize()) return false;
-  present_ = std::make_unique<Presenter>(*this);
-  if (!present_->Initialize()) return false;
+  REXLOG_INFO("D3D12: {} backend", api);
+  if (!backend_->Initialize(options)) return false;
   csv_ = std::make_unique<Csv>();
   profile::enabled.store(REXCVAR_GET(fear_d3d12_profile), std::memory_order_relaxed);
   const std::string path = REXCVAR_GET(fear_d3d12_csv).empty()
@@ -357,21 +358,13 @@ bool NativeRenderer::Initialize() {
   return true;
 }
 
-ID3D12Device* NativeRenderer::d3d12() const { return device_->device(); }
-ID3D12CommandQueue* NativeRenderer::command_queue() const { return device_->command_queue(); }
-ID3D12GraphicsCommandList* NativeRenderer::command_list() const { return device_->command_list(); }
-uint64_t NativeRenderer::frame_fence() const { return device_->frame_fence(); }
-
 void NativeRenderer::BeginFrameModules() {
-  const uint64_t fence = device_->frame_fence(), done = device_->completed_fence();
-  rt_->BeginFrame(frame_index_, fence, done);
-  resolver_->set_linear_output(device_->hdr());
-  resolver_->BeginFrame(frame_index_, fence, done);
+  backend_->BeginFrame(frame_index_);
   frame_begun_ = true;
 }
 
 void NativeRenderer::RenderThreadMain() {
-  SetThreadDescription(GetCurrentThread(), L"D3D12 render");
+  SetThreadName("D3D12 render");
   Queue& q = *queue_;
   for (;;) {
     std::unique_ptr<Queue::Batch> b;
@@ -393,7 +386,7 @@ void NativeRenderer::RenderThreadMain() {
           Queue::DrawCmd& d = b->draws[c.index];
           d.state.regs = q.regs;
           // A draw whose copies are not recorded yet is the first of its copy segment to
-          // need any: it records the whole segment's (DrawRenderer::Prepare).
+          // need any: it records the whole segment's (Backend::Prepare).
           uint32_t to = copies_issued;
           if (d.copy_end > copies_issued) {
             while (segment < b->segments.size() && b->segments[segment] <= copies_issued) ++segment;
@@ -425,8 +418,8 @@ void NativeRenderer::RenderThreadMain() {
             stats_.guest_swap_ns = s.guest_swap_ns;
             stats_.pace_wait_ns = s.pace_wait_ns;
             stats_.state_fail += s.state_fail;
-            draw_->AddPrepareCounters(s.prep);
-            if (s.log_frames) draw_->LogFrames(s.log_frames);
+            backend_->AddPrepareCounters(s.prep);
+            if (s.log_frames) backend_->LogFrames(s.log_frames);
             if (profile::On()) {
               for (uint32_t i = 0; i < profile::kStageCount; ++i) profile::g.ticks[i] += s.ticks[i];
               profile::g.track_calls += s.track_calls;
@@ -466,11 +459,11 @@ void NativeRenderer::QueueDraw(const uint8_t* base, const HookArgs& args) {
   } else {
     // The render thread records a batch's copies while it runs the batch: each batch starts
     // a copy segment.
-    if (b.draws.size() == 1) draw_->BeginCopySegment();
+    if (b.draws.size() == 1) backend_->BeginCopySegment();
     d.copy_begin = uint32_t(b.copies.size());
     d.audit_begin = uint32_t(b.audits.size());
     // Upload memory of frame F is tagged F + 1: free once F's fence completed.
-    draw_->Prepare(d.state, q.frame + 1, &d.prep, &b.copies, &b.audits);
+    backend_->Prepare(d.state, q.frame + 1, &d.prep, &b.copies, &b.audits);
     d.copy_end = uint32_t(b.copies.size());
     d.audit_end = uint32_t(b.audits.size());
     if (d.prep.copy_segment) b.segments.push_back(d.copy_begin);
@@ -488,7 +481,7 @@ void NativeRenderer::QueueClear(const uint8_t* base, const HookArgs& args) {
   Queue& q = *queue_;
   Queue::Batch& b = *q.current;
   ClearCall& c = b.clears.emplace_back();
-  if (RenderTargets::DecodeClear(base, args, &c))
+  if (DecodeClear(base, args, &c))
     q.Push(Queue::kClear, uint32_t(b.clears.size() - 1));
   else
     b.clears.pop_back();
@@ -521,19 +514,19 @@ void NativeRenderer::QueueSwap(uint8_t* base, const HookArgs& args) {
   s.pace_wait_ns = q.pace_wait_ns;
   Presenter::ReadSwap(base, args, &s.call);
   // Captures with the Xenos copy: from the Swap that arms one (HoldFullReadback) to the one
-  // captured, the next shown (DrawRenderer::FrameIncomplete holds frames back), every Swap runs
+  // captured, the next shown (Backend::SwapResult::incomplete holds frames back), every Swap runs
   // before the guest continues, as without the render thread.
   bool sync = q.capture_armed, requested = false;
   if (sync) {
     s.call.capture_request = 0;
   } else {
-    requested = present_->CaptureRequested(q.frame);
+    requested = backend_->CaptureRequested(q.frame);
     s.call.capture_request = requested ? 1 : 0;
-    sync = requested && present_->capture_holds_guest();
+    sync = requested && backend_->capture_holds_guest();
   }
-  s.prep = draw_->EndFramePrepare(q.gpu_frames_done.load(std::memory_order_acquire));
+  s.prep = backend_->EndFramePrepare(q.gpu_frames_done.load(std::memory_order_acquire));
   s.log_frames = requested ? uint32_t(std::max(0, REXCVAR_GET(fear_d3d12_mark_audit))) : 0;
-  if (s.log_frames) draw_->StartAudit(s.log_frames);
+  if (s.log_frames) backend_->StartAudit(s.log_frames);
   // At most one frame ahead: frame F is queued once the render thread finished F - 1.
   const uint64_t wait = q.WaitFrames(q.frame);
   q.hook_wait_ns += wait;
@@ -554,7 +547,7 @@ void NativeRenderer::QueueSwap(uint8_t* base, const HookArgs& args) {
   // A capture's wait counts towards the next frame.
   const uint64_t capture_wait = sync ? q.WaitFrames(q.frame) : 0;
   // The render thread has run this Swap: the capture is taken, or waits for a shown frame.
-  if (sync) q.capture_armed = present_->capture_holding_guest();
+  if (sync) q.capture_armed = backend_->capture_holding_guest();
   const uint64_t pace_wait = pacer_ ? pacer_->WaitToBegin() : 0;
   const uint64_t t2 = NowNs();
   // The pacer's wait is the gap between two frames, not time in the hook.
@@ -587,7 +580,7 @@ void NativeRenderer::OnClear(const uint8_t* base, const HookArgs& args) {
   if (queue_) return QueueClear(base, args);
   if (g_failed) [[unlikely]]
     return;
-  if (ClearCall c; RenderTargets::DecodeClear(base, args, &c)) ExecuteClear(c);
+  if (ClearCall c; DecodeClear(base, args, &c)) ExecuteClear(c);
 }
 
 void NativeRenderer::OnResolve(const uint8_t* base, const HookArgs& args) {
@@ -619,17 +612,7 @@ void NativeRenderer::ExecuteDraw(const DrawState& state, const DrawPrep* prep) {
   profile::Begin();
   BeginFrame();
   ++stats_.draws;
-  if (gpu_timer_) {
-    uint64_t key;
-    if (gpu_timer_->per_shader() && prep && prep->vs) {
-      const auto [vs, ps] = DrawRenderer::ShaderHashes(*prep);
-      key = gpu_timer_->KeyDrawShaders(state.regs, vs, ps);
-    } else {
-      key = GpuTimer::KeyDraw(state.regs);
-    }
-    gpu_timer_->Pass(device_->command_list(), key);
-  }
-  draw_->OnDraw(state, prep);
+  backend_->Draw(state, prep);
   SubmitEarly();
   draw_ticks_ += Ticks() - t0;
 }
@@ -638,10 +621,7 @@ void NativeRenderer::ExecuteClear(const ClearCall& c) {
   const uint64_t t0 = Ticks();
   BeginFrame();
   ++stats_.clears;
-  if (gpu_timer_) gpu_timer_->Pass(device_->command_list(), GpuTimer::KeyClear(c));
-  draw_->LogClear(c);
-  rt_->Clear(device_->command_list(), c.regs, c.bound_colors, c.depth_bound, c.height, c.p,
-             c.width);
+  backend_->Clear(c);
   clear_ticks_ += Ticks() - t0;
 }
 
@@ -649,34 +629,27 @@ void NativeRenderer::ExecuteResolve(const ResolveParams& p) {
   const uint64_t t0 = Ticks();
   BeginFrame();
   ++stats_.resolves;
-  if (gpu_timer_) gpu_timer_->Pass(device_->command_list(), GpuTimer::KeyResolve(p));
-  draw_->LogResolve(p);
-  // Sets its own compute root signature, pipeline and descriptor heap on the list.
-  resolver_->Resolve(device_->command_list(), p);
-  draw_->InvalidateListState();
+  backend_->Resolve(p);
   resolve_ticks_ += Ticks() - t0;
 }
 
 // With one submission per frame the GPU idles from the end of a frame until the render thread
 // has recorded all of the next one. Every --fear_d3d12_submit_draws draws, the frame so far is
-// submitted and recording goes on in a fresh list, where nothing bound carries over. The texture
-// copies recorded so far read upload memory the untile workers fill: while untiles are still
-// running, the next draw or resolve tries again.
+// submitted and recording goes on in a fresh list, where nothing bound carries over
+// (Backend::SubmitEarly: not ready while texture uploads still run; the next draw tries again).
 void NativeRenderer::SubmitEarly() {
   const int32_t every = REXCVAR_GET(fear_d3d12_submit_draws);
-  if (every <= 0 || stats_.draws - draws_submitted_ < uint64_t(every) || !textures_->UploadsDone())
-    return;
-  profile::Scope scope(profile::kSubmit);
-  if (!CloseUploadLists() || !device_->Submit(upload_lists_)) return Fail();
-  draw_->InvalidateListState(DrawRenderer::ListBreak::kSubmit);
-  draws_submitted_ = stats_.draws;
-  ++stats_.submits;
-}
-
-bool NativeRenderer::CloseUploadLists() {
-  profile::Scope scope(profile::kUploadList);
-  upload_lists_.clear();
-  return textures_->CloseUploadLists(&upload_lists_);
+  if (every <= 0 || stats_.draws - draws_submitted_ < uint64_t(every)) return;
+  switch (backend_->SubmitEarly()) {
+    case Backend::SubmitResult::kNotReady:
+      return;
+    case Backend::SubmitResult::kFailed:
+      return Fail();
+    case Backend::SubmitResult::kSubmitted:
+      draws_submitted_ = stats_.draws;
+      ++stats_.submits;
+      return;
+  }
 }
 
 void NativeRenderer::Fail() {
@@ -689,40 +662,24 @@ void NativeRenderer::Fail() {
 void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
   const uint64_t t0 = NowNs();
   BeginFrame();
-  D3D12Device& d = *device_;
-  if (gpu_timer_) gpu_timer_->Pass(d.command_list(), GpuTimer::KeyPresent());
+  const Backend::SwapResult r = backend_->Swap(swap);
   // A scene's first frame without the draws whose pipelines were compiling: the previous frame
   // stays on screen while the next one waits for them.
-  const bool incomplete = draw_->FrameIncomplete();
-  if (incomplete) ++stats_.frames_held;
-  const bool shown = !incomplete;
-  // The resolved front buffer into the output image (PRESENT in and out).
-  present_->OnSwap(swap, shown);
-  // The frame's texture copies read upload memory the untile workers fill.
-  const uint64_t u0 = NowNs();
-  textures_->FinishUploads();
-  stats_.swap_untile_ns = NowNs() - u0;
-  draw_->BeforeSubmit();
-  const uint64_t fence = d.frame_fence();
-  if (!CloseUploadLists()) return Fail();
-  // The frame to ReXGlue's presenter, which submits it (the texture uploads first) in its
-  // callback; a held or refused frame is submitted here, and the window keeps the last one.
-  const bool handed = shown && present_->HandToPresenter(upload_lists_);
-  if (!d.EndFrame(handed, handed ? std::span<ID3D12CommandList* const>()
-                                 : std::span<ID3D12CommandList* const>(upload_lists_)))
-    return Fail();
-  const D3D12Device::EndFrameTimes& et = d.end_frame_times();
-  stats_.swap_submit_ns = et.submit_ns;
-  stats_.swap_present_ns = et.present_ns;
-  stats_.swap_fence_ns = et.fence_ns;
-  stats_.present = et.presented ? et.presents : 0;
-  if (pacer_ && et.presented)
+  if (r.incomplete) ++stats_.frames_held;
+  if (!r.ok) return Fail();
+  stats_.swap_untile_ns = r.untile_ns;
+  stats_.swap_submit_ns = r.submit_ns;
+  stats_.swap_present_ns = r.present_ns;
+  stats_.swap_fence_ns = r.fence_ns;
+  stats_.present = r.presented ? r.presents : 0;
+  const uint64_t fence = r.fence;
+  if (pacer_ && r.presented)
     pacer_->Presented(fence);
   else if (pacer_)
     pacer_->RetireUnshown();
   ++frame_index_;
   frame_begun_ = false;
-  const uint64_t completed = d.completed_fence();
+  const uint64_t completed = r.completed;
   if (queue_) {
     // Frees the guest thread's vertex upload memory of finished frames (Prepare's tags).
     Queue& q = *queue_;
@@ -732,10 +689,7 @@ void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
       q.frame_fences.pop_front();
     }
   }
-  textures_->Retire(completed);
-  draw_->EndFrame(completed);
-  resolver_->AfterSwap();
-  present_->AfterEndFrame();
+  backend_->AfterSwap(frame_index_, completed);
   const uint64_t t1 = NowNs();
   stats_.swap_ns = t1 - t0;
   stats_.draw_ns = TicksToNs(draw_ticks_);
@@ -754,8 +708,8 @@ void NativeRenderer::ExecuteSwap(const SwapCall& swap) {
 
 void NativeRenderer::AppendCsvColumns(const FrameStats& s, uint64_t frame_ns, bool header,
                                       std::string* line) {
-  const DrawRenderer::Stats& ds = draw_->stats();
-  const TextureCache::Stats& ts = textures_->stats();
+  const DrawStats& ds = backend_->draw_stats();
+  const TextureStats& ts = backend_->texture_stats();
   const CsvCell cells[] = {
       Uint("frame", frame_index_ - 1),
       Uint("draws", s.draws),
@@ -776,7 +730,7 @@ void NativeRenderer::AppendCsvColumns(const FrameStats& s, uint64_t frame_ns, bo
       Fix1("upload_kb", ds.upload_bytes / 1024.0),
       Uint("textures", ds.textures),
       Uint("textures_missing", ds.textures_missing),
-      Uint("front_buffer", present_->front_buffer_found() ? 1 : 0),
+      Uint("front_buffer", backend_->front_buffer_found() ? 1 : 0),
       Fix1("hook_us", s.hook_ns / 1000.0),
       Fix1("hook_wait_us", s.hook_wait_ns / 1000.0),
       Uint("reg_writes", s.reg_writes),
@@ -786,7 +740,7 @@ void NativeRenderer::AppendCsvColumns(const FrameStats& s, uint64_t frame_ns, bo
       Fix1("swap_fence_us", s.swap_fence_ns / 1000.0),
       Fix1("hook_max_us", s.hook_max_ns / 1000.0),
       Uint("watch_faults", ds.watch_faults),
-      Fix3("gpu_prev_ms", gpu_timer_ ? gpu_timer_->last_frame_ms() : 0.0),
+      Fix3("gpu_prev_ms", backend_->gpu_last_frame_ms()),
       Uint("copy_batches", ds.copy_batches),
       Uint("watch_arms", ds.watch_arms),
       Uint("watch_arm_pages", ds.watch_arm_pages),
@@ -803,8 +757,8 @@ void NativeRenderer::AppendCsvColumns(const FrameStats& s, uint64_t frame_ns, bo
       Uint("coh_late", ds.late_pages),
       Uint("coh_gpu", ds.gpu_mismatch_pages),
       Uint("coh_regs", ds.reg_mismatches),
-      Fix1("tex_mb", textures_->resident_bytes() / 1048576.0),
-      Uint("tex_count", textures_->texture_count()),
+      Fix1("tex_mb", backend_->texture_resident_bytes() / 1048576.0),
+      Uint("tex_count", backend_->texture_count()),
       Uint("tex_evicted", ts.evicted - csv_->evicted_prev),
       Fix1("tex_evict_us", (ts.evict_ns - csv_->evict_ns_prev) / 1000.0),
       Uint("views", ds.views),
@@ -833,9 +787,9 @@ void NativeRenderer::AppendCsvProfileColumns(bool header, std::string* line) {
     else
       AppendCsvCell(Fix1("", double(TicksToNs(profile::g.ticks[i])) / 1000.0), false, true, line);
   }
-  const DrawRenderer::Stats& ds = draw_->stats();
-  const TextureCache::Stats& t = textures_->stats();
-  const TextureCache::Stats& p = csv_->tex_prev;
+  const DrawStats& ds = backend_->draw_stats();
+  const TextureStats& t = backend_->texture_stats();
+  const TextureStats& p = csv_->tex_prev;
   const CsvCell cells[] = {
       Uint("track_calls", profile::g.track_calls),
       Uint("tex_memo_miss", t.memo_misses - p.memo_misses),
@@ -862,7 +816,7 @@ void NativeRenderer::AppendCsvProfileColumns(bool header, std::string* line) {
 }
 
 void NativeRenderer::AppendCsvLumaColumns(bool header, std::string* line) {
-  const LumaProbe& l = present_->luma_probe();
+  const LumaProbe& l = backend_->luma_probe();
   AppendCsvCell(Uint("luma_frame", l.frame), header, true, line);
   static constexpr const char* kRowNames[LumaProbe::kRows] = {"top", "mid", "low"};
   for (uint32_t row = 0; row < LumaProbe::kRows; ++row) {
@@ -880,11 +834,11 @@ void NativeRenderer::WriteCsvRow(const FrameStats& s, uint64_t frame_ns) {
   if (!c.file) return;
   c.line.clear();
   AppendCsvColumns(s, frame_ns, false, &c.line);
-  c.evicted_prev = textures_->stats().evicted;
-  c.evict_ns_prev = textures_->stats().evict_ns;
+  c.evicted_prev = backend_->texture_stats().evicted;
+  c.evict_ns_prev = backend_->texture_stats().evict_ns;
   if (profile::On()) {
     AppendCsvProfileColumns(false, &c.line);
-    c.tex_prev = textures_->stats();
+    c.tex_prev = backend_->texture_stats();
   }
   if (c.luma) AppendCsvLumaColumns(false, &c.line);
   c.line += '\n';
@@ -901,7 +855,7 @@ void NativeRenderer::AddToStatsLog(const FrameStats& s, uint64_t frame_ns) {
   w.hook_ns += s.hook_ns;
   w.hook_wait_ns += s.hook_wait_ns;
   {
-    const DrawRenderer::Stats& ds = draw_->stats();
+    const DrawStats& ds = backend_->draw_stats();
     w.skipped += ds.skipped;
     w.failed += ds.failed;
     w.unsupported += ds.unsupported;
@@ -943,18 +897,13 @@ void NativeRenderer::AddToStatsLog(const FrameStats& s, uint64_t frame_ns) {
     for (uint64_t& t : w.stage_ticks) t = 0;
     w.track_calls = 0;
   }
-  if (gpu_timer_) {
-    gpu_timer_->Log();
-    for (uint64_t hash : gpu_timer_->TakeNewTopShaders())
-      REXLOG_INFO("D3D12 GPU: shader {:016X} ucode:\n{}", hash,
-                  draw_->ShaderDisassembly(hash));
-  }
+  backend_->LogGpuTiming();
   w.frames = w.draws = w.draw_ns = w.swap_ns = w.frame_ns = w.hook_ns = w.hook_wait_ns = 0;
   w.skipped = w.failed = w.unsupported = w.pso_pending = w.textures_missing = w.watch_faults = 0;
 }
 
 void NativeRenderer::ResetFrameCounters() {
-  draw_->ResetStats();
+  backend_->ResetDrawStats();
   if (profile::On()) {
     for (uint64_t& t : profile::g.ticks) t = 0;
     profile::g.track_calls = 0;

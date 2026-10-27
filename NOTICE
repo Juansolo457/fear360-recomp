@@ -34,7 +34,8 @@ BSD code keeps its own terms: it isn't relicensed as MIT.
      (https://github.com/rexglue/rexglue-sdk, BSD-3-Clause, derived in part from Xenia). This is
      SDK build scaffolding, not a translation of game code.
    - patches/rexglue-sdk-nx/0001-*.patch and on are this project's changes to the SDK, under the
-     SDK's BSD-3-Clause license; their context lines are ReXGlue and Xenia code.
+     SDK's BSD-3-Clause license; their context lines are ReXGlue and Xenia code. 0019 to 0021
+     come from GRAW 360 Recompiled's tools/patches/, by the same author.
    - Parts of port-nx/src/native/ (and of fear-nx's renderer in this repository's history)
      originate in Xenia (https://github.com/xenia-project/xenia, BSD-3-Clause), reached through
      ReXGlue and fear-nx; Xenia's notice applies to those parts as well as the GPL.
@@ -46,10 +47,11 @@ BSD code keeps its own terms: it isn't relicensed as MIT.
      and the libraries in its thirdparty/ keep their own licenses.
 
 4. MIT, pgr4-native (port-nx/src/d3d12/LICENSE.pgr4-native)
-   - port-nx/src/d3d12/, the D3D12 renderer, is ported from GRAW 360 Recompiled's native/
-     (https://github.com/Juansolo457/graw360-recomp, commit 1b42337, MIT), which ports it from
-     pgr4-native (https://github.com/shaunsingh/pgr4-native, commit 8ea20d5, MIT). Its README.md
-     lists the changes; F.E.A.R.'s own front end is fear_d3d.h and fear_d3d_hooks.cpp.
+   - port-nx/src/d3d12/, the renderer (D3D12 and Vulkan), is ported from GRAW 360 Recompiled's
+     native/ (https://github.com/Juansolo457/graw360-recomp, commits 1b42337 and 0377b6c, the
+     latter with its Vulkan backend and shaders, MIT), which ports it from pgr4-native
+     (https://github.com/shaunsingh/pgr4-native, commit 8ea20d5, MIT). Its README.md lists the
+     changes; F.E.A.R.'s own front end is fear_d3d.h and fear_d3d_hooks.cpp.
    - patches/rexglue-sdk-nx/0016-*.patch and 0017-*.patch are pgr4-native's SDK patches 0021 and
      0022 (shader translator changes the renderer needs), as GRAW 360 Recompiled carries them, by
      their author; their context lines are ReXGlue and Xenia code (3).

@@ -3,7 +3,9 @@
 // See present.h.
 #include "present.h"
 
+#include "d3d12_backend.h"
 #include "d3d12_device.h"
+#include "gamma_ramp.h"
 #include "guest_memory.h"
 #include "present_debug.h"
 #include "renderer.h"
@@ -32,6 +34,7 @@
 #include <thread>
 #include <vector>
 
+REXCVAR_DECLARE(bool, fear_d3d12_luma_probe);
 REXCVAR_DEFINE_STRING(
     fear_d3d12_capture_dir, "", "F.E.A.R. D3D12",
     "Folder for front buffer captures (native + Xenos PNGs, PSNR), marks and draw "
@@ -50,10 +53,6 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_capture_xenos, false, "F.E.A.R. D3D12",
                     "between them, holding the guest thread (--fear_d3d12_capture_hold_ms); "
                     "false: the native image alone, written off the guest thread. Nothing else "
                     "writes the front buffer into guest memory now (fear-nx's renderer is gone)");
-REXCVAR_DEFINE_BOOL(fear_d3d12_luma_probe, false, "F.E.A.R. D3D12",
-                    "Read back three rows of every front buffer (at 10, 40 and 80 % of its "
-                    "height) and log their mean brightness in the frame CSV, to find frames "
-                    "drawn partly black");
 REXCVAR_DEFINE_INT32(fear_d3d12_hdr_paper_white, 400, "F.E.A.R. D3D12",
                      "HDR output: the luminance of SDR white (the HUD, the game's 1.0) in nits. "
                      "400 is what gamescope shows SDR content at (--hdr-sdr-content-nits), so the "
@@ -68,19 +67,9 @@ using present_debug::WritePng;
 
 namespace {
 
-// The display controller's gamma ramp, as the Xenos command processor holds it from the guest's
-// DC_LUT register writes: 128 PWL entries per channel (DC_LUT_PWL_DATA: base 0:15, delta
-// 16:31) for 2_10_10_10 front buffers, 256 table entries (DC_LUT_30_COLOR: blue 0:9, green
-// 10:19, red 20:29) for 8_8_8_8 ones, as D3D's presentation parameters set them up. The ramp
-// math follows Xenia's apply_gamma_pwl / apply_gamma_table (BSD-3-Clause, see
-// THIRD_PARTY_NOTICES.md). The ramp applies to each texel before filtering, so a scaled image
-// filters display values like the console's scaler does.
-enum RampMode : uint32_t { kRampNone = 0, kRampPwl = 1, kRampTable = 2 };
-constexpr uint32_t kPwlWords = 128 * 3, kTableWords = 256;
+// The display controller's gamma ramp: gamma_ramp.h.
 constexpr uint32_t kRampSlotBytes = kPwlWords * 4;  // a multiple of the 256-byte CBV alignment
 static_assert(kRampSlotBytes % D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT == 0);
-static_assert(sizeof(rex::graphics::reg::DC_LUT_PWL_DATA) == 4 &&
-              sizeof(rex::graphics::reg::DC_LUT_30_COLOR) == 4);
 
 // image_size: the image in texels (the texture can be larger than the image); point: the
 // viewport is the image's size, every pixel is one texel.
@@ -153,12 +142,6 @@ float4 ps(float4 pos : SV_Position, float2 texel : TEXCOORD0) : SV_Target {
 }
 )";
 
-// Output of a PWL ramp channel for a 10-bit input (the shader's math), for the log.
-double PwlOut(const uint32_t* words, uint32_t channel, uint32_t x) {
-  const uint32_t w = words[(x >> 3) * 3 + channel];
-  return std::min(1.0, ((w & 0xFFFFu) + (x & 7u) * (w >> 16) / 8.0) / 65472.0);
-}
-
 double Psnr(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
   if (a.size() != b.size() || a.empty()) return 0.0;
   double se = 0.0;
@@ -199,7 +182,7 @@ bool ReadbackRgb(ID3D12Resource* readback, uint32_t row_pitch, uint32_t width, u
 }  // namespace
 
 struct Presenter::Impl {
-  NativeRenderer& r;
+  D3D12Backend& r;
   ComPtr<ID3D12RootSignature> root_signature;
   ComPtr<ID3D12PipelineState> pso, hdr_pso;  // into kBackBufferFormat, kHdrBackBufferFormat
   ComPtr<ID3D12DescriptorHeap> heap;
@@ -208,10 +191,7 @@ struct Presenter::Impl {
   // One gamma ramp slot per frame in flight (D3D12Device::frame_slot), persistently mapped.
   ComPtr<ID3D12Resource> ramp_buffer;
   uint8_t* ramp_mapped = nullptr;
-  uint32_t last_ramp[kPwlWords] = {};
-  RampMode last_ramp_mode = kRampNone;
-  uint32_t ramp_changes_logged = 0;
-  float ramp_white[3] = {1.0f, 1.0f, 1.0f};  // the last ramp's output for 1.0, display-encoded
+  GammaRamp gamma;
 
   struct Capture {
     bool armed = false;  // requested: capture the next shown frame
@@ -235,7 +215,7 @@ struct Presenter::Impl {
   present_debug::GlitchCatch glitch;
   present_debug::LumaProbeReadback probe;
 
-  explicit Impl(NativeRenderer& renderer) : r(renderer) {}
+  explicit Impl(D3D12Backend& renderer) : r(renderer) {}
   ~Impl() {
     if (capture.writer.joinable()) capture.writer.join();
   }
@@ -340,49 +320,8 @@ bool Presenter::Impl::Initialize() {
 }
 
 bool Presenter::Impl::WriteRamp(RampMode mode, uint32_t slot) {
-  // F.E.A.R.: the ramp comes from fear-nx's ring (native_system.h), which keeps the 256-entry
-  // table only; a front buffer that asks for the PWL ramp (10:10:10:2) is shown without one.
-  const uint32_t* words = mode == kRampTable ? fear_nx::native::GammaRamp256() : nullptr;
-  if (!words) {
-    if (mode == kRampPwl) {
-      static bool logged = false;
-      if (!logged) {
-        logged = true;
-        REXLOG_WARN("D3D12 present: the front buffer asks for the PWL gamma ramp, which fear-nx "
-                    "does not track; shown without a ramp");
-      }
-    }
-    return false;
-  }
-  const uint32_t count = mode == kRampPwl ? kPwlWords : kTableWords;
-  // The ring thread writes the ramp as it executes the guest's register writes; a ramp read
-  // during an update shows for one frame, the next frame reads the finished one.
-  uint32_t ramp[kPwlWords];
-  for (uint32_t i = 0; i < count; ++i) ramp[i] = __atomic_load_n(words + i, __ATOMIC_RELAXED);
-  std::memcpy(ramp_mapped + size_t(slot) * kRampSlotBytes, ramp, count * 4);
-  if (mode != last_ramp_mode || std::memcmp(ramp, last_ramp, count * 4)) {
-    last_ramp_mode = mode;
-    std::memcpy(last_ramp, ramp, count * 4);
-    for (uint32_t c = 0; c < 3; ++c)
-      ramp_white[c] = mode == kRampPwl ? float(PwlOut(ramp, c, 1023))
-                                       : float((ramp[255] >> (20 - 10 * c)) & 1023) / 1023.0f;
-    if (ramp_changes_logged < 8) {
-      ++ramp_changes_logged;
-      if (mode == kRampPwl)
-        REXLOG_INFO(
-            "D3D12 present: PWL gamma ramp at frame {}: 0.25/0.5/0.75 -> R {:.3f} "
-            "{:.3f} {:.3f}, G {:.3f} {:.3f} {:.3f}, B {:.3f} {:.3f} {:.3f}",
-            r.frame_index(), PwlOut(ramp, 0, 256), PwlOut(ramp, 0, 512), PwlOut(ramp, 0, 767),
-            PwlOut(ramp, 1, 256), PwlOut(ramp, 1, 512), PwlOut(ramp, 1, 767), PwlOut(ramp, 2, 256),
-            PwlOut(ramp, 2, 512), PwlOut(ramp, 2, 767));
-      else
-        REXLOG_INFO(
-            "D3D12 present: gamma table at frame {}: 64/128/192 -> R {} {} {} (of 1023)",
-            r.frame_index(), (ramp[64] >> 20) & 1023, (ramp[128] >> 20) & 1023,
-            (ramp[192] >> 20) & 1023);
-    }
-  }
-  return true;
+  return gamma.Read(mode, r.frame_index(),
+                    reinterpret_cast<uint32_t*>(ramp_mapped + size_t(slot) * kRampSlotBytes));
 }
 
 bool Presenter::Impl::CaptureRequested(uint64_t frame) {
@@ -604,7 +543,7 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
                                  {}};
       for (uint32_t c = 0; c < 3; ++c)
         constants.white[c] =
-            constants.ramp_mode == kRampNone ? 1.0f : std::pow(ramp_white[c], 2.2f);
+            constants.ramp_mode == kRampNone ? 1.0f : std::pow(gamma.white()[c], 2.2f);
       list->SetGraphicsRoot32BitConstants(1, sizeof(constants) / 4, &constants, 0);
       list->SetGraphicsRootConstantBufferView(
           2, ramp_buffer->GetGPUVirtualAddress() + uint64_t(ramp_slot) * kRampSlotBytes);
@@ -675,21 +614,12 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
   }
 }
 
-Presenter::Presenter(NativeRenderer& renderer) : impl_(std::make_unique<Impl>(renderer)) {}
+Presenter::Presenter(D3D12Backend& renderer) : impl_(std::make_unique<Impl>(renderer)) {}
 Presenter::~Presenter() = default;
 
 bool Presenter::Initialize() { return impl_->Initialize(); }
 
 bool Presenter::CaptureRequested(uint64_t frame) { return impl_->CaptureRequested(frame); }
-
-void Presenter::ReadSwap(const uint8_t* base, const HookArgs& args, SwapCall* out) {
-  // The front buffer texture's fetch constant (D3DBaseTexture + 16 in GRAW's XDK; Swap
-  // sub_824CC9C8 reads +20..+28).
-  out->texture = args.r[1];
-  if (out->texture)
-    for (int i = 0; i < 6; ++i)
-      out->fetch[i] = Load32(base, out->texture + kTextureFetchOffset + 4 * i);
-}
 
 void Presenter::OnSwap(const SwapCall& swap, bool shown) { impl_->OnSwap(swap, shown); }
 
