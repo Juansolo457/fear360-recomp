@@ -132,6 +132,10 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   bool pipeline_wait_ = false;
   // --fear_d3d12_vulkan_skip_draws: this frame's draw count, and the range skipped.
   uint32_t frame_draw_ = 0;
+  uint64_t skip_vs_ = 0;  // --fear_d3d12_vulkan_skip_vs
+  uint64_t dump_after_vs_ = 0;  // --fear_d3d12_vulkan_dump_after_vs
+  int64_t dump_at_ = -1;         // the frame it picked (-1: none yet)
+  uint32_t dump_after_count_ = 0;
   uint32_t skip_first_ = UINT32_MAX, skip_last_ = 0;
   DrawStats stats_;
   bool front_buffer_found_ = false;

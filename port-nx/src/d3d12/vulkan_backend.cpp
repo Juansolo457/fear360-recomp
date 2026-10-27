@@ -17,6 +17,7 @@
 #include "vulkan_textures.h"
 #include "../pipeline_warmup.h"
 
+#include <fmt/format.h>
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
@@ -29,6 +30,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -62,6 +64,18 @@ REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_dump_target_draws, "", "F.E.A.R. D3D12",
 REXCVAR_DEFINE_INT32(fear_d3d12_vulkan_resolve_dump_frames, 1, "F.E.A.R. D3D12",
                      "The frames --fear_d3d12_vulkan_resolve_dump dumps from "
                      "--fear_d3d12_vulkan_resolve_dump_frame on");
+REXCVAR_DEFINE_INT32(fear_d3d12_vulkan_draw_log_frame, -1, "F.E.A.R. D3D12",
+                     "With --fear_d3d12_api=vulkan, debug: log every draw of this frame (targets, "
+                     "depth and stencil state, blending, viewport depth range, depth bias), to "
+                     "compare with the D3D12 draw log (-1: off)");
+REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_dump_after_vs, "", "F.E.A.R. D3D12",
+                      "With --fear_d3d12_vulkan_resolve_dump, debug: dump (and draw-log) the frame "
+                      "after the first one, from --fear_d3d12_vulkan_resolve_dump_frame on, that "
+                      "draws with this vertex shader (ucode hash, 16 hex digits; :<n> also needs n "
+                      "vertices)");
+REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_skip_vs, "", "F.E.A.R. D3D12",
+                      "With --fear_d3d12_api=vulkan, debug: skip every draw whose vertex shader "
+                      "has this ucode hash (16 hex digits, as the draw log prints it)");
 REXCVAR_DEFINE_INT32(fear_d3d12_vulkan_resolve_dump_frame, -1, "F.E.A.R. D3D12",
                      "The native frame --fear_d3d12_vulkan_resolve_dump dumps (-1: none)");
 REXCVAR_DECLARE(bool, fear_d3d12_render_thread);
@@ -138,6 +152,7 @@ struct VulkanBackend::Gpu {
     uint64_t frame = 0, fence = 0;  // the frame it belongs to, and its fence
     int32_t target_draw = -1;  // a render target after this draw (DumpTarget), not a resolve
     uint32_t target_format = 0, target_base = 0, target_pitch = 0, samples = 1;
+    bool target_depth = false;  // the depth target's depth aspect (24 bits in 32), not color 0
     VulkanMemory::Buffer readback;
   };
   std::vector<DumpEntry> dump;
@@ -406,7 +421,16 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
     }
   }
   if (!mods.pixel_shader_used) ps = nullptr;
-  if (draw_index >= skip_first_ && draw_index <= skip_last_) {
+  // --fear_d3d12_vulkan_dump_after_vs: the dumps and the draw log start on the frame after the
+  // first one from --fear_d3d12_vulkan_resolve_dump_frame on that draws with this vertex shader.
+  if (dump_after_vs_ && dump_at_ < 0 && vs->ucode_data_hash() == dump_after_vs_ &&
+      (!dump_after_count_ || state.count == dump_after_count_) &&
+      int64_t(frame_index_) >= int64_t(REXCVAR_GET(fear_d3d12_vulkan_resolve_dump_frame))) {
+    dump_at_ = int64_t(frame_index_) + 1;
+    REXLOG_INFO("D3D12 Vulkan: dumping frame {}", dump_at_);
+  }
+  if ((draw_index >= skip_first_ && draw_index <= skip_last_) ||
+      (skip_vs_ && vs->ucode_data_hash() == skip_vs_)) {
     ++stats_.skipped;
     return;
   }
@@ -702,10 +726,26 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   fn.vkCmdSetScissor(cmd, 0, 1, &scissor_rect);
   float poly_offset = 0.0f, poly_offset_scale = 0.0f;
   if (rasterization) GetPreferredFacePolygonOffset(regs, polygonal, poly_offset_scale, poly_offset);
-  fn.vkCmdSetDepthBias(cmd,
-                       float(rex::graphics::draw_util::GetD3D10IntegerPolygonOffset(
-                           regs.Get<reg::RB_DEPTH_INFO>().depth_format, poly_offset)),
-                       0.0f, poly_offset_scale * xenos::kPolygonOffsetScaleSubpixelUnit);
+  // The polygon offset in D3D's integer units of the depth format's r, as the D3D12 backend sets
+  // it. Plain vkCmdSetDepthBias lets the driver scale it by up to 2 (NVIDIA's D24 does), which
+  // turned the guns' -0.5 offset (their view model drawn in front of the world) into -1 and
+  // their depth into 0; exact depth bias keeps D3D's scale.
+  const float depth_bias = float(rex::graphics::draw_util::GetD3D10IntegerPolygonOffset(
+      regs.Get<reg::RB_DEPTH_INFO>().depth_format, poly_offset));
+  const float slope_bias = poly_offset_scale * xenos::kPolygonOffsetScaleSubpixelUnit;
+  if (fn.vkCmdSetDepthBias2EXT) {
+    VkDepthBiasRepresentationInfoEXT representation{
+        VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT};
+    representation.depthBiasRepresentation =
+        VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORMAT_EXT;
+    representation.depthBiasExact = VK_TRUE;
+    VkDepthBiasInfoEXT bias{VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT, &representation};
+    bias.depthBiasConstantFactor = depth_bias;
+    bias.depthBiasSlopeFactor = slope_bias;
+    fn.vkCmdSetDepthBias2EXT(cmd, &bias);
+  } else {
+    fn.vkCmdSetDepthBias(cmd, depth_bias, 0.0f, slope_bias);
+  }
   const float blend_constants[4] = {regs.Get<float>(rex::graphics::XE_GPU_REG_RB_BLEND_RED),
                                     regs.Get<float>(rex::graphics::XE_GPU_REG_RB_BLEND_GREEN),
                                     regs.Get<float>(rex::graphics::XE_GPU_REG_RB_BLEND_BLUE),
@@ -729,22 +769,62 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   } else {
     fn.vkCmdDraw(cmd, state.count, 1, 0, 0);
   }
+  if (int64_t(frame_index_) ==
+      (dump_at_ >= 0 ? dump_at_ : int64_t(REXCVAR_GET(fear_d3d12_vulkan_draw_log_frame)))) {
+    const auto surface = [](const VulkanRenderTarget* rt) {
+      return rt ? fmt::format("{}:{}x{}/{}@{}", rt->edram_base, rt->width, rt->height,
+                              int(rt->format), rt->samples)
+                : std::string("-");
+    };
+    const VulkanPipelineKey::Rt& r0 = key.rt[0];
+    REXLOG_INFO(
+        "D3D12 Vulkan draw {} vs={:016X} ps={:016X} prim={} n={} rt0={} ds={} z={}/{}/{} st={} "
+        "cull={} cw={} clamp={} blend={}:{}/{}/{},{}/{}/{} mask={:X} dc={:08X} vp_z={:.4f}-{:.4f} "
+        "po={}/{} sc={},{},{},{} flags={:08X} ndc_z_scale={} ndc_z_offset={} vte={:08X} "
+        "clip={:08X} c2={},{},{},{}",
+        draw_index, vs->ucode_data_hash(), ps ? ps->ucode_data_hash() : 0, uint32_t(prim),
+        state.count, surface(bound.color[0]), surface(bound.depth), key.depth_test,
+        key.depth_write, key.depth_compare, key.stencil_test, key.cull, key.front_cw,
+        key.depth_clamp, r0.blend, r0.src, r0.dst, r0.op, r0.src_a, r0.dst_a, r0.op_a, r0.mask,
+        regs[rex::graphics::XE_GPU_REG_RB_DEPTHCONTROL], vp.z_min, vp.z_max, poly_offset,
+        poly_offset_scale, scissor_rect.offset.x, scissor_rect.offset.y,
+        scissor_rect.extent.width, scissor_rect.extent.height, sys.flags, sys.ndc_scale[2],
+        sys.ndc_offset[2], regs[rex::graphics::XE_GPU_REG_PA_CL_VTE_CNTL],
+        regs[rex::graphics::XE_GPU_REG_PA_CL_CLIP_CNTL],
+        regs.Get<float>(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_000_X + 8),
+        regs.Get<float>(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_000_X + 9),
+        regs.Get<float>(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_000_X + 10),
+        regs.Get<float>(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_000_X + 11));
+  }
   ++stats_.draws;
   if (draw_index >= dump_target_first_ && draw_index <= dump_target_last_ && bound.color[0] &&
       DumpingFrame())
     DumpTarget(bound.color[0], draw_index);
+  if (draw_index >= dump_target_first_ && draw_index <= dump_target_last_ && bound.depth &&
+      DumpingFrame())
+    DumpTarget(bound.depth, draw_index);
 }
 
 void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
   if (rt->samples != 1) return;  // MSAA images can't be copied to buffers
+  const VkImageAspectFlags aspect =
+      rt->depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+  const VkImageLayout layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                         : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  const VkPipelineStageFlags stage = rt->depth ? (VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                                  VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
+                                               : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  const VkAccessFlags write = rt->depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                                        : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   Gpu::DumpEntry e;
+  e.target_depth = rt->depth;
   e.target_draw = int32_t(index);
   e.target_format = rt->guest_format;
   e.target_base = rt->edram_base;
   e.target_pitch = rt->pitch;
   e.width = rt->width;
   e.height = std::min(rt->height, 2048u);
-  e.bpp = FormatBytes(rt->format);
+  e.bpp = rt->depth ? 4 : FormatBytes(rt->format);
   if (!gpu_->memory.CreateReadbackBuffer(uint64_t(e.width) * e.height * e.bpp, &e.readback,
                                          "render target dump readback"))
     return;
@@ -754,25 +834,27 @@ void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
   VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   b.image = rt->image.image;
-  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b.subresourceRange = {rt->depth ? VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT |
+                                                         VK_IMAGE_ASPECT_STENCIL_BIT)
+                                   : aspect,
+                         0, 1, 0, 1};
+  b.oldLayout = layout;
   b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b.srcAccessMask = write;
   b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+  fn.vkCmdPipelineBarrier(cmd, stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                          &b);
   VkBufferImageCopy region{};
-  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.imageSubresource = {aspect, 0, 0, 1};
   region.imageExtent = {e.width, e.height, 1};
   fn.vkCmdCopyImageToBuffer(cmd, rt->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                             e.readback.buffer, 1, &region);
   b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b.newLayout = layout;
   b.srcAccessMask = 0;
-  b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr,
-                          1, &b);
+  b.dstAccessMask = write;
+  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, stage, 0, 0, nullptr, 0, nullptr, 1,
+                          &b);
   e.frame = frame_index_;
   e.fence = device_->frame_fence();
   gpu_->dump.push_back(std::move(e));
@@ -998,7 +1080,8 @@ void VulkanBackend::DumpRecord(const ResolveParams& p, uint32_t width, uint32_t 
 }
 
 bool VulkanBackend::DumpingFrame() const {
-  const int32_t at = REXCVAR_GET(fear_d3d12_vulkan_resolve_dump_frame);
+  // With --fear_d3d12_vulkan_dump_after_vs, only the frame it picks.
+  const int64_t at = dump_after_vs_ ? dump_at_ : REXCVAR_GET(fear_d3d12_vulkan_resolve_dump_frame);
   return at >= 0 && frame_index_ >= uint64_t(at) &&
          frame_index_ < uint64_t(at) + uint64_t(std::max(1, REXCVAR_GET(fear_d3d12_vulkan_resolve_dump_frames)));
 }
@@ -1015,7 +1098,9 @@ void VulkanBackend::DumpWrite(uint64_t completed) {
     gpu_->memory.Invalidate(e.readback);
     if (e.target_draw >= 0) {
       const std::string stem = prefix + "-d" + std::to_string(e.target_draw);
-      if (std::FILE* f = std::fopen((dir / (stem + "-rt.bin")).string().c_str(), "wb")) {
+      if (std::FILE* f =
+              std::fopen((dir / (stem + (e.target_depth ? "-ds.bin" : "-rt.bin"))).string().c_str(),
+                         "wb")) {
         std::fwrite(e.readback.mapped, 1, size_t(e.width) * e.height * e.bpp, f);
         std::fclose(f);
       }
@@ -1498,6 +1583,14 @@ void VulkanBackend::BeginFrame(uint64_t frame_index) {
   const std::string skip = REXCVAR_GET(fear_d3d12_vulkan_skip_draws);
   if (!skip.empty() && std::sscanf(skip.c_str(), "%u-%u", &skip_first_, &skip_last_) != 2)
     skip_first_ = UINT32_MAX;
+  skip_vs_ = std::strtoull(REXCVAR_GET(fear_d3d12_vulkan_skip_vs).c_str(), nullptr, 16);
+  {
+    // <hash>[:<vertex count>]
+    const std::string after = REXCVAR_GET(fear_d3d12_vulkan_dump_after_vs);
+    char* end = nullptr;
+    dump_after_vs_ = std::strtoull(after.c_str(), &end, 16);
+    dump_after_count_ = end && *end == ':' ? uint32_t(std::strtoul(end + 1, nullptr, 10)) : 0;
+  }
   gpu_->targets.BeginFrame(frame_index, device_->frame_fence(), device_->completed_fence());
 }
 

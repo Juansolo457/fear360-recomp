@@ -5,7 +5,9 @@ Started 2026-10-26, on branch `vulkan-linux`. The renderer (`port-nx/src/d3d12/`
 Deck run the game natively instead of through Proton. GRAW did the work first
 ([graw360-recomp#44](https://github.com/Juansolo457/graw360-recomp/pull/44), its
 `docs/VULKAN_RENDERER.md` has the plan, the milestones and what each one found); this is the port
-of it to F.E.A.R. **Status: written, not built or run yet.**
+of it to F.E.A.R. **Status: built on Windows (both games); F.E.A.R. played on Vulkan on Windows
+(2026-10-27, RTX 4090): consistent frames, the menus and settings fine, guns fixed (below). Linux
+and the Deck not built yet.**
 
 ## Decisions (2026-10-26)
 - **D3D12 stays the Windows default.** Vulkan on Windows is a comparison flag only,
@@ -77,7 +79,21 @@ F.E.A.R. was ported from):
   - `k_4_4_4_4` textures (fonts, HUD) as `VK_FORMAT_A4R4G4B4_UNORM_PACK16` (core in Vulkan 1.3,
     optional: a GPU without it fails those textures, logged);
   - the shader load bound (a ucode address past physical memory isn't read);
-  - the pipeline warm-up before the first draw, with its panel (`fear_d3d12_warmup`).
+  - the pipeline warm-up before the first draw, with its panel (`fear_d3d12_warmup`);
+  - **exact depth bias** (`VK_EXT_depth_bias_control`, which the SDK's device enables where the
+    GPU has it): the guns' view model is drawn with a -0.5 polygon offset to sit in front of the
+    world. Plain `vkCmdSetDepthBias` lets the driver scale the bias by up to 2, and NVIDIA's D24
+    does, so the view model's depth went to 0 and the gun's far side showed through its near side
+    (transparent-looking guns). `vkCmdSetDepthBias2EXT` with `depthBiasExact` keeps D3D's scale;
+    without the extension, the plain call stays.
+- **Debug switches for comparing with D3D12** (beside GRAW's `--fear_d3d12_vulkan_skip_draws` and
+  the resolve and target dumps): `--fear_d3d12_vulkan_draw_log_frame` logs every draw of a frame
+  (targets, depth and stencil state, blending, viewport depth, depth bias);
+  `--fear_d3d12_vulkan_skip_vs` skips the draws of one vertex shader;
+  `--fear_d3d12_vulkan_dump_after_vs` picks the dumped frame as the one after a given vertex shader
+  first draws, since frame numbers land on different scenes from run to run; the target dumps also
+  write the depth target after each dumped draw (`-ds.bin`, depth in the low 24 bits).
+  `tools/autoplay.ps1 -ThenWhenDraws N` switches to `-ThenKey` once gameplay starts.
 - **One build file for both games:** `port-nx/cmake/fear_common.cmake` (the renderer's object
   library, Windows: every file, Linux: without the D3D12 backend's; the static plugin linked whole;
   the runtime libraries staged beside the program on Linux).
@@ -91,8 +107,10 @@ F.E.A.R. was ported from):
 - **Steam Deck:** `tools/build-deck.sh` (podman), with its own SDK checkout and build folders.
 
 ## Not done yet
-- **Building and running any of it.** The order: Windows D3D12 first (must be unchanged), then
-  Windows Vulkan against D3D12 (captures, frame times), then Linux (WSL), then the Deck.
+- **A Windows D3D12 run on this branch** (it must be unchanged), then Linux (WSL), then the Deck:
+  60 fps as its Vulkan baseline, then see how 120 goes.
+- On a GPU without exact depth bias, or with a 32-bit float buffer standing in for D24 (AMD, the
+  Deck), the polygon offset's size depends on the primitive's depth: check the guns on the Deck.
 - On Vulkan, as in GRAW: GPU timing (`--fear_d3d12_gpu_timing`), the capture tools and the luma
   probe, HDR, texture eviction, untiling on worker threads.
 - The Deck package (`tools/steamdeck/make_package.py`) still packs the Windows builds for Proton;

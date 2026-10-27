@@ -105,6 +105,8 @@ class VulkanDevice {
     FEAR_VK_INSTANCE_FUNCTIONS(FEAR_VK_DECLARE)
     FEAR_VK_DEVICE_FUNCTIONS(FEAR_VK_DECLARE)
 #undef FEAR_VK_DECLARE
+    // VK_EXT_depth_bias_control's, where the SDK's device enabled it (else null).
+    PFN_vkCmdSetDepthBias2EXT vkCmdSetDepthBias2EXT = nullptr;
   };
 
   // What the device has enabled among what the SPIR-V translator can use (its Features).
@@ -129,6 +131,9 @@ class VulkanDevice {
     bool signed_zero_inf_nan_preserve_float32 = false;
     bool denorm_flush_to_zero_float32 = false;
     bool rounding_mode_rte_float32 = false;
+    // VK_EXT_depth_bias_control's depthBiasExact: the constant depth bias in exactly the depth
+    // format's r, as D3D does, not up to twice that as Vulkan otherwise allows.
+    bool depth_bias_exact = false;
   };
 
   // What the last EndFrame did (the frame CSV's swap columns).
