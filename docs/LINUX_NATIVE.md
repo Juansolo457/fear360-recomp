@@ -19,6 +19,10 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   starts (`fear::panel::ReleaseControllers`), and the panels latch SDL's button presses (a tap
   between frames, or a pad opened mid-press). Checked in WSL with a virtual Xbox 360 pad (uinput):
   the menu, then the game past Press Start, in both games.
+- The second Deck test: SIGBUS in a guest memcpy (F.E.A.R. Files loading a level, after
+  settings changes in both games). Each run left its guest memory named in `/dev/shm` (the
+  title's hard exit never reaches the SDK's unlink), and a few restarts filled that tmpfs. SDK
+  patch 0023 unlinks it once created; checked in WSL (a killed run leaves nothing behind).
 - Frame rate: the launcher runs at 120 fps by default (`FEAR_FPS=60` for 60), with mailbox
   presentation.
 - Not tested yet: audio, the Deck itself.
