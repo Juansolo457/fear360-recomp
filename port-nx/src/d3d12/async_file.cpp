@@ -2,10 +2,11 @@
 // (async_file.h).
 #include "async_file.h"
 
+#include "native_thread.h"
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
 
 #include <cstdarg>
 
@@ -51,7 +52,7 @@ void AsyncFile::Printf(const char* format, ...) {
 }
 
 void AsyncFile::Run() {
-  SetThreadDescription(GetCurrentThread(), L"D3D12 file");
+  SetThreadName("D3D12 file");
   // Swapped with pending_, so both keep their capacity and appending stops allocating.
   std::string writing;
   std::unique_lock<std::mutex> lock(mutex_);

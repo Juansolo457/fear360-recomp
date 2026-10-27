@@ -1,8 +1,9 @@
 // F.E.A.R. (Xbox 360) - ReXGlue application, port-nx flavour.
 //
 // One renderer: the D3D12 renderer (src/d3d12/, docs/NATIVE_RENDERER.md), which draws the game
-// from its Direct3D calls, on fear-nx's graphics system (src/native/), which runs the GPU ring and
-// ReXGlue's D3D12 presenter. The SDK's Xenos plugin is still linked in
+// from its Direct3D calls on D3D12 or Vulkan (docs/VULKAN_RENDERER.md), on fear-nx's graphics
+// system (src/native/), which runs the GPU ring and ReXGlue's presenter of that API. The SDK's
+// Xenos plugin is still linked in
 // (REXGLUE_GPU_XENOS_STATIC) for the shader translator and texture code the renderer uses, but
 // never drives the game.
 
@@ -32,6 +33,7 @@
 #include "fear_version.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
+#include "d3d12/renderer.h"  // RendererApi
 #include "pipeline_warmup.h"
 #include "profiler.h"
 
@@ -116,14 +118,15 @@ class FearApp : public rex::ReXApp {
 
     fear::display_vblank::Configure();
     config.graphics = fear_nx::native::CreateGraphicsSystem();
-    REXLOG_INFO("F.E.A.R.: the D3D12 renderer, on ReXGlue's D3D12 presenter");
+    REXLOG_INFO("F.E.A.R.: the D3D12 renderer on {}, with ReXGlue's presenter",
+                fear::d3d12::RendererApi());
   }
 
   void OnPostSetup() override {
     if (runtime()) fear::look_tuning::Apply(*runtime());
     fear::profiler::Start();
 
-    // The pipeline warm-up (pipeline_warmup.h): the D3D12 renderer runs it before the game's
+    // The pipeline warm-up (pipeline_warmup.h): the renderer runs it before the game's
     // first draw; the panel shows on the UI thread.
     fear::pipeline_warmup::SetBeginCallback([this] {
       app_context().CallInUIThreadDeferred(

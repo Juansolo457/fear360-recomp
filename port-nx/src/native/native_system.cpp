@@ -5,9 +5,10 @@
 // Native Xenos graphics system for F.E.A.R. NX. It consumes the Xbox 360 GPU
 // command ring and updates register and memory state: fences, write-backs, interrupts, swaps
 // and their pacing. F.E.A.R.: the D3D12 renderer (port-nx/src/d3d12) draws the game from its
-// Direct3D calls and hands each frame to ReXGlue's D3D12 presenter, which this system owns
-// (with the window, the ImGui panels and the system dialogs). fear-nx's Vulkan renderer is gone
-// (docs/NATIVE_RENDERER.md, D3D12 only).
+// Direct3D calls and hands each frame to ReXGlue's presenter, which this system owns (with the
+// window, the ImGui panels and the system dialogs): the D3D12 one, or the Vulkan one on Linux and
+// with --fear_d3d12_api=vulkan (docs/VULKAN_RENDERER.md). fear-nx's own Vulkan renderer is gone
+// (docs/NATIVE_RENDERER.md).
 #include "native_system.h"
 
 #include <algorithm>
@@ -39,10 +40,14 @@
 #include <rex/system/xthread.h>
 #include <rex/system/xvideo.h>
 #include <rex/thread.h>
+#if defined(_WIN32)
 #include <rex/ui/d3d12/d3d12_provider.h>
+#endif
 #include <rex/ui/presenter.h>
+#include <rex/ui/vulkan/provider.h>
 #include <rex/ui/windowed_app_context.h>
 
+#include "../d3d12/renderer.h"  // RendererApi
 #include "display_vblank.h"
 
 REXCVAR_DECLARE(int32_t, switch_cp_core);
@@ -117,7 +122,7 @@ constexpr int kMaxIndirectDepth = 4;
 constexpr auto kWaitRegMemMax = std::chrono::milliseconds(200);
 
 std::atomic<uint64_t> g_swaps_presented{0};
-// The graphics system's gamma ramp, for GammaRamp256 (the D3D12 renderer's presenter).
+// The graphics system's gamma ramp, for GammaRamp256 (the renderer's present pass).
 std::atomic<const uint32_t*> g_gamma_ramp{nullptr};
 
 // Big-endian words of a command buffer. In the ring the position wraps around
@@ -186,10 +191,17 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       return X_STATUS_SUCCESS;
     }
     app_context_ = app_context;
+    // The presenter of the renderer's API (fear::d3d12::RendererApi): the renderer records on its
+    // device and hands it the frames.
+    const std::string api = fear::d3d12::RendererApi();
     if (!provider_) {
-      provider_ = rex::ui::d3d12::D3D12Provider::Create();
+#if defined(_WIN32)
+      if (api == "d3d12") provider_ = rex::ui::d3d12::D3D12Provider::Create();
+#endif
+      // With the GPU emulation features: the renderer's SPIR-V shaders need them.
+      if (api == "vulkan") provider_ = rex::ui::vulkan::VulkanProvider::Create(true, true);
       if (!provider_) {
-        REXLOG_ERROR("[native] Could not create the Direct3D 12 device");
+        REXLOG_ERROR("[native] Could not create the {} device", api);
         return X_STATUS_UNSUCCESSFUL;
       }
     }
@@ -203,7 +215,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
       REXLOG_ERROR("[native] Could not create the presenter");
       return X_STATUS_UNSUCCESSFUL;
     }
-    REXLOG_INFO("[native] Native Xenos graphics system initialized with the D3D12 presenter");
+    REXLOG_INFO("[native] Native Xenos graphics system initialized with the {} presenter", api);
     return X_STATUS_SUCCESS;
   }
 
@@ -268,7 +280,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
 
   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
                                bool blocking) override {
-    // The D3D12 renderer keeps its own pipeline store (port-nx/src/d3d12/pipeline_store.h).
+    // The renderer keeps its own pipeline store (port-nx/src/d3d12/pipeline_store.h).
     (void)cache_root;
     (void)title_id;
     (void)blocking;
@@ -1313,7 +1325,7 @@ class NativeGraphicsSystem final : public rex::system::IGraphicsSystem {
   // --- State -------------------------------------------------------------------------
 
   rex::ui::WindowedAppContext* app_context_ = nullptr;
-  std::unique_ptr<rex::ui::d3d12::D3D12Provider> provider_;
+  std::unique_ptr<rex::ui::GraphicsProvider> provider_;
   std::unique_ptr<rex::ui::Presenter> presenter_;
 
   rex::runtime::FunctionDispatcher* dispatcher_ = nullptr;

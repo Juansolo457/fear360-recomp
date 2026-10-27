@@ -111,6 +111,30 @@ textures ([TEXTURES.md](TEXTURES.md)), but the Direct3D 12 renderer can't use it
 **Steam Deck:** experimental. Build on a Windows PC as above, then package and copy it over:
 `tools/steamdeck/README-SteamDeck.txt`.
 
+## Linux (in progress)
+
+A native Linux x86-64 build on the renderer's Vulkan backend is being written
+([VULKAN_RENDERER.md](VULKAN_RENDERER.md)): **not built or tested yet**, so expect it not to work
+for now. What it will take, on Ubuntu 22.04 or newer (other distributions: the same libraries):
+
+- clang 20 or newer, CMake 3.25+, Ninja, Git, Python 3, and a GPU with Vulkan 1.3 (the Steam
+  Deck's has it);
+- the SDK's system libraries:
+  `sudo apt install libgtk-3-dev libx11-xcb-dev libxss-dev libvulkan-dev libwayland-dev
+  libwayland-bin wayland-protocols libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev
+  libpipewire-0.3-dev` (on 22.04 also libstdc++ 13 from the toolchain PPA:
+  `tools/linux/deck.Containerfile` has the whole setup);
+- the discs dumped as in step 3, then:
+
+```
+tools/setup-sdk.sh
+tools/build-linux.sh
+tools/build-linux.sh --project port-files
+```
+
+For the Steam Deck, `tools/build-deck.sh` builds in an Ubuntu 22.04 container (podman), so the
+game runs on SteamOS's older glibc.
+
 ## When something goes wrong
 
 - **"default.xex is not the supported executable":** the disc is a different version from the

@@ -1,5 +1,5 @@
 # fearfiles (port-files): F.E.A.R. Files (Extraction Point + Perseus Mandate) on the same host
-# code as port-nx: fear-nx's patched SDK, the Direct3D 12 renderer, our fixes and options. Only
+# code as port-nx: fear-nx's patched SDK, the D3D12 renderer, our fixes and options. Only
 # the translation (generated/default, from fear_manifest.toml) is this title's own. The project
 # keeps the name "fear" so generated/rexglue.cmake applies unchanged; the binary is fearfiles.exe.
 
@@ -15,9 +15,12 @@ endif()
 if(NOT REXGLUE_GPU_XENOS_STATIC)
     message(FATAL_ERROR "port-files links the Xenos plugin in: pass -DREXGLUE_GPU_XENOS_STATIC=ON.")
 endif()
-if(NOT WIN32)
-    message(FATAL_ERROR "port-files builds for Windows only: the game draws with the Direct3D 12 renderer "
-        "(src/d3d12/). Linux runs the Windows build through Proton (#74).")
+if(NOT WIN32 AND NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"))
+    message(FATAL_ERROR "port-files builds for Windows and Linux x86-64 (docs/VULKAN_RENDERER.md).")
+endif()
+if(NOT REXGLUE_USE_VULKAN OR (WIN32 AND NOT REXGLUE_USE_D3D12))
+    message(FATAL_ERROR "port-files needs the SDK's Vulkan backend, and on Windows its D3D12 one "
+        "too: pass -DREXGLUE_USE_VULKAN=ON (and -DREXGLUE_USE_D3D12=ON on Windows).")
 endif()
 
 # No floating-point contraction: built for x86-64-v3 (tools/build-nx.ps1), clang's default
@@ -85,23 +88,14 @@ target_compile_definitions(fear PRIVATE FEAR_TITLE_FILES)
 
 rexglue_setup_target(fear)
 
-target_link_libraries(fear PRIVATE rexgpu-xenos xxHash::xxhash)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../port-nx/cmake/fear_common.cmake")
+fear_link_plugin_whole()
+fear_stage_runtime_libraries()
 if(WIN32)
     target_link_libraries(fear PRIVATE dbghelp dxgi)
 endif()
-target_link_options(fear PRIVATE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:rexgpu-xenos>")
-# The D3D12 renderer, for F.E.A.R. Files' Direct3D (port-nx/CMakeLists.txt has why).
-if(WIN32)
-    file(GLOB FEAR_D3D12_SOURCES CONFIGURE_DEPENDS "${HOST}/d3d12/*.cpp")
-    add_library(fear_d3d12 OBJECT ${FEAR_D3D12_SOURCES})
-    target_compile_definitions(fear_d3d12 PRIVATE FEAR_TITLE_FILES)
-    target_include_directories(fear_d3d12 PRIVATE "${HOST}/d3d12"
-        $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>)
-    rexglue_apply_target_settings(fear_d3d12)
-    target_link_libraries(fear_d3d12 PRIVATE rex::runtime xxHash::xxhash)
-    target_link_libraries(fear PRIVATE fear_d3d12 d3d12 dxguid)
-endif()
-set_property(TARGET fear APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:rexgpu-xenos>)
+# The renderer, for F.E.A.R. Files' Direct3D (port-nx/cmake/fear_common.cmake).
+fear_add_renderer("${HOST}" FILES)
 target_include_directories(fear PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"            # generated/default/fear_init.h, from port-nx/src/main.cpp
     "${HOST}"

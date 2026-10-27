@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 19:10:47 -0700
+Subject: [PATCH 21/21] kernel: XamLoaderLaunchTitle keeps its launch path in a
+ string
+
+The launch path was a string_view of the guest's string, then of a
+joined path: a temporary that ends with its statement, so the view
+outlived the memory it pointed at. GRAW's Steam Deck run found the
+requested path holding glibc's free-list pointers when its campaign
+launched the front end. Copy it into a std::string. From
+graw360-recomp (tools/patches/rexglue-bd833a2-launch-title-path.patch).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kernel/xam/xam_info.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
+index 1fda053..424d02e 100644
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -268,7 +268,8 @@ void XamLoaderLaunchTitle_entry(mapped_string raw_name_ptr, u32 flags) {
+ 
+   // Translate the launch path to a full path.
+   if (raw_name_ptr) {
+-    auto path = raw_name_ptr.value();
++    // A copy: the joined path below is a temporary that a string_view would outlive.
++    std::string path(raw_name_ptr.value());
+     if (path.empty()) {
+       loader_data.launch_path = "game:\\default.xex";
+     } else {
+-- 
+2.53.0.windows.1
+

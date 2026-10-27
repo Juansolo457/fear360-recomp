@@ -42,7 +42,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu before either game loads, *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays on the same Direct3D 12 renderer (its Direct3D mapped on its own) with F.E.A.R.'s fixes; still to do: the smoke plumes, its own effects ([#51](https://github.com/Juansolo457/fear360-recomp/issues/51)), an optimisation pass and the full play-through ([#57](https://github.com/Juansolo457/fear360-recomp/issues/57)). The collection: [docs/FILES.md](docs/FILES.md) |
 | ⏳ Steam Deck (Proton), experimental | on the Direct3D 12 renderer: a median frame of 8.4 ms over the first four levels; first-run shader stutter and blood marks still to check (#28, #40); `tools/steamdeck/README-SteamDeck.txt` |
-| ⏳ Linux | through Proton, as on the Steam Deck; a native build later ([#74](https://github.com/Juansolo457/fear360-recomp/issues/74)) |
+| ⏳ Linux | through Proton, as on the Steam Deck; a native build on the renderer's Vulkan backend is being written, not tested yet ([#74](https://github.com/Juansolo457/fear360-recomp/issues/74), [docs/VULKAN_RENDERER.md](docs/VULKAN_RENDERER.md)) |
 | ⏳ Windows on ARM64 | scoped, not started ([#73](https://github.com/Juansolo457/fear360-recomp/issues/73)) |
 | ⏳ Android (ARM64) | scoped, not started; needs a renderer path, since the games are Direct3D 12 only ([#44](https://github.com/Juansolo457/fear360-recomp/issues/44)) |
 
@@ -98,7 +98,7 @@ docs/             progress, handoff, findings, plan, ripping
 - Three sets of terms, file by file in [NOTICE](NOTICE), full texts in [LICENSES/](LICENSES/):
   - **MIT** ([LICENSE](LICENSE)): our own tools, docs and glue.
   - **GPL-3.0-or-later** ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)): `port-nx/src/native/` (what's left of fear-nx ← Project8Recomp ← nfsmw-nx: the GPU ring and display pacing), the manifests and SDK patch 0000. Builds that link it are GPL.
-  - **MIT, pgr4-native** ([port-nx/src/d3d12/LICENSE.pgr4-native](port-nx/src/d3d12/LICENSE.pgr4-native)): `port-nx/src/d3d12/`, the Direct3D 12 renderer, and SDK patches 0016-0017.
+  - **MIT, pgr4-native** ([port-nx/src/d3d12/LICENSE.pgr4-native](port-nx/src/d3d12/LICENSE.pgr4-native)): `port-nx/src/d3d12/`, the renderer (Direct3D 12 and Vulkan), and SDK patches 0016-0017.
   - **BSD-3-Clause**: ReXGlue (with Xenia's notices), its `rexglue init` scaffolding and our SDK patches 0001 on.
 - F.E.A.R. is a trademark of Warner Bros. Entertainment / Monolith Productions. Not affiliated with Monolith, Day 1 Studios, Warner Bros., Vivendi/Sierra, Activision or Microsoft.
 

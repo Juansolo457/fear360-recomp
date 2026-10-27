@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 19:10:36 -0700
+Subject: [PATCH 19/21] gpu: a switch for the DXBC translator's implicit
+ gradients
+
+The previous sample_b change translates computed-LOD pixel shader
+fetches with implicit derivatives and the LOD bias, always. Add
+g_dxbc_implicit_gradients (true by default, so translations are
+unchanged): false brings back sample_d with explicit coarse gradients
+for those fetches. F.E.A.R.'s renderer sets it from
+--fear_d3d12_implicit_gradients and keeps a separate pipeline cache for
+each choice, to compare the two on the Steam Deck. From graw360-recomp
+(tools/patches/rexglue-bd833a2-implicit-gradients-switch.patch).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/graphics/pipeline/shader/dxbc_translator_fetch.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp b/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
+index bdce483..918ef72 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
+@@ -30,6 +30,11 @@ REXCVAR_DEFINE_BOOL(draw_resolution_scaled_texture_offsets, true, "GPU/Shader",
+ namespace rex::graphics {
+ using namespace ucode;
+ 
++// false translates computed-LOD pixel shader fetches with sample_d and explicit coarse gradients
++// again, as before sample_b (the implicit gradients below). Set by F.E.A.R.'s renderer
++// (--fear_d3d12_implicit_gradients), for comparing the two on the Steam Deck.
++bool g_dxbc_implicit_gradients = true;
++
+ void DxbcShaderTranslator::ProcessVertexFetchInstruction(
+     const ParsedVertexFetchInstruction& instr) {
+   if (emit_source_map_) {
+@@ -1435,7 +1440,7 @@ void DxbcShaderTranslator::ProcessTextureFetchInstruction(
+             a_.OpMul(lod_dest, lod_src, dxbc::Src::LF(1.0f / 32.0f));
+           }
+         }
+-        implicit_gradients = use_computed_lod && is_pixel_shader() &&
++        implicit_gradients = g_dxbc_implicit_gradients && use_computed_lod && is_pixel_shader() &&
+                              !instr.attributes.use_register_gradients &&
+                              instr.dimension != xenos::FetchOpDimension::k3DOrStacked;
+         if (use_computed_lod && !implicit_gradients) {
+-- 
+2.53.0.windows.1
+

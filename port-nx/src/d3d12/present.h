@@ -32,6 +32,7 @@
 // the guest memory read keep their meaning.
 #pragma once
 
+#include "backend.h"  // LumaProbe
 #include "hook_args.h"
 
 #include <cstdint>
@@ -42,17 +43,12 @@ struct ID3D12CommandList;
 
 namespace fear::d3d12 {
 
-class NativeRenderer;
+class D3D12Backend;
 
-// --fear_d3d12_luma_probe: the mean brightness (0-255, before the gamma ramp) of each quarter
-// of three rows of a front buffer, at 10, 40 and 80 % of its height (left to right), read
-// kFramesInFlight frames after it was drawn. Quarters, as a whole-row mean hides a flash
-// confined to one object.
-struct LumaProbe {
-  static constexpr uint32_t kRows = 3, kSegments = 4;
-  uint64_t frame = 0;  // the frame they belong to (0: none yet)
-  float luma[kRows][kSegments] = {};
-};
+// --fear_d3d12_luma_probe (LumaProbe, backend.h): the mean brightness (0-255, before the gamma
+// ramp) of each quarter of three rows of a front buffer, at 10, 40 and 80 % of its height (left
+// to right), read kFramesInFlight frames after it was drawn. Quarters, as a whole-row mean hides
+// a flash confined to one object.
 
 // What OnSwap needs from the guest Swap call (read at the call).
 struct SwapCall {
@@ -64,7 +60,7 @@ struct SwapCall {
 
 class Presenter {
  public:
-  explicit Presenter(NativeRenderer& renderer);
+  explicit Presenter(D3D12Backend& renderer);
   ~Presenter();
   Presenter(const Presenter&) = delete;
   Presenter& operator=(const Presenter&) = delete;

@@ -2,3 +2,7 @@
 # They are generated locally and not tracked (.gitignore); if one is ever added, keep its line
 # endings as written.
 */warmup/shader_warmup.inc text eol=lf
+# The Linux build's scripts and container file (tools/*.sh, tools/linux/): LF whatever the
+# checkout's core.autocrlf, or bash and podman can't read them.
+*.sh text eol=lf
+*.Containerfile text eol=lf

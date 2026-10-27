@@ -16,7 +16,8 @@ namespace fear_nx::native {
 uint64_t SwapsPresented();
 
 // The 256-entry gamma ramp the game set (DC_LUT_*: 10 bits per channel, red in bits 20-29), for
-// the D3D12 renderer's presenter (port-nx/src/d3d12); null before the graphics system starts.
+// the renderer's present pass (port-nx/src/d3d12/gamma_ramp.h); null before the graphics system
+// starts.
 // The ring thread writes it as it runs the guest's register writes: a ramp read during an update
 // shows for one frame. The PWL ramp is not tracked.
 const uint32_t* GammaRamp256();
