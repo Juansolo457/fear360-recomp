@@ -189,24 +189,35 @@ bool PanelKeysHeld() {
 
 uint32_t Navigator::Poll() {
   const double t = ImGui::GetTime();
-  if (opened_ < 0) opened_ = t;
+  const bool first = opened_ < 0;
+  if (first) opened_ = t;
+  const auto bits = [](uint16_t buttons) {
+    uint32_t out = 0;
+    if (buttons & XINPUT_GAMEPAD_DPAD_UP) out |= kUp;
+    if (buttons & XINPUT_GAMEPAD_DPAD_DOWN) out |= kDown;
+    if (buttons & XINPUT_GAMEPAD_DPAD_LEFT) out |= kLeft;
+    if (buttons & XINPUT_GAMEPAD_DPAD_RIGHT) out |= kRight;
+    if (buttons & XINPUT_GAMEPAD_A) out |= kAccept;
+    if (buttons & XINPUT_GAMEPAD_B) out |= kBack;
+    return out;
+  };
 #if !defined(_WIN32)
   UpdateSdlPads();
-  PadState pad = ReadPads();
-  // A tap since the last frame that is already let go: pressed for this frame (held_ doesn't
-  // have it, now does); one still held is in the state anyway.
-  pad.buttons |= g_sdl_taps.exchange(0);
+  // Presses since the last frame, from SDL's events: a press each, even let go before this frame
+  // or with the state wrong (a pad opened mid-press keeps the button down in SDL's state, which
+  // would hold it here for good). From before the panel opened (the press that opened it): none.
+  const uint32_t taps = bits(g_sdl_taps.exchange(0));
+  const uint32_t tapped = first ? 0 : taps;
 #else
-  const PadState pad = ReadPads();
+  const uint32_t tapped = 0;
 #endif
-  uint32_t now = 0;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_UP) || pad.ly > 16000) now |= kUp;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_DOWN) || pad.ly < -16000) now |= kDown;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_LEFT) || pad.lx < -16000) now |= kLeft;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_RIGHT) || pad.lx > 16000) now |= kRight;
-  if (pad.buttons & XINPUT_GAMEPAD_A) now |= kAccept;
-  if (pad.buttons & XINPUT_GAMEPAD_B) now |= kBack;
-  uint32_t pressed = now & ~held_;
+  const PadState pad = ReadPads();
+  uint32_t now = bits(pad.buttons);
+  if (pad.ly > 16000) now |= kUp;
+  if (pad.ly < -16000) now |= kDown;
+  if (pad.lx < -16000) now |= kLeft;
+  if (pad.lx > 16000) now |= kRight;
+  uint32_t pressed = (now & ~held_) | tapped;
   const uint32_t directions = now & kDirections;
   if (pressed & kDirections) {
     next_repeat_ = t + 0.4;
