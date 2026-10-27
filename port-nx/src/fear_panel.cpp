@@ -60,6 +60,25 @@ constexpr uint16_t XINPUT_GAMEPAD_B = 0x2000;
 std::mutex g_sdl_mutex;
 std::vector<SDL_Gamepad*> g_sdl_pads;
 bool g_sdl_initialized = false;  // UI thread
+// Buttons pressed since the last Poll (XINPUT_GAMEPAD_*), from SDL's events: a tap shorter than
+// a frame falls between two reads of the state.
+std::atomic<uint16_t> g_sdl_taps{0};
+
+bool SDLCALL WatchTaps(void*, SDL_Event* event) {
+  if (event->type != SDL_EVENT_GAMEPAD_BUTTON_DOWN) return true;
+  uint16_t bit = 0;
+  switch (event->gbutton.button) {
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: bit = XINPUT_GAMEPAD_DPAD_UP; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: bit = XINPUT_GAMEPAD_DPAD_DOWN; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: bit = XINPUT_GAMEPAD_DPAD_LEFT; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: bit = XINPUT_GAMEPAD_DPAD_RIGHT; break;
+    case SDL_GAMEPAD_BUTTON_SOUTH: bit = XINPUT_GAMEPAD_A; break;
+    case SDL_GAMEPAD_BUTTON_EAST: bit = XINPUT_GAMEPAD_B; break;
+    default: break;
+  }
+  g_sdl_taps.fetch_or(bit);
+  return true;
+}
 
 void UpdateSdlPads() {
   static bool failed = false;
@@ -70,6 +89,7 @@ void UpdateSdlPads() {
       failed = true;
       return;
     }
+    SDL_AddEventWatch(WatchTaps, nullptr);
     g_sdl_initialized = true;
   }
   SDL_UpdateGamepads();
@@ -172,8 +192,13 @@ uint32_t Navigator::Poll() {
   if (opened_ < 0) opened_ = t;
 #if !defined(_WIN32)
   UpdateSdlPads();
-#endif
+  PadState pad = ReadPads();
+  // A tap since the last frame that is already let go: pressed for this frame (held_ doesn't
+  // have it, now does); one still held is in the state anyway.
+  pad.buttons |= g_sdl_taps.exchange(0);
+#else
   const PadState pad = ReadPads();
+#endif
   uint32_t now = 0;
   if ((pad.buttons & XINPUT_GAMEPAD_DPAD_UP) || pad.ly > 16000) now |= kUp;
   if ((pad.buttons & XINPUT_GAMEPAD_DPAD_DOWN) || pad.ly < -16000) now |= kDown;
@@ -305,6 +330,8 @@ void ReleaseControllers() {
     for (SDL_Gamepad* pad : g_sdl_pads) SDL_CloseGamepad(pad);
     g_sdl_pads.clear();
   }
+  SDL_RemoveEventWatch(WatchTaps, nullptr);
+  g_sdl_taps = 0;
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
   g_sdl_initialized = false;
 #endif
