@@ -130,13 +130,20 @@ void Configure() {
   Waiter waiter;
   const bool opened = waiter.Open();
   const double hz = waiter.RefreshHz();
+  const double limit = REXCVAR_GET(fear_frame_rate_limit);
   if (!opened || hz < 24.0) {
+    // The game shows a frame every 2 guest vblanks, so the timer runs at twice the frame rate
+    // setting (Linux has no display vblank to wait on: left at the SDK's 60 Hz, every frame rate
+    // the panel saved came back as 30, 2026-10-27 on the Steam Deck). An explicit
+    // video_mode_refresh_rate still wins.
+    if (!rex::cvar::HasNonDefaultValue("video_mode_refresh_rate")) {
+      REXCVAR_SET(video_mode_refresh_rate, std::min(480.0, limit * 2.0));
+    }
     REXLOG_WARN("F.E.A.R.: no display vblank to follow (output {}, {} Hz); vblank from a timer "
                 "at {} Hz", opened ? "found" : "not found", hz,
                 REXCVAR_GET(video_mode_refresh_rate));
     return;
   }
-  const double limit = REXCVAR_GET(fear_frame_rate_limit);
   g_plan.active = true;
   g_plan.display_hz = hz;
   g_plan.refreshes_per_frame = std::max(1u, uint32_t(std::ceil(hz / limit - 1e-6)));

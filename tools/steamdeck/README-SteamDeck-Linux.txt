@@ -19,16 +19,16 @@ Setup (Desktop Mode)
   3. In the library, right-click the new entry > Properties:
        - Compatibility: leave "Force the use of a specific Steam Play compatibility tool"
          UNTICKED. This is a Linux program; Proton can't run it.
-       - Shortcut > LAUNCH OPTIONS: empty for 120 fps. For 60 fps:  FEAR_FPS=60 %command%
+       - Shortcut > LAUNCH OPTIONS: leave empty (the frame rate is in PC Settings).
   4. Rename it (e.g. "F.E.A.R. Collection (Linux)") and go back to Game Mode.
 
 It starts at the collection menu; pick a game. Switch Game in either game's main menu starts the
 other one. The controller comes through Steam Input, as for any non-Steam game.
 
-The frame rate: 120 fps by default, as the Proton package; 60 with FEAR_FPS=60. The launcher
-passes it to both games on the command line, over user/settings.toml, with mailbox presentation
-(no tearing; on the Deck's screen the frames beyond its refresh are dropped). FEAR_START=files starts
-F.E.A.R. Files without the menu.
+The frame rate: PC Settings > Frame rate in each game's main menu, 120 fps until changed there
+(Save and restart applies it). Mailbox presentation: no tearing; on the Deck's screen the frames
+beyond its refresh are dropped. FEAR_FPS=60 %command% in the launch options overrides the setting
+in both games. FEAR_START=files starts F.E.A.R. Files without the menu.
 
 What to test
   - The collection menu: does the controller move and pick? Switch Game both ways.
@@ -36,7 +36,7 @@ What to test
     PC's; this is the first test of that path).
   - Shimmer on edges and distant detail, compared with the Proton build.
   - Audio, saving and loading, suspend and resume.
-  - The frame rate in a fight (Performance Overlay level 3 or 4): 120, then FEAR_FPS=60 held.
+  - The frame rate in a fight (Performance Overlay level 3 or 4): 120, 60 and 30 from PC Settings.
   - The first run builds shaders as they appear (brief hitches); test the second run for
     smoothness. The Linux cache is separate from Proton's (cache/fear-d3d12-vulkan).
 

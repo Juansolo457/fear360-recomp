@@ -23,8 +23,11 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   settings changes in both games). Each run left its guest memory named in `/dev/shm` (the
   title's hard exit never reaches the SDK's unlink), and a few restarts filled that tmpfs. SDK
   patch 0023 unlinks it once created; checked in WSL (a killed run leaves nothing behind).
-- Frame rate: the launcher runs at 120 fps by default (`FEAR_FPS=60` for 60), with mailbox
-  presentation.
+- Frame rate: PC Settings' Frame rate (120 by default), with mailbox presentation. With no
+  display vblank to wait on, `display_vblank::Configure` runs the timer at twice the setting. The
+  first launcher pinned the timer at 240 Hz on the command line, and Save and restart drops those
+  flags (they would override the setting), so every frame rate chosen came back at the SDK's
+  60 Hz timer: 30 fps (third Deck test). `FEAR_FPS` now passes `--fear_frame_rate_limit`.
 - Not tested yet: audio, the Deck itself.
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,

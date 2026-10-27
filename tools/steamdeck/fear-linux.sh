@@ -4,21 +4,24 @@
 # (each with its Linux program, assets/ and user/ as in the Proton package).
 # Starts the collection menu in F.E.A.R. (fear/fear); Switch Game starts F.E.A.R. Files
 # (fearfiles/fearfiles) and back, through collection-linux.toml, which this script writes.
-#   FEAR_FPS=60       the frame rate (default 120): a timer at twice it paces the game
+#   FEAR_FPS=60       the frame rate for this start (default: PC Settings' Frame rate, 120 until
+#                     changed there); a timer at twice it paces the game
 #   FEAR_START=files  skip the menu and start F.E.A.R. Files (fear: F.E.A.R.)
 # Extra arguments go to the game, e.g.  ./fear-linux.sh --no-fullscreen
 here="$(cd "$(dirname "$0")" && pwd)"
-fps="${FEAR_FPS:-120}"
+fps="${FEAR_FPS:-}"
 cd "$here/fear" || { echo "No fear folder next to $0" >&2; exit 1; }
 mkdir -p logs
 stamp="$(date +%Y%m%d-%H%M%S)"
 info="$here/fear/logs/system-$stamp.txt"
 
 # The settings each game starts with; the collection passes them on when it switches games.
-# A command-line flag beats user/settings.toml (the Proton package's 120 fps timer, for one).
+# A command-line flag beats user/settings.toml. No timer flags: with no display vblank to wait
+# on (Linux), the game runs its timer at twice PC Settings' frame rate, so changing it there works
+# (pinned to 240 Hz here, every other choice came back at 30 fps after Save and restart).
 args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user
-      --cache_root cache --fear_vblank_source timer --video_mode_refresh_rate "$((fps * 2))"
-      --no-vulkan_allow_present_mode_immediate)
+      --cache_root cache --no-vulkan_allow_present_mode_immediate)
+[ -n "$fps" ] && args+=(--fear_frame_rate_limit "$fps")
 # (Mailbox presentation, as the Proton package: frames beyond the screen's refresh are dropped,
 # no tearing. ReXGlue's presenter takes immediate first when it may.)
 {
@@ -48,7 +51,7 @@ args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_
     echo "libstdc++: $libstdcxx LACKS GLIBCXX_3.4.32 (needed): the game can't start"
   fi
   echo "display: DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
-  echo "fps: $fps"
+  echo "fps: ${fps:-PC Settings}"
   # The controllers: what Steam Input tells SDL, and the input devices the game can open.
   echo "--- controller environment"
   env | grep -E '^(SDL_|SteamVirtualGamepadInfo|SteamAppId|SteamGameId|SteamDeck)' | cut -c1-300
