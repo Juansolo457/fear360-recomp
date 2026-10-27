@@ -265,7 +265,12 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
     if (mips_bytes) guest_->EnablePhysicalMemoryAccessCallbacks(mips, mips_bytes, true, false);
   }
   VulkanUploadPool::Alloc a;
-  if (!upload_.Allocate(total, 16, frame, &a)) return false;
+  // A failed upload leaves it dirty, so the next Get tries again instead of keeping the old
+  // contents of an initialized image.
+  if (!upload_.Allocate(total, 16, frame, &a)) {
+    t.dirty.store(true, std::memory_order_release);
+    return false;
+  }
   GuestTextureMemory mem;
   if (base_bytes && base < kMemorySize) {
     mem.base = membase_ + base;
@@ -275,7 +280,10 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
     mem.mips = membase_ + mips;
     mem.mips_size = std::min<size_t>(mips_bytes, kMemorySize - mips);
   }
-  if (!UntileTexture(key, layout, mem, subresources_, a.cpu, &scratch_)) return false;
+  if (!UntileTexture(key, layout, mem, subresources_, a.cpu, &scratch_)) {
+    t.dirty.store(true, std::memory_order_release);
+    return false;
+  }
 
   const VulkanDevice::Functions& fn = device_.fn();
   VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
