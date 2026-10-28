@@ -2,6 +2,7 @@
 
 #include "profiler.h"
 
+#include "d3d12/profile.h"
 #include "fear_title.h"
 
 #include <rex/cvar.h>
@@ -717,6 +718,7 @@ void Start() {
 
 void FearD3DWaitBegin(PPCRegister& r5) {
   using namespace fear::profiler;
+  fear::d3d12::profile::GuestD3dWaitBegin();
   if (!g_profiling.load(std::memory_order_relaxed)) return;
   if (WaitSlot* slot = ThisThreadsWaitSlot()) {
     slot->reason.store(std::min(r5.u32, kWaitOther) + 1, std::memory_order_relaxed);
@@ -725,6 +727,7 @@ void FearD3DWaitBegin(PPCRegister& r5) {
 
 void FearD3DWaitEnd() {
   using namespace fear::profiler;
+  fear::d3d12::profile::GuestD3dWaitEnd();
   if (!g_profiling.load(std::memory_order_relaxed)) return;
   if (WaitSlot* slot = ThisThreadsWaitSlot()) slot->reason.store(0, std::memory_order_relaxed);
 }
@@ -735,7 +738,8 @@ namespace fear::profiler {
 void Start() {}
 }  // namespace fear::profiler
 
-void FearD3DWaitBegin(PPCRegister&) {}
-void FearD3DWaitEnd() {}
+// The profiler is Windows only; the D3D wait still feeds the frame CSV's guest_d3d_wait (#92).
+void FearD3DWaitBegin(PPCRegister&) { fear::d3d12::profile::GuestD3dWaitBegin(); }
+void FearD3DWaitEnd() { fear::d3d12::profile::GuestD3dWaitEnd(); }
 
 #endif

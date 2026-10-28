@@ -15,6 +15,7 @@
 // After a failure, the hooks only call the originals.
 #include "d3d_state.h"
 #include "hook_args.h"
+#include "profile.h"
 #include "renderer.h"
 
 #include <rex/cvar.h>
@@ -74,8 +75,15 @@ template <GuestFn kOriginal>
 inline void RunTracked(PPCContext& ctx, uint8_t* base, uint32_t fn) {
   const uint32_t device = ctx.r3.u32;
   nat::GuestStateTracker& gs = nat::GuestState();
-  gs.Sync(base, device, fn, t_native_depth == 0);
-  kOriginal(ctx, base);
+  {
+    nat::profile::HostInGuestD3d host;
+    gs.Sync(base, device, fn, t_native_depth == 0);
+  }
+  {
+    nat::profile::GuestD3dScope d3d;
+    kOriginal(ctx, base);
+  }
+  nat::profile::HostInGuestD3d host;
   gs.Sync(base, device, fn);
   gs.AfterCall(base, device);
 }
@@ -97,9 +105,16 @@ inline void NativeHook(PPCContext& ctx, uint8_t* base) {
   {
     const uint32_t device = ctx.r3.u32;
     nat::GuestStateTracker& gs = nat::GuestState();
-    gs.Sync(base, device, kAddr, outer);
-    if (outer && (kClass == kNatDraw || kClass == kNatPendingDraw)) gs.BeginDrawCall();
-    kOriginal(ctx, base);
+    {
+      nat::profile::HostInGuestD3d host;
+      gs.Sync(base, device, kAddr, outer);
+      if (outer && (kClass == kNatDraw || kClass == kNatPendingDraw)) gs.BeginDrawCall();
+    }
+    {
+      nat::profile::GuestD3dScope d3d;
+      kOriginal(ctx, base);
+    }
+    nat::profile::HostInGuestD3d host;
     gs.Sync(base, device, kAddr);
     gs.AfterCall(base, device);
   }
@@ -138,11 +153,20 @@ inline void EndVerticesHook(PPCContext& ctx, uint8_t* base, uint32_t fn) {
   }
   nat::GuestStateTracker& gs = nat::GuestState();
   const uint32_t device = ctx.r3.u32;
-  gs.Sync(base, device, fn, t_native_depth == 0);
-  gs.BeginDrawCall();
-  kOriginal(ctx, base);
-  gs.Sync(base, device, fn);
-  gs.AfterCall(base, device);
+  {
+    nat::profile::HostInGuestD3d host;
+    gs.Sync(base, device, fn, t_native_depth == 0);
+    gs.BeginDrawCall();
+  }
+  {
+    nat::profile::GuestD3dScope d3d;
+    kOriginal(ctx, base);
+  }
+  {
+    nat::profile::HostInGuestD3d host;
+    gs.Sync(base, device, fn);
+    gs.AfterCall(base, device);
+  }
   if (t_pending && t_native_depth == 0) {
     t_pending = false;
     if (t_pending_args.device == device) r->OnDraw(base, t_pending_args);
@@ -179,9 +203,16 @@ inline void JumpHook(PPCContext& ctx, uint8_t* base, uint32_t fn) {
   }
   const uint32_t device = ctx.r3.u32;
   nat::GuestStateTracker& gs = nat::GuestState();
-  if (t_jump_depth++ == 0) gs.Sync(base, device, fn, t_native_depth == 0);
-  kOriginal(ctx, base);
+  if (t_jump_depth++ == 0) {
+    nat::profile::HostInGuestD3d host;
+    gs.Sync(base, device, fn, t_native_depth == 0);
+  }
+  {
+    nat::profile::GuestD3dScope d3d;
+    kOriginal(ctx, base);
+  }
   --t_jump_depth;
+  nat::profile::HostInGuestD3d host;
   gs.Jump(base, device, fn);
 }
 

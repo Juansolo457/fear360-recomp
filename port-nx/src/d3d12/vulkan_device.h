@@ -22,6 +22,8 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
+#include <utility>
 
 namespace rex::ui::vulkan {
 class VulkanProvider;
@@ -29,9 +31,10 @@ class VulkanProvider;
 
 namespace fear::d3d12 {
 
-#define FEAR_VK_INSTANCE_FUNCTIONS(X)    \
-  X(vkGetPhysicalDeviceProperties)       \
-  X(vkGetPhysicalDeviceFormatProperties) \
+#define FEAR_VK_INSTANCE_FUNCTIONS(X)         \
+  X(vkGetPhysicalDeviceProperties)            \
+  X(vkGetPhysicalDeviceFormatProperties)      \
+  X(vkGetPhysicalDeviceQueueFamilyProperties) \
   X(vkGetDeviceProcAddr)
 
 #define FEAR_VK_DEVICE_FUNCTIONS(X) \
@@ -93,7 +96,12 @@ namespace fear::d3d12 {
   X(vkCmdPushConstants)             \
   X(vkCreatePipelineCache)          \
   X(vkDestroyPipelineCache)         \
-  X(vkGetPipelineCacheData)
+  X(vkGetPipelineCacheData)         \
+  X(vkCreateQueryPool)              \
+  X(vkDestroyQueryPool)             \
+  X(vkCmdResetQueryPool)            \
+  X(vkCmdWriteTimestamp)            \
+  X(vkGetQueryPoolResults)
 
 class VulkanDevice {
  public:
@@ -192,6 +200,20 @@ class VulkanDevice {
   bool EndFrame(bool present, PresentPass& pass);
   const EndFrameTimes& end_frame_times() const { return times_; }
 
+  // GPU time per frame (#91): a timestamp where each frame's command buffer starts and one
+  // where it ends, read back once BeginSlot has waited for that frame's fence (never a stall).
+  // The span runs from the start of the frame's first command to the end of its last, so it
+  // includes any wait inside the frame for the GPU to free up, but not the idle time between
+  // frames, which is kept apart. NaN when the queue has no timestamps.
+  double gpu_last_frame_ms() const { return gpu_last_ms_; }
+  // Collected frames since the last TakeGpuWindow: their count, GPU time (sum, max) and the
+  // GPU's idle time between consecutive frames.
+  struct GpuWindow {
+    uint64_t frames = 0;
+    double sum_ms = 0.0, max_ms = 0.0, idle_ms = 0.0;
+  };
+  GpuWindow TakeGpuWindow() { return std::exchange(gpu_window_, {}); }
+
   const Functions& fn() const { return fn_; }
   VkDevice device() const { return device_; }
   VkInstance instance() const { return instance_; }
@@ -205,7 +227,10 @@ class VulkanDevice {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     uint64_t number = 0;  // the frame it last carried (0: none)
+    bool timed = false;   // its command buffer wrote both timestamps
   };
+  // The finished frame's timestamps (queries 2 * slot and 2 * slot + 1) into gpu_last_ms_.
+  void CollectGpuTime(uint32_t slot);
   bool BeginSlot();  // waits for the slot's previous frame and opens its command buffer
   // Ends and submits the slot's command buffer on queue 0 (under the SDK's queue lock).
   bool Submit(Frame& f);
@@ -222,6 +247,13 @@ class VulkanDevice {
   uint32_t slot_ = 0;
   uint64_t submitted_ = 0, completed_ = 0;
   EndFrameTimes times_;
+
+  VkQueryPool timestamps_ = VK_NULL_HANDLE;  // two per frame-in-flight slot
+  double tick_ns_ = 0.0;                     // the device's timestampPeriod
+  uint64_t tick_mask_ = 0;                   // the queue's timestampValidBits
+  double gpu_last_ms_ = std::numeric_limits<double>::quiet_NaN();
+  uint64_t gpu_last_end_ = 0;  // end tick of the frame collected last (0: none yet)
+  GpuWindow gpu_window_;
 };
 
 }  // namespace fear::d3d12

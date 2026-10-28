@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
@@ -138,6 +139,8 @@ void AppendCsvCell(const CsvCell& c, bool header, bool comma, std::string* line)
     line->append(c.name);
     return;
   }
+  // A measurement the backend doesn't have (NaN) is an empty cell, not a plausible 0.
+  if (c.format >= CsvCell::kFixed1 && std::isnan(c.d)) return;
   char text[64];
   int n = 0;
   switch (c.format) {
