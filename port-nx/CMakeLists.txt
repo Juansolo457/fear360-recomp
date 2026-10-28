@@ -75,6 +75,7 @@ set(FEAR_SOURCES
     src/look_tuning.cpp
     src/difficulty.cpp
     src/pipeline_warmup.cpp
+    src/pgo.cpp
     ${FEAR_NATIVE_SOURCES}
 )
 

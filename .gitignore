@@ -43,6 +43,9 @@ shaders_generated/
 
 # --- Build output (programs built from the game's code) and packages ---
 /port*/out/
+# PGO training data (tools/build-linux.sh FEAR_PGO): counts from runs of the game's code.
+/pgo/
+/port*/pgo-raw/
 build/
 out/
 *.exe

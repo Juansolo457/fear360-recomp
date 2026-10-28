@@ -82,6 +82,30 @@ if [[ "$lto" == ON ]]; then
     echo "lld is not installed (docs/SETUP.md, Linux), or build with FEAR_LTO=OFF" >&2; exit 1; }
   lto_tools=(-DCMAKE_AR="$ar" -DCMAKE_RANLIB="$ranlib")
 fi
+# Profile-guided optimization (#87), per game (the translated code is most of the binary):
+#   FEAR_PGO=generate  an instrumented build for a training run; it writes pgo-raw/*.profraw
+#                      where the game runs (src/pgo.cpp), merged by tools/pgo-merge.sh
+#   FEAR_PGO=use       optimize with pgo/<project>/default.profdata
+#   FEAR_PGO=off       neither
+# Default: use when that profile exists, else off. The profile comes from runs of the game's code:
+# pgo/ stays out of git, so only builds made where the training ran get it.
+pgo="${FEAR_PGO:-}"
+profile="$root/pgo/$project/default.profdata"
+[[ -n "$pgo" ]] || { [[ -f "$profile" ]] && pgo=use || pgo=off; }
+case "$pgo" in
+  generate)
+    flags="$flags -fprofile-generate=pgo-raw -DFEAR_PGO_GENERATE=1"
+    link_flags="$link_flags -fprofile-generate=pgo-raw"
+    exe_link_flags="$exe_link_flags -fprofile-generate=pgo-raw" ;;
+  use)
+    [[ -f "$profile" ]] || { echo "FEAR_PGO=use: $profile is missing (tools/pgo-merge.sh)" >&2; exit 1; }
+    # Functions the training never reached are compiled as without a profile; a profile from an
+    # older revision still applies where the code is unchanged.
+    flags="$flags \"-fprofile-use=$profile\" -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date"
+    flags="$flags -Wno-backend-plugin" ;;
+  off) ;;
+  *) echo "FEAR_PGO is generate, use or off, not $pgo" >&2; exit 2 ;;
+esac
 args=(--preset "$preset" -B "$build" -DREXSDK_DIR="$sdk"
       -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}"
       "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags"
@@ -98,4 +122,4 @@ first_time=0
 cmake --build "$build" --parallel "$jobs" --target fear_codegen
 if [[ $first_time -eq 1 ]]; then cmake "${args[@]}"; fi
 cmake --build "$build" --parallel "$jobs"
-echo "Built $build/$name (LTO $lto)"
+echo "Built $build/$name (LTO $lto, PGO $pgo)"
