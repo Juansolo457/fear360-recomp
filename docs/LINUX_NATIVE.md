@@ -40,8 +40,16 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   SDK's Tracy zones and perf counters (an atomic add per guest indirect call) and builds the
   translated code at -O2; the Deck build is now Release (-O3) with `-g` kept: 1,000-1,200-draw
   frames went from 18.3 to 15.1 ms median. The state tracker decodes whole packets straight
-  from guest memory (same result; too small to see in the numbers). Next: the page hashing.
-- Not tested yet: audio, the Deck itself.
+  from guest memory (same result; too small to see in the numbers).
+- Fourth Deck test (2026-10-28, frame CSVs on; Interval 4, Rooftop and Sprint Instant Action):
+  F.E.A.R. at 60 fps held 60 (p99 18 ms, 0.1-0.2% of frames over 33 ms); F.E.A.R. Files at 120
+  ran a median 8.7 ms, with its big fights (1,000-2,000 draws) at 18.3 ms. There the vertex
+  mirror hashes about 8,800 pages a frame (2.7 ms of hooks). Hashing beats watching per page on
+  the Deck (XXH3 of 4 KB: 0.14 µs; a write fault: 7-9 µs, plus 4-6.5 µs to re-protect), so the
+  cost is the volume: each draw asks for its whole vertex buffer. Pipeline builds hitch first
+  visits only (the cache works). The remaining hitches are mostly game-thread time the renderer's
+  counters don't cover. Two docked display drop-outs: the kernel logged a DisplayPort link
+  failure first (the TV newly at 120 Hz over the dock), not a GPU fault.
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
   `README-SteamDeck-Linux.txt`.
