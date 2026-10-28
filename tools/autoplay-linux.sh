@@ -84,7 +84,8 @@ while true; do
     fi
     if next=$(replacement "$pid"); then
       echo "switched games at $elapsed s: pid $pid -> $next" >&2
-      pid=$next window="" switches=$(( switches + 1 ))
+      # The replacement has to show a window of its own.
+      pid=$next window="" windows=0 switches=$(( switches + 1 ))
       continue
     fi
     status="exited early ($code)"
@@ -117,7 +118,8 @@ if [[ -z "$status" ]]; then
   sleep 2
   kill -9 "$pid" 2>/dev/null || true
   status=stopped
-  # Alive but never showed a window: nothing was driven or captured.
+  # The game running at the end (the replacement after a switch) never showed a window:
+  # nothing was driven or captured.
   (( windows > 0 )) || status="stopped, no window appeared"
 fi
 trap - EXIT
