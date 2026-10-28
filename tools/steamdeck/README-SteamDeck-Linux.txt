@@ -29,6 +29,13 @@ The frame rate: PC Settings > Frame rate in each game's main menu, 120 fps until
 (Save and restart applies it). Mailbox presentation: no tearing; on the Deck's screen the frames
 beyond its refresh are dropped. FEAR_FPS=60 %command% in the launch options overrides the setting
 in both games. FEAR_START=files starts F.E.A.R. Files without the menu.
+Each game keeps its own setting: set both if you want both at 120.
+
+The screen sets the ceiling: no game shows more frames than the display refreshes. The Deck's
+own screen shows up to 90. Docked, a TV at 60 Hz shows 60 even with 120 set; for 120, put the TV
+in its 120 Hz mode (a "game" or "PC" input on most TVs) and pick 120 Hz in Steam's display
+settings. 120 Hz over the dock needs a cable and TV port for HDMI 2.1; if the picture drops out
+at 120 Hz, try 60 Hz.
 
 What to test
   - The collection menu: does the controller move and pick? Switch Game both ways.
