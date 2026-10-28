@@ -158,7 +158,9 @@ def main_linux():
         add(os.path.join(steamdeck, 'README-SteamDeck-Linux.txt'), 'README-SteamDeck-Linux.txt')
         for folder, project, exe, *_ in GAMES:
             program = exe.removesuffix('.exe')
-            build = os.path.join(REPO, project, 'out', 'build', 'deck-amd64-release')
+            # FEAR_LTO=ON: tools/build-deck.sh's ThinLTO build folder.
+            build = os.path.join(REPO, project, 'out', 'build', 'deck-amd64-release'
+                                 + ('-lto' if os.environ.get('FEAR_LTO') == 'ON' else ''))
             if not os.path.exists(os.path.join(build, program)):
                 raise SystemExit(f'{build}/{program} is missing: run tools/build-deck.sh'
                                  + ('' if project == 'port-nx' else f' --project {project}'))

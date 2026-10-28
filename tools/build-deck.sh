@@ -38,6 +38,9 @@ fi
 
 sdk=/src/third_party/rexglue-sdk-nx-deck
 build_rel="$project/out/build/deck-amd64-${config,,}"
+# FEAR_LTO=ON (tools/build-linux.sh): ThinLTO, in a build folder of its own.
+lto="${FEAR_LTO:-OFF}"
+[[ "$lto" == ON ]] && build_rel="$build_rel-lto"
 # The disc files: a project's assets may be a link out of the tree; the link's target is mounted
 # read-only at the same path so it resolves.
 mounts=(-v "$root:/src")
@@ -49,7 +52,7 @@ for assets in "$root"/port*/assets; do
   [[ " ${mounts[*]} " == *" $real:$real:ro "* ]] || mounts+=(-v "$real:$real:ro")
 done
 podman run --rm --userns=keep-id "${mounts[@]}" -w /src -e HOME=/tmp \
-  -e FEAR_SDK_DIR="$sdk" -e FEAR_BUILD_DIR="/src/$build_rel" "$image" \
+  -e FEAR_SDK_DIR="$sdk" -e FEAR_BUILD_DIR="/src/$build_rel" -e FEAR_LTO="$lto" "$image" \
   bash -c "tools/setup-sdk.sh && tools/build-linux.sh --project $project --config $config --jobs $jobs"
 
 # The newest glibc symbol version each binary needs, and libstdc++'s for the record (libstdc++ 13

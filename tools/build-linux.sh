@@ -57,9 +57,25 @@ build="${FEAR_BUILD_DIR:-$port/out/build/$preset}"
 # x86-64-v3 as on Windows (tools/build-nx.ps1 has why); the Steam Deck's Zen 2 has it. The presets
 # name clang-20; any clang 20 or later works. Debug info in every configuration, Release too: a
 # crash's backtrace (coredumpctl) and perf need the function names.
+flags="-march=x86-64-v3 -g"
+# FEAR_LTO=ON: ThinLTO over the game, its translated code (199 files whose calls to each other
+# can't be inlined otherwise) and the static SDK libraries; lld links it and llvm-ar archives the
+# bitcode. Off by default until measured (#87).
+link_flags=
+lto_tools=()
+if [[ "${FEAR_LTO:-OFF}" == ON ]]; then
+  flags="$flags -flto=thin"
+  link_flags="-fuse-ld=lld -flto=thin"
+  ar=$(command -v llvm-ar-20 || command -v llvm-ar) || { echo "llvm-ar is not installed" >&2; exit 1; }
+  ranlib=$(command -v llvm-ranlib-20 || command -v llvm-ranlib) || {
+    echo "llvm-ranlib is not installed" >&2; exit 1; }
+  lto_tools=(-DCMAKE_AR="$ar" -DCMAKE_RANLIB="$ranlib")
+fi
 args=(--preset "$preset" -B "$build" -DREXSDK_DIR="$sdk"
       -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}"
-      "-DCMAKE_C_FLAGS=-march=x86-64-v3 -g" "-DCMAKE_CXX_FLAGS=-march=x86-64-v3 -g"
+      "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags"
+      "-DCMAKE_EXE_LINKER_FLAGS=$link_flags" "-DCMAKE_SHARED_LINKER_FLAGS=$link_flags"
+      "${lto_tools[@]}"
       -DREXGLUE_USE_VULKAN=ON -DREXGLUE_GPU_XENOS_STATIC=ON -DREXGLUE_BUILD_TESTS=OFF)
 cd "$port"
 cmake "${args[@]}"
@@ -71,4 +87,4 @@ first_time=0
 cmake --build "$build" --parallel "$jobs" --target fear_codegen
 if [[ $first_time -eq 1 ]]; then cmake "${args[@]}"; fi
 cmake --build "$build" --parallel "$jobs"
-echo "Built $build/$name"
+echo "Built $build/$name (LTO ${FEAR_LTO:-OFF})"
