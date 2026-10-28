@@ -50,7 +50,7 @@ LINUX = '--linux' in sys.argv[1:]
 # --nolto (or FEAR_LTO=OFF): the programs of FEAR_LTO=OFF tools/build-deck.sh, without ThinLTO.
 NO_LTO = '--nolto' in sys.argv[1:] or os.environ.get('FEAR_LTO') == 'OFF'
 # --pgogen (or FEAR_PGO=generate): the instrumented PGO training build (FEAR_PGO=generate
-# tools/build-deck.sh), which writes pgo-raw/*.profraw where each game runs.
+# tools/build-deck.sh), which writes pgo-raw/*.profraw beside each game.
 PGO_GEN = '--pgogen' in sys.argv[1:] or os.environ.get('FEAR_PGO') == 'generate'
 OUT = ARGV[0] if ARGV else os.path.join(
     REPO, 'private', 'windows' if WINDOWS else 'steamdeck',

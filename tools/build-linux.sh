@@ -84,7 +84,7 @@ if [[ "$lto" == ON ]]; then
 fi
 # Profile-guided optimization (#87), per game (the translated code is most of the binary):
 #   FEAR_PGO=generate  an instrumented build for a training run; it writes pgo-raw/*.profraw
-#                      where the game runs (src/pgo.cpp), merged by tools/pgo-merge.sh
+#                      beside the program (src/pgo.cpp), merged by tools/pgo-merge.sh
 #   FEAR_PGO=use       optimize with pgo/<project>/default.profdata
 #   FEAR_PGO=off       neither
 # Default: use when that profile exists, else off. The profile comes from runs of the game's code:
