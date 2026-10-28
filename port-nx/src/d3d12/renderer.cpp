@@ -749,6 +749,7 @@ void NativeRenderer::AppendCsvColumns(const FrameStats& s, uint64_t frame_ns, bo
       Fix3("t_ms", NowNs() / 1e6),
       Uint("hash_pages", ds.hash_pages),
       Uint("hash_copies", ds.hash_copies),
+      Uint("narrowed_ranges", ds.narrowed_ranges),
       Uint("pso_pending", ds.pso_pending),
       Uint("pso_wait_us", ds.pso_wait_us),
       Uint("held", s.frames_held),

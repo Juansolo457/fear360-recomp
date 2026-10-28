@@ -95,6 +95,9 @@ class GuestMemoryMirror {
   uint64_t upload_fence = 0;
   // kDebugUploadEveryDraw (draw-debug.txt): every range copied whole, unwatched.
   std::atomic<bool> upload_every_draw{false};
+  // --fear_vertex_index_range (read at Initialize): a vertex range is copied only as far as the
+  // draw's vertices reach, from its index bounds (IndexBounds), not the whole fetch constant.
+  bool index_ranges = false;
 
   // Copy segments (DrawRenderer::Prepare): what the current segment's draws read. Watched
   // ranges are copied in whole pages, so their reads are kept one bit per page, valid in the
@@ -298,6 +301,8 @@ class GuestMemoryMirror {
 
   // Pages hashed (hot, pending, before a copy) and copied as they changed since EndFrame.
   std::atomic<uint64_t> hash_pages{0}, hash_copies{0};
+  // Vertex ranges index_ranges made shorter than their fetch constant, since EndFrame.
+  std::atomic<uint64_t> narrowed_ranges{0};
   // Write-watch faults (InvalidationThunk calls) since the last EndFrame; any guest thread.
   std::atomic<uint64_t> watch_faults{0};
   // The watch thread's protection changes, their pages, the pages found written since their
@@ -352,6 +357,10 @@ class GuestMemoryMirror {
   void CheckLateWrites();
 
  private:
+  // The vertex indices a draw's shader sees ([lo, hi]): its indices (read and swapped here, the
+  // primitive reset index left out) or 0..count-1, plus VGT_INDX_OFFSET, clamped to
+  // VGT_MIN/MAX_VTX_INDX, as the translated shaders form them. False when it can't tell.
+  bool IndexBounds(const DrawState& s, uint32_t& lo, uint32_t& hi) const;
   Sink* sink_ = nullptr;
   uint64_t* upload_bytes_ = nullptr;
   uint64_t* uploads_ = nullptr;

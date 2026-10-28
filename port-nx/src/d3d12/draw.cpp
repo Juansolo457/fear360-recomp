@@ -3083,6 +3083,7 @@ void DrawRenderer::EndFrame(uint64_t completed_fence) {
   stats_.watch_arm_changed = impl_->mirror.watch_arm_changed.exchange(0, std::memory_order_relaxed);
   stats_.watch_arm_ns = impl_->mirror.watch_arm_ns.exchange(0, std::memory_order_relaxed);
   stats_.hash_pages = impl_->mirror.hash_pages.exchange(0, std::memory_order_relaxed);
+  stats_.narrowed_ranges = impl_->mirror.narrowed_ranges.exchange(0, std::memory_order_relaxed);
   stats_.hash_copies = impl_->mirror.hash_copies.exchange(0, std::memory_order_relaxed);
   if (!impl_->threaded) impl_->mirror.watch_frame.fetch_add(1, std::memory_order_relaxed);
   if (impl_->mirror.trace.file) {

@@ -5,18 +5,22 @@
 #include "clock.h"
 #include "log.h"
 
+#include <rex/cvar.h>
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/xenos.h>
 #include <rex/logging.h>
 
 #include <fmt/format.h>
 
+#include <bit>
 #include <cstring>
 
 #if defined(_WIN32)
 #include <windows.h>
 #undef DrawState
 #endif
+
+REXCVAR_DECLARE(bool, fear_vertex_index_range);
 
 namespace fear::d3d12 {
 
@@ -44,6 +48,8 @@ bool GuestMemoryMirror::Initialize(rex::memory::Memory* memory_in, Sink* sink,
   }
   invalidation_handle = memory->RegisterPhysicalMemoryInvalidationCallback(InvalidationThunk, this);
   arm_thread = std::thread([this] { WatchThread(); });
+  index_ranges = REXCVAR_GET(fear_vertex_index_range);
+  if (index_ranges) REXLOG_INFO("D3D12 draw: vertex ranges from the index bounds");
 #if defined(_WIN32)
   SetThreadDescription(arm_thread.native_handle(), L"D3D12 watches");
 #endif
@@ -81,6 +87,58 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
   namespace xenos = rex::graphics::xenos;
   const auto& regs = *reinterpret_cast<const rex::graphics::RegisterFile*>(s.regs);
   const rex::graphics::Shader::ConstantRegisterMap& vmap = vs.constant_register_map();
+  // With index_ranges, the bytes of each fetch constant the draw's vertices reach, for the
+  // bindings whose fetches all take the vertex index the shader starts with (r0.x, not
+  // rewritten before them, SDK patch 0025): vertex lo..hi, each vertex's attributes. Any other
+  // binding of a fetch constant keeps it whole.
+  struct Reach {
+    uint32_t index;
+    int64_t begin, end;  // bytes from the fetch constant's address
+    bool whole;
+  };
+  Reach reach[8];
+  uint32_t reach_count = 0;
+  uint32_t lo = 0, hi = 0;
+  if (index_ranges && vs.is_ucode_analyzed() && !vs.vertex_index_rewritten() &&
+      IndexBounds(s, lo, hi)) {
+    using rex::graphics::InstructionStorageAddressingMode;
+    using rex::graphics::InstructionStorageSource;
+    using rex::graphics::SwizzleSource;
+    for (const rex::graphics::Shader::VertexBinding& b : vs.vertex_bindings()) {
+      bool plain = true;
+      int64_t first = 0, last = b.stride_words;  // dwords around one vertex's start
+      for (const auto& a : b.attributes) {
+        const auto& op = a.fetch_instr.operands[0];
+        if (op.storage_source != InstructionStorageSource::kRegister || op.storage_index != 0 ||
+            op.storage_addressing_mode != InstructionStorageAddressingMode::kAbsolute ||
+            op.components[0] != SwizzleSource::kX ||
+            a.fetch_instr.attributes.stride != b.stride_words) {
+          plain = false;
+          break;
+        }
+        const int64_t offset = a.fetch_instr.attributes.offset;
+        const uint32_t words =
+            xenos::GetVertexFormatNeededWords(a.fetch_instr.attributes.data_format, 0b1111);
+        first = std::min(first, offset);
+        last = std::max(last, offset + int64_t(std::bit_width(words)));
+      }
+      Reach* r = nullptr;
+      for (uint32_t i = 0; i < reach_count; ++i)
+        if (reach[i].index == b.fetch_constant) r = &reach[i];
+      if (!r) {
+        // Full: this constant stays whole; later bindings of recorded ones still merge.
+        if (reach_count == std::size(reach)) continue;
+        r = &reach[reach_count++];
+        *r = {b.fetch_constant, INT64_MAX, INT64_MIN, false};
+      }
+      if (!plain) {
+        r->whole = true;
+        continue;
+      }
+      r->begin = std::min(r->begin, (int64_t(lo) * b.stride_words + first) * 4);
+      r->end = std::max(r->end, (int64_t(hi) * b.stride_words + last) * 4);
+    }
+  }
   for (uint32_t w = 0; w < 3; ++w) {
     uint32_t bits = vmap.vertex_fetch_bitmap[w];
     while (bits) {
@@ -93,8 +151,18 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
                        uint32_t(f.type), f.dword_0, f.dword_1);
         if (f.type != xenos::FetchConstantType::kInvalidVertex) return false;
       }
-      const uint32_t start = f.address << 2, size = f.size << 2;
+      uint32_t start = f.address << 2, size = f.size << 2;
       const bool inline_data = s.inline_vertices && start == s.inline_vertices;
+      if (!inline_data)
+        for (uint32_t i = 0; i < reach_count; ++i) {
+          const Reach& r = reach[i];
+          if (r.index != index || r.whole || r.begin >= r.end) continue;
+          const int64_t begin = std::clamp<int64_t>(r.begin, 0, size);
+          const int64_t end = std::clamp<int64_t>(r.end, begin, size);
+          if (end - begin < size) narrowed_ranges.fetch_add(1, std::memory_order_relaxed);
+          start += uint32_t(begin);
+          size = uint32_t(end - begin);
+        }
       if (coherency) coherency->slot = uint8_t(index);
       if (!RequestRange(start, size, !inline_data, out)) return false;
     }
@@ -105,6 +173,93 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
   if (fans_converted && xenos::PrimitiveType(s.primitive) == xenos::PrimitiveType::kTriangleFan)
     return InSharedMemory(s.index_address, index_bytes);
   return RequestRange(s.index_address, index_bytes, true, out);
+}
+
+bool GuestMemoryMirror::IndexBounds(const DrawState& s, uint32_t& lo, uint32_t& hi) const {
+  namespace xenos = rex::graphics::xenos;
+  namespace reg = rex::graphics::reg;
+  using xenos::PrimitiveType;
+  if (!s.count) return false;
+  const auto& regs = *reinterpret_cast<const rex::graphics::RegisterFile*>(s.regs);
+  const PrimitiveType prim = PrimitiveType(s.primitive);
+  switch (prim) {
+    case PrimitiveType::kPointList:
+    case PrimitiveType::kLineList:
+    case PrimitiveType::kLineStrip:
+    case PrimitiveType::kTriangleList:
+    case PrimitiveType::kTriangleFan:
+    case PrimitiveType::kTriangleStrip:
+    case PrimitiveType::kRectangleList:
+    case PrimitiveType::kQuadList:
+      break;
+    default:
+      return false;
+  }
+  uint32_t raw_lo = 0, raw_hi = s.count - 1;
+  if (s.indexed) {
+    const uint32_t size = s.index_32bit ? 4u : 2u;
+    if (s.index_address >= kSharedMemorySize ||
+        (kSharedMemorySize - s.index_address) / size < s.count)
+      return false;
+    // As the draw's own index handling (draw.cpp): 16-bit indices swap within half words.
+    xenos::Endian endian = xenos::Endian(s.index_endian);
+    if (!s.index_32bit && endian != xenos::Endian::kNone && endian != xenos::Endian::k8in16)
+      endian = endian == xenos::Endian::k8in32 ? xenos::Endian::k8in16 : xenos::Endian::kNone;
+    // The reset index, in either byte order, is no vertex.
+    const bool strip = prim == PrimitiveType::kLineStrip || prim == PrimitiveType::kTriangleStrip;
+    const bool reset_on = strip && regs.Get<reg::PA_SU_SC_MODE_CNTL>().multi_prim_ib_ena;
+    uint32_t reset = regs.Get<reg::VGT_MULTI_PRIM_IB_RESET_INDX>().reset_indx;
+    uint32_t reset_swapped = xenos::GpuSwap(reset, endian);
+    if (!s.index_32bit) {
+      reset &= 0xFFFF;
+      reset_swapped &= 0xFFFF;
+    }
+    uint32_t mn = UINT32_MAX, mx = 0;
+    const uint8_t* p = membase + s.index_address;
+    if (s.index_32bit) {
+      for (uint32_t i = 0; i < s.count; ++i) {
+        uint32_t v;
+        std::memcpy(&v, p + i * 4, 4);
+        v = xenos::GpuSwap(v, endian);
+        if (reset_on && (v == reset || v == reset_swapped)) continue;
+        mn = std::min(mn, v);
+        mx = std::max(mx, v);
+      }
+    } else if (!reset_on && endian == xenos::Endian::k8in16) {
+      // The common case, simple enough to vectorize.
+      uint16_t mn16 = 0xFFFF, mx16 = 0;
+      for (uint32_t i = 0; i < s.count; ++i) {
+        uint16_t v;
+        std::memcpy(&v, p + i * 2, 2);
+        v = uint16_t((v << 8) | (v >> 8));
+        mn16 = std::min(mn16, v);
+        mx16 = std::max(mx16, v);
+      }
+      mn = mn16;
+      mx = mx16;
+    } else {
+      for (uint32_t i = 0; i < s.count; ++i) {
+        uint16_t v16;
+        std::memcpy(&v16, p + i * 2, 2);
+        const uint32_t v = xenos::GpuSwap(v16, endian);
+        if (reset_on && (v == reset || v == reset_swapped)) continue;
+        mn = std::min(mn, v);
+        mx = std::max(mx, v);
+      }
+    }
+    if (mn > mx) return false;  // only reset indices
+    raw_lo = mn;
+    raw_hi = mx;
+  }
+  // The shaders add the offset, keep 24 bits and clamp; past 24 bits the order breaks.
+  const uint32_t offset = regs.Get<reg::VGT_INDX_OFFSET>().indx_offset;
+  if (uint64_t(raw_hi) + offset > xenos::kVertexIndexMask) return false;
+  const uint32_t min_index = regs.Get<reg::VGT_MIN_VTX_INDX>().min_indx;
+  const uint32_t max_index = regs.Get<reg::VGT_MAX_VTX_INDX>().max_indx;
+  if (min_index > max_index) return false;
+  lo = std::clamp(raw_lo + offset, min_index, max_index);
+  hi = std::clamp(raw_hi + offset, min_index, max_index);
+  return true;
 }
 
 bool GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length, bool watch,

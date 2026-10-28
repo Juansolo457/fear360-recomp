@@ -20,9 +20,10 @@ ctr_as_local = true
 xer_as_local = true
 reserved_as_local = true
 cr_as_local = true
-# Stage B of the A/B (docs/HANDOFF-REGOPTS.md section 4): non_volatile_as_local with
-# setjmp/longjmp on top of the five above. Stage C adds non_argument_as_local.
-# non_argument_as_local = true
+# Stage B (docs/HANDOFF-REGOPTS.md section 4): non_volatile_as_local with setjmp/longjmp on top of
+# the five above. Stage C: non_argument_as_local too (r0, r2, r11, r12, f0, v32-v63; the r12
+# funclets need patch 0007). Section 8 has the scan of what reads them from a caller.
+non_argument_as_local = true
 non_volatile_as_local = true
 # The C runtime's setjmp and longjmp (libpng, libjpeg and the shader compilers' error paths):
 # their jmp_buf can't reach registers that are locals, so these calls become host ones.

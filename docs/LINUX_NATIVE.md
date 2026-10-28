@@ -50,7 +50,22 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   visits only (the cache works). The remaining hitches are mostly game-thread time the renderer's
   counters don't cover. Two docked display drop-outs: the kernel logged a DisplayPort link
   failure first (the TV newly at 120 Hz over the dock), not a GPU fault.
-- The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
+- The game thread (2026-10-28, PR #88; Sprint with the 360's settings, 120 fps, field of view 90,
+  bloom and MSAA off):
+  - **Vertex ranges from the index bounds** (`--fear_vertex_index_range`, docked): 1,000+ draw
+    frames 18.3 to 12.6 ms median, hashed pages 8,765 to 541 a frame, frames under 60 fps 5.4%
+    to 2.2%. A profile of those fights then showed the main thread at a full core, about 85% of
+    it translated game code (the hottest single function: the game's own GPU wait spin), with
+    the GPU about 55% busy.
+  - **Register options stage C** (#34): no clear change in the big fights.
+  - **ThinLTO** (#87), against stage C alone, both handheld at the screen's 90 Hz: frames
+    slower than 90 fps 23.7% to 18.4%, over 17 ms 2.8% to 1.9%, hitches over 33 ms 0.59% to
+    0.29%; 1,000-1,400 draws p90 15.6 to 13.4 ms. Now the default (`FEAR_LTO=OFF` turns it
+    off). lld 20 left the translated code's per-function `.ltext.*` sections apart (100,000+,
+    past the ELF section index fields, so binutils' `objdump` failed); `tools/linux/ltext.ld`
+    merges them. A docked 120 Hz retest is #89.
+- The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux; add `--nolto` for
+  a `FEAR_LTO=OFF tools/build-deck.sh` build), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
   `README-SteamDeck-Linux.txt`.
 

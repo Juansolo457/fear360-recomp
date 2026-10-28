@@ -13,13 +13,13 @@ out_directory_path = "generated/default"
 includes = []
 
 # The translator's register options (#34, docs/HANDOFF-REGOPTS.md), as in port-nx's manifest:
-# stage B (non_argument_as_local, stage C, isn't tested yet).
+# stage C.
 skip_lr = true
 ctr_as_local = true
 xer_as_local = true
 reserved_as_local = true
 cr_as_local = true
-# non_argument_as_local = true
+non_argument_as_local = true
 non_volatile_as_local = true
 setjmp_address = 0x82B95310
 longjmp_address = 0x82B94EC0

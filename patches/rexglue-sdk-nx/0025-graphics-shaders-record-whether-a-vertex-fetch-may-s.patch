@@ -1,0 +1,127 @@
+From c940d3ed5de9e9c5556af8b8cdf684185e292f30 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 05:52:47 -0700
+Subject: [PATCH] graphics: shaders record whether a vertex fetch may see r0.x
+ rewritten
+
+A vertex shader starts with the vertex index in r0.x, and the Xbox 360 compiler reuses r0 once
+the fetches are done. A host that copies only the vertices a draw's indices reach needs to know
+the fetches read that index unchanged: vertex_index_rewritten() is true when a vfetch_full
+reading r0 may run after an r0.x write (in program order, or anywhere when loops, calls or
+backward jumps leave the order unknown).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/graphics/pipeline/shader/shader.h |  9 ++++++++
+ src/graphics/pipeline/shader/translator.cpp   | 21 +++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/include/rex/graphics/pipeline/shader/shader.h b/include/rex/graphics/pipeline/shader/shader.h
+index 4cf3854..b90cb96 100644
+--- a/include/rex/graphics/pipeline/shader/shader.h
++++ b/include/rex/graphics/pipeline/shader/shader.h
+@@ -933,6 +933,12 @@ class Shader {
+   // True if the shader overrides the pixel depth.
+   bool writes_depth() const { return writes_depth_; }
+ 
++  // True if a vfetch_full reading r0 (where a vertex shader starts with the vertex index) may
++  // run after an instruction wrote r0.x: in program order, or anywhere when loops, calls or
++  // backward jumps leave the order unknown. Relative register writes count as r0.x writes.
++  // Valid after AnalyzeUcode.
++  bool vertex_index_rewritten() const { return vertex_index_rewritten_; }
++
+   // Whether the shader can have early depth and stencil writing enabled, unless
+   // alpha test or alpha to coverage is enabled.
+   bool implicit_early_z_write_allowed() const {
+@@ -1016,6 +1022,9 @@ class Shader {
+   bool kills_pixels_ = false;
+   bool uses_texture_fetch_instruction_results_ = false;
+   bool writes_depth_ = false;
++  bool vertex_index_rewritten_ = false;
++  bool register_0_x_written_ = false;  // so far, during AnalyzeUcode
++  bool control_flow_nonlinear_ = false;
+ 
+   // Memory export eM write info for each control flow instruction, if there are
+   // any eM writes in the shader.
+diff --git a/src/graphics/pipeline/shader/translator.cpp b/src/graphics/pipeline/shader/translator.cpp
+index e472251..0556743 100644
+--- a/src/graphics/pipeline/shader/translator.cpp
++++ b/src/graphics/pipeline/shader/translator.cpp
+@@ -134,18 +134,21 @@ void Shader::AnalyzeUcode(string::StringBuffer& ucode_disasm_buffer) {
+                                 ucode_disasm_buffer);
+         } break;
+         case ControlFlowOpcode::kLoopStart: {
++          control_flow_nonlinear_ = true;
+           ParsedLoopStartInstruction instr;
+           ParseControlFlowLoopStart(cf.loop_start, cf_index, instr);
+           instr.Disassemble(&ucode_disasm_buffer);
+           constant_register_map_.loop_bitmap |= uint32_t(1) << instr.loop_constant_index;
+         } break;
+         case ControlFlowOpcode::kLoopEnd: {
++          control_flow_nonlinear_ = true;
+           ParsedLoopEndInstruction instr;
+           ParseControlFlowLoopEnd(cf.loop_end, cf_index, instr);
+           instr.Disassemble(&ucode_disasm_buffer);
+           constant_register_map_.loop_bitmap |= uint32_t(1) << instr.loop_constant_index;
+         } break;
+         case ControlFlowOpcode::kCondCall: {
++          control_flow_nonlinear_ = true;
+           ParsedCallInstruction instr;
+           ParseControlFlowCondCall(cf.cond_call, cf_index, instr);
+           instr.Disassemble(&ucode_disasm_buffer);
+@@ -161,6 +164,7 @@ void Shader::AnalyzeUcode(string::StringBuffer& ucode_disasm_buffer) {
+         case ControlFlowOpcode::kCondJmp: {
+           ParsedJumpInstruction instr;
+           ParseControlFlowCondJmp(cf.cond_jmp, cf_index, instr);
++          if (instr.target_address <= cf_index) control_flow_nonlinear_ = true;
+           instr.Disassemble(&ucode_disasm_buffer);
+           if (instr.type == ParsedJumpInstruction::Type::kConditional) {
+             bool_constant_index = instr.bool_constant_index;
+@@ -184,6 +188,7 @@ void Shader::AnalyzeUcode(string::StringBuffer& ucode_disasm_buffer) {
+     }
+   }
+   ucode_disassembly_ = ucode_disasm_buffer.to_string();
++  if (control_flow_nonlinear_ && register_0_x_written_) vertex_index_rewritten_ = true;
+ 
+   if (constant_register_map_.float_dynamic_addressing) {
+     // All potentially can be referenced.
+@@ -375,6 +380,14 @@ void Shader::GatherVertexFetchInformation(const VertexFetchInstruction& op,
+     previous_vfetch_full = op;
+   }
+   fetch_instr.Disassemble(&ucode_disasm_buffer);
++  // A vfetch_mini reuses its vfetch_full's index, whatever r0 holds by then.
++  if (!fetch_instr.is_mini_fetch && register_0_x_written_ &&
++      fetch_instr.operands[0].storage_source == InstructionStorageSource::kRegister &&
++      (fetch_instr.operands[0].storage_index == 0 ||
++       fetch_instr.operands[0].storage_addressing_mode !=
++           InstructionStorageAddressingMode::kAbsolute)) {
++    vertex_index_rewritten_ = true;
++  }
+ 
+   GatherFetchResultInformation(fetch_instr.result);
+ 
+@@ -545,6 +558,10 @@ void Shader::GatherFetchResultInformation(const InstructionResult& result) {
+   // Fetch instructions can't export - don't need the current memexport count
+   // operand.
+   assert_true(result.storage_target == InstructionStorageTarget::kRegister);
++  if (result.storage_addressing_mode != InstructionStorageAddressingMode::kAbsolute ||
++      (result.storage_index == 0 && (result.GetUsedWriteMask() & 1))) {
++    register_0_x_written_ = true;
++  }
+   if (result.storage_addressing_mode == InstructionStorageAddressingMode::kAbsolute) {
+     register_static_address_bound_ =
+         std::max(register_static_address_bound_, result.storage_index + uint32_t(1));
+@@ -560,6 +577,10 @@ void Shader::GatherAluResultInformation(const InstructionResult& result, uint32_
+   }
+   switch (result.storage_target) {
+     case InstructionStorageTarget::kRegister:
++      if (result.storage_addressing_mode != InstructionStorageAddressingMode::kAbsolute ||
++          (result.storage_index == 0 && (used_write_mask & 1))) {
++        register_0_x_written_ = true;
++      }
+       if (result.storage_addressing_mode == InstructionStorageAddressingMode::kAbsolute) {
+         register_static_address_bound_ =
+             std::max(register_static_address_bound_, result.storage_index + uint32_t(1));
+-- 
+2.53.0.windows.1
+

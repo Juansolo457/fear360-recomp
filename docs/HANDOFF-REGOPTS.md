@@ -687,3 +687,33 @@ the fragments and `sub_82BC0D34` (dead `r28`, no callers).
 temporary worktree; the checkout is still `b29317c`); `share_registers` entries in both manifests
 (6.1, 6.3); `tools/analysis/regflow.py` (6.5); this section. The stage plan (section 4) stands,
 with patches 0011-0012 and the new manifest entries belonging to stage B.
+
+## 8. Stage C (2026-10-28, both games, nothing built yet)
+`non_argument_as_local` is on in both manifests (branch `register-options-stage-c`, from
+`linux-native`). Stage B has run on both games since the Deck builds of 2026-10-27 (both manifests
+have it). The Deck profile of F.E.A.R. Files' Sprint fights on 2026-10-28 (B1 on) showed the game
+thread at a full core, about 85% of it translated code: the case for more register options.
+
+What was checked, without a build:
+- **The scan** (`regflow.py` over the stage B translations, in WSL): every function that reads r0,
+  r2, r11, r12, f0 or v32-v63 before writing it. F.E.A.R. 37, Files 38:
+  - 31 each are SEH funclets taking their frame in r12 (`addi r31,r12,-N`): patch 0007.
+  - `__chkstk` (`sub_8287C854`, Files `sub_82873C04`): r12 = 0 probes nothing (section 3).
+  - The unreferenced fragments of section 3 (`sub_82340588`, `sub_8246DFD4`, `sub_828C7918`,
+    `sub_82ABF0D4`; Files `sub_82314660`, `sub_828BDF10`, `sub_82A0D6DC`).
+  - Pieces the analyser split off a function whose head it never translated: F.E.A.R.
+    `sub_82A04614` (head `lwz r11,0x1bc(r3)` at 0x82A04600, no function there and no pointer to
+    either address), Files `sub_829CF0D4` (its twin) and `sub_82898EB8` (head at 0x82898EA0).
+    Nothing calls them; a call to the heads would fail today as an unregistered function.
+  - Files `sub_822A4D8C` (a tail-call hint in the manifest): its only branch is a `goto` inside
+    `sub_822A4D38`; no call reaches the separate function.
+  - No function reads v32-v63 from a caller.
+- **Host code:** `port-nx/src` reads only r1, r3-r10 and f1-f4 from the context, all still there.
+- **Midasm hooks:** the emitter resolves each listed register through the same accessors as the
+  generated code (`BuilderContext::emit_mid_asm_hook`), so `FearAnimFrameMs`' f0 and the particle
+  hooks' r11 get the locals.
+- **The SDK:** only `XThread`'s context save and restore read these fields.
+
+Next: translate and build both games, then the A/B of section 4 (PC first, then the Deck), with
+the tracer, AI and physics checks. Watch Havok (section 3's v92 helpers are unchanged by this
+stage) and anything reached through an exception funclet.

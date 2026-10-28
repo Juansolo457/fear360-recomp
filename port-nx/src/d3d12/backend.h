@@ -91,6 +91,7 @@ struct DrawStats {
   // ... pages found written between their copy and the arm, and the watch thread's time.
   uint64_t watch_arm_changed = 0, watch_arm_ns = 0;
   uint64_t hash_pages = 0, hash_copies = 0;  // pages hashed, and copied as they changed
+  uint64_t narrowed_ranges = 0;  // vertex ranges cut to the index bounds (--fear_vertex_index_range)
   // --fear_d3d12_coherency_check: pages whose guest memory differed from shared memory's
   // copy although the page watch said it was current, and pages rewritten after a draw of
   // the frame read them.
