@@ -44,8 +44,14 @@ enum Stage : uint32_t {
   kTexSrv,   // SRV index lookups on that path
   // Hook side, overlapping kTrack (not summed with the others): time inside the original guest
   // D3D functions at the outermost hooked call, i.e. the D3D library's own work (packet
-  // building, state flushes) that a recompilation which replaces the D3D API would not run.
+  // building, state flushes) that a recompilation which replaces the D3D API would not run
+  // (#92). Without the host work nested in it (our hooks inside the call) and without the D3D's
+  // waits, which are kGuestD3dWait. A lower bound: the game also writes some state straight
+  // into the command buffer, outside these calls.
   kGuestD3d,
+  // The guest D3D's own waits (the GPU-wait spin and its siblings), between its wait-begin and
+  // wait-end functions (the FearD3DWaitBegin/End midasm hooks), hooked call or not.
+  kGuestD3dWait,
   // Nested inside kSubmit or the swap: NativeRenderer::CloseUploadLists.
   kUploadList,
   kStageCount
@@ -55,7 +61,7 @@ inline constexpr const char* kStageNames[kStageCount] = {
     "read_state", "shaders",  "setup",   "rt_bind",     "translate",    "pipeline",
     "textures",   "sysconst", "pack",    "vertices",    "cbv",          "record",
     "submit",     "track",    "imm_vs",  "cap_shaders", "cap_vertices", "cap_record",
-    "tex_miss",   "tex_get",  "tex_srv", "guest_d3d",   "upload_list"};
+    "tex_miss",   "tex_get",  "tex_srv", "guest_d3d",   "guest_d3d_wait", "upload_list"};
 
 // Per-frame event counts (CSV columns, reset every frame), counted while the profiler is on.
 enum Counter : uint32_t {
@@ -119,5 +125,60 @@ class Scope {
   Stage stage_;
   uint64_t start_;
 };
+
+// kGuestD3d (#92): around each call of an original guest D3D function from a hook. Only the
+// outermost one counts; what the host does inside it (HostInGuestD3d) and the D3D's waits come
+// off.
+inline thread_local uint32_t guest_d3d_depth = 0;
+inline thread_local uint64_t guest_d3d_excluded = 0;  // ticks inside the outermost call to take off
+
+class GuestD3dScope {
+ public:
+  GuestD3dScope() : on_(On()) {
+    if (on_ && guest_d3d_depth++ == 0) {
+      guest_d3d_excluded = 0;
+      start_ = Ticks();
+    }
+  }
+  ~GuestD3dScope() {
+    if (on_ && --guest_d3d_depth == 0) {
+      const uint64_t span = Ticks() - start_;
+      g.ticks[kGuestD3d] += span > guest_d3d_excluded ? span - guest_d3d_excluded : 0;
+    }
+  }
+  GuestD3dScope(const GuestD3dScope&) = delete;
+  GuestD3dScope& operator=(const GuestD3dScope&) = delete;
+
+ private:
+  bool on_;
+  uint64_t start_ = 0;
+};
+
+// Host work (the tracker) inside an original D3D call, e.g. a push-buffer hook nested in a draw.
+class HostInGuestD3d {
+ public:
+  HostInGuestD3d() : start_(On() && guest_d3d_depth ? Ticks() : 0) {}
+  ~HostInGuestD3d() {
+    if (start_) guest_d3d_excluded += Ticks() - start_;
+  }
+  HostInGuestD3d(const HostInGuestD3d&) = delete;
+  HostInGuestD3d& operator=(const HostInGuestD3d&) = delete;
+
+ private:
+  uint64_t start_;
+};
+
+// kGuestD3dWait, from the FearD3DWaitBegin/End midasm hooks (profiler.cpp).
+inline thread_local uint64_t guest_d3d_wait_start = 0;
+inline void GuestD3dWaitBegin() {
+  if (On()) guest_d3d_wait_start = Ticks();
+}
+inline void GuestD3dWaitEnd() {
+  if (!guest_d3d_wait_start) return;
+  const uint64_t span = Ticks() - guest_d3d_wait_start;
+  guest_d3d_wait_start = 0;
+  g.ticks[kGuestD3dWait] += span;
+  if (guest_d3d_depth) guest_d3d_excluded += span;
+}
 
 }  // namespace fear::d3d12::profile

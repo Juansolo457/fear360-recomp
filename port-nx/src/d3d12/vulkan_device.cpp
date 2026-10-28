@@ -12,6 +12,7 @@
 #include <rex/ui/vulkan/provider.h>
 
 #include <algorithm>
+#include <vector>
 
 namespace fear::d3d12 {
 
@@ -28,6 +29,7 @@ VulkanDevice::~VulkanDevice() {
     if (f.fence) fn_.vkDestroyFence(device_, f.fence, nullptr);
     if (f.pool) fn_.vkDestroyCommandPool(device_, f.pool, nullptr);
   }
+  if (timestamps_) fn_.vkDestroyQueryPool(device_, timestamps_, nullptr);
 }
 
 bool VulkanDevice::Initialize(rex::ui::vulkan::VulkanProvider& provider) {
@@ -106,6 +108,30 @@ bool VulkanDevice::Initialize(rex::ui::vulkan::VulkanProvider& provider) {
     REXLOG_ERROR("D3D12 Vulkan: the device has no BC texture compression (the game's textures)");
     return false;
   }
+  // Frame timestamps, where the queue has them.
+  uint32_t families = 0;
+  fn_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &families, nullptr);
+  std::vector<VkQueueFamilyProperties> family(families);
+  fn_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &families, family.data());
+  const uint32_t valid_bits =
+      queue_family_ < families ? family[queue_family_].timestampValidBits : 0;
+  if (valid_bits && p.timestampPeriod > 0.0f) {
+    VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    qp.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qp.queryCount = 2 * kFramesInFlight;
+    // Timing is optional: without the pool the renderer runs and the GPU time is unavailable.
+    if (!Check(fn_.vkCreateQueryPool(device_, &qp, nullptr, &timestamps_), "vkCreateQueryPool")) {
+      timestamps_ = VK_NULL_HANDLE;
+    } else {
+      tick_ns_ = p.timestampPeriod;
+      tick_mask_ = valid_bits >= 64 ? ~uint64_t(0) : (uint64_t(1) << valid_bits) - 1;
+      // The counter's whole range in ns: an interval the host saw take longer may have wrapped.
+      range_ns_ = valid_bits >= 64 ? std::numeric_limits<double>::infinity()
+                                   : double(tick_mask_) * tick_ns_;
+    }
+  } else {
+    REXLOG_WARN("D3D12 Vulkan: no GPU timestamps on this queue (frame GPU time unavailable)");
+  }
   for (Frame& f : frames_) {
     VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -132,14 +158,65 @@ bool VulkanDevice::BeginSlot() {
       return false;
     completed_ = std::max(completed_, f.number);
     fn_.vkResetFences(device_, 1, &f.fence);
+    if (f.timed) CollectGpuTime(slot_);
   }
   fn_.vkResetCommandPool(device_, f.pool, 0);
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  return Check(fn_.vkBeginCommandBuffer(f.cmd, &bi), "vkBeginCommandBuffer");
+  if (!Check(fn_.vkBeginCommandBuffer(f.cmd, &bi), "vkBeginCommandBuffer")) return false;
+  f.timed = false;
+  if (timestamps_) {
+    fn_.vkCmdResetQueryPool(f.cmd, timestamps_, 2 * slot_, 2);
+    fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps_, 2 * slot_);
+    // The GPU runs this frame after now: host time from here bounds its timestamps' interval.
+    f.recorded_ns = NowNs();
+  }
+  return true;
+}
+
+void VulkanDevice::CollectGpuTime(uint32_t slot) {
+  frames_[slot].timed = false;
+  uint64_t ticks[2];
+  // The frame's fence was waited for, so both are available; without WAIT_BIT a result that
+  // isn't (a driver that disagrees) is skipped, never waited for.
+  if (fn_.vkGetQueryPoolResults(device_, timestamps_, 2 * slot, 2, sizeof(ticks), ticks,
+                                sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+    return;
+  const uint64_t begin = ticks[0] & tick_mask_, end = ticks[1] & tick_mask_;
+  // Masked, the difference survives one wrap of the counter, but not a whole one: the host time
+  // since the frame was recorded bounds the interval, and past the counter's range the frame is
+  // unavailable (NaN), and the next idle time too.
+  const uint64_t now = NowNs();
+  GpuWindow& w = gpu_window_;
+  if (double(now - frames_[slot].recorded_ns) >= range_ns_) {
+    gpu_last_ms_ = std::numeric_limits<double>::quiet_NaN();
+    gpu_last_end_ = 0;
+    ++w.ambiguous;
+    return;
+  }
+  const double ms = double((end - begin) & tick_mask_) * tick_ns_ / 1e6;
+  gpu_last_ms_ = ms;
+  ++w.frames;
+  w.sum_ms += ms;
+  w.max_ms = std::max(w.max_ms, ms);
+  // Idle: from the previous frame's end to this one's start, within the counter's range since
+  // the previous frame was recorded. A frame that started before the previous one ended
+  // (overlap) gives a "negative" difference, past half the range: no idle time.
+  if (gpu_last_end_ && double(now - gpu_last_recorded_ns_) < range_ns_) {
+    const uint64_t idle = (begin - gpu_last_end_) & tick_mask_;
+    if (idle <= (tick_mask_ >> 1)) w.idle_ms += double(idle) * tick_ns_ / 1e6;
+  }
+  gpu_last_end_ = end;
+  gpu_last_recorded_ns_ = frames_[slot].recorded_ns;
 }
 
 bool VulkanDevice::Submit(Frame& f) {
+  if (timestamps_) {
+    const uint32_t slot = uint32_t(&f - frames_.data());
+    fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps_,
+                            2 * slot + 1);
+    f.timed = true;
+  }
   if (!Check(fn_.vkEndCommandBuffer(f.cmd), "vkEndCommandBuffer")) return false;
   VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   si.commandBufferCount = 1;

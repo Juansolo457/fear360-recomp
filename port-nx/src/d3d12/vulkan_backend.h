@@ -83,8 +83,11 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint64_t texture_count() const override { return 0; }
   bool front_buffer_found() const override { return front_buffer_found_; }
   const LumaProbe& luma_probe() const override { return luma_; }
-  double gpu_last_frame_ms() const override { return 0.0; }
-  void LogGpuTiming() override {}
+  // The device's frame timestamps (#91): measured whether or not --fear_d3d12_gpu_timing is on
+  // (two timestamps a frame); NaN, an empty CSV cell, where the queue has none.
+  double gpu_last_frame_ms() const override { return device_->gpu_last_frame_ms(); }
+  // --fear_d3d12_gpu_timing: GPU time per frame and idle time between frames, per window.
+  void LogGpuTiming() override;
 
   // GuestMemoryMirror::Sink. The shared buffer is allocated whole (no sparse binding yet).
   bool MapShared(uint32_t start, uint32_t length) override { return true; }

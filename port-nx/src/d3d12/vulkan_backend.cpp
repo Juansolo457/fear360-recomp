@@ -89,6 +89,7 @@ REXCVAR_DECLARE(std::string, fear_d3d12_watch_trace);
 REXCVAR_DECLARE(bool, fear_d3d12_coherency_check);
 REXCVAR_DECLARE(int32_t, fear_d3d12_anisotropy);
 REXCVAR_DECLARE(bool, fear_d3d12_warmup);
+REXCVAR_DECLARE(bool, fear_d3d12_gpu_timing);
 
 namespace fear::d3d12 {
 
@@ -1618,6 +1619,18 @@ PrepareCounters VulkanBackend::EndFramePrepare(uint64_t done) {
   c.uploads = std::exchange(prep_uploads_, 0);
   c.diag = std::exchange(prep_diag_, {});
   return c;
+}
+
+void VulkanBackend::LogGpuTiming() {
+  const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
+  if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;
+  const double n = double(w.frames);
+  REXLOG_INFO("D3D12 Vulkan GPU: {} frames, per frame {:.2f} ms (max {:.2f}), idle between "
+              "frames {:.2f} ms{}",
+              w.frames, w.sum_ms / n, w.max_ms, w.idle_ms / n,
+              w.ambiguous ? fmt::format(", {} left out (past the timestamp counter's range)",
+                                        w.ambiguous)
+                          : std::string());
 }
 
 void VulkanBackend::AddPrepareCounters(const PrepareCounters& c) {
