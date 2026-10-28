@@ -60,17 +60,18 @@ podman run --rm --userns=keep-id "${mounts[@]}" -w /src -e HOME=/tmp \
 
 # The newest glibc symbol version each binary needs, and libstdc++'s for the record (libstdc++ 13
 # here: GLIBCXX_3.4.32 at most, which the Deck's libstdc++ has to provide). Read with the
-# container's llvm-readelf: binutils' objdump stops at lld's large executables.
+# container's llvm-readelf: binutils' objdump stops at lld's large executables. A failed read
+# stops the script (an empty symbol list would pass the check).
 dynsyms() {
   podman run --rm -v "$root:/src:ro" "$image" \
-    llvm-readelf-20 --dyn-syms --wide "/src/${1#"$root"/}" 2>/dev/null || true
+    llvm-readelf-20 --dyn-syms --wide "/src/${1#"$root"/}"
 }
 fail=0
 for f in "$root/$build_rel"/*; do
   [[ -f "$f" && ( -x "$f" || "$f" == *.so ) ]] || continue
   file -b "$f" | grep -q '^ELF' || continue
   # (grep finds nothing in a binary without these symbol versions: not an error.)
-  syms=$(dynsyms "$f")
+  syms=$(dynsyms "$f") || { echo "$(basename "$f"): couldn't read its symbols" >&2; exit 1; }
   need=$({ grep -o 'GLIBC_[0-9.]*' || true; } <<< "$syms" | sed 's/GLIBC_//' | sort -uV | tail -1)
   cxx=$({ grep -o 'GLIBCXX_[0-9.]*' || true; } <<< "$syms" | sort -uV | tail -1)
   if [[ -n "$need" && "$(printf '%s\n%s\n' "$need" "$glibc_max" | sort -V | tail -1)" != "$glibc_max" ]]; then

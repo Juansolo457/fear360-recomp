@@ -70,12 +70,16 @@ lto_tools=()
 if [[ "$lto" == ON ]]; then
   flags="$flags -flto=thin"
   link_flags="-fuse-ld=lld -flto=thin"
-  exe_link_flags="$link_flags -Wl,-T,$root/tools/linux/ltext.ld"
+  # Quoted for the shell that runs the link command: the checkout's path may hold spaces.
+  exe_link_flags="$link_flags \"-Wl,-T,$root/tools/linux/ltext.ld\""
   # The archive tools of the compiler's own LLVM (llvm-ar-21 next to clang 21), else unversioned.
   llvm=$("${CC:-clang}" -dumpversion | cut -d. -f1)
   ar=$(command -v "llvm-ar-$llvm" || command -v llvm-ar) || { echo "llvm-ar is not installed" >&2; exit 1; }
   ranlib=$(command -v "llvm-ranlib-$llvm" || command -v llvm-ranlib) || {
     echo "llvm-ranlib is not installed" >&2; exit 1; }
+  # -fuse-ld=lld: the compiler names the ld.lld it would run (a bare name when it has none).
+  [[ -x "$("${CC:-clang}" -print-prog-name=ld.lld)" ]] || command -v ld.lld >/dev/null || {
+    echo "lld is not installed (docs/SETUP.md, Linux), or build with FEAR_LTO=OFF" >&2; exit 1; }
   lto_tools=(-DCMAKE_AR="$ar" -DCMAKE_RANLIB="$ranlib")
 fi
 args=(--preset "$preset" -B "$build" -DREXSDK_DIR="$sdk"

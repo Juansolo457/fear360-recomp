@@ -64,7 +64,8 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
     off). lld 20 left the translated code's per-function `.ltext.*` sections apart (100,000+,
     past the ELF section index fields, so binutils' `objdump` failed); `tools/linux/ltext.ld`
     merges them. A docked 120 Hz retest is #89.
-- The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
+- The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux; add `--nolto` for
+  a `FEAR_LTO=OFF tools/build-deck.sh` build), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
   `README-SteamDeck-Linux.txt`.
 
