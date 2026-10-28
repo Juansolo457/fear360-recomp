@@ -88,9 +88,9 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
   const auto& regs = *reinterpret_cast<const rex::graphics::RegisterFile*>(s.regs);
   const rex::graphics::Shader::ConstantRegisterMap& vmap = vs.constant_register_map();
   // With index_ranges, the bytes of each fetch constant the draw's vertices reach, for the
-  // bindings whose fetches all take the vertex index the shader starts with (r0.x, never
-  // written): vertex lo..hi, each vertex's attributes. Any other binding of a fetch constant
-  // keeps it whole.
+  // bindings whose fetches all take the vertex index the shader starts with (r0.x, not
+  // rewritten before them, SDK patch 0025): vertex lo..hi, each vertex's attributes. Any other
+  // binding of a fetch constant keeps it whole.
   struct Reach {
     uint32_t index;
     int64_t begin, end;  // bytes from the fetch constant's address
@@ -99,7 +99,7 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
   Reach reach[8];
   uint32_t reach_count = 0;
   uint32_t lo = 0, hi = 0;
-  if (index_ranges && vs.is_ucode_analyzed() && !vs.writes_register_0_x() &&
+  if (index_ranges && vs.is_ucode_analyzed() && !vs.vertex_index_rewritten() &&
       IndexBounds(s, lo, hi)) {
     using rex::graphics::InstructionStorageAddressingMode;
     using rex::graphics::InstructionStorageSource;
