@@ -207,9 +207,10 @@ class VulkanDevice {
   // frames, which is kept apart. NaN when the queue has no timestamps.
   double gpu_last_frame_ms() const { return gpu_last_ms_; }
   // Collected frames since the last TakeGpuWindow: their count, GPU time (sum, max) and the
-  // GPU's idle time between consecutive frames.
+  // GPU's idle time between consecutive frames; `ambiguous`: frames left out because the host
+  // saw them take longer than the timestamp counter's range (a whole wrap can't be told).
   struct GpuWindow {
-    uint64_t frames = 0;
+    uint64_t frames = 0, ambiguous = 0;
     double sum_ms = 0.0, max_ms = 0.0, idle_ms = 0.0;
   };
   GpuWindow TakeGpuWindow() { return std::exchange(gpu_window_, {}); }
@@ -228,6 +229,7 @@ class VulkanDevice {
     VkFence fence = VK_NULL_HANDLE;
     uint64_t number = 0;  // the frame it last carried (0: none)
     bool timed = false;   // its command buffer wrote both timestamps
+    uint64_t recorded_ns = 0;  // host time when its first timestamp was recorded
   };
   // The finished frame's timestamps (queries 2 * slot and 2 * slot + 1) into gpu_last_ms_.
   void CollectGpuTime(uint32_t slot);
@@ -251,8 +253,10 @@ class VulkanDevice {
   VkQueryPool timestamps_ = VK_NULL_HANDLE;  // two per frame-in-flight slot
   double tick_ns_ = 0.0;                     // the device's timestampPeriod
   uint64_t tick_mask_ = 0;                   // the queue's timestampValidBits
+  double range_ns_ = 0.0;                    // the counter's whole range
   double gpu_last_ms_ = std::numeric_limits<double>::quiet_NaN();
   uint64_t gpu_last_end_ = 0;  // end tick of the frame collected last (0: none yet)
+  uint64_t gpu_last_recorded_ns_ = 0;  // that frame's Frame::recorded_ns
   GpuWindow gpu_window_;
 };
 

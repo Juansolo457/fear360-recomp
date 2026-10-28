@@ -1626,8 +1626,11 @@ void VulkanBackend::LogGpuTiming() {
   if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;
   const double n = double(w.frames);
   REXLOG_INFO("D3D12 Vulkan GPU: {} frames, per frame {:.2f} ms (max {:.2f}), idle between "
-              "frames {:.2f} ms",
-              w.frames, w.sum_ms / n, w.max_ms, w.idle_ms / n);
+              "frames {:.2f} ms{}",
+              w.frames, w.sum_ms / n, w.max_ms, w.idle_ms / n,
+              w.ambiguous ? fmt::format(", {} left out (past the timestamp counter's range)",
+                                        w.ambiguous)
+                          : std::string());
 }
 
 void VulkanBackend::AddPrepareCounters(const PrepareCounters& c) {
