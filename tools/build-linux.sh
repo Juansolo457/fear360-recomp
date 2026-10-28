@@ -58,14 +58,19 @@ build="${FEAR_BUILD_DIR:-$port/out/build/$preset}"
 # name clang-20; any clang 20 or later works. Debug info in every configuration, Release too: a
 # crash's backtrace (coredumpctl) and perf need the function names.
 flags="-march=x86-64-v3 -g"
-# FEAR_LTO=ON: ThinLTO over the game, its translated code (199 files whose calls to each other
-# can't be inlined otherwise) and the static SDK libraries; lld links it and llvm-ar archives the
-# bitcode. Off by default until measured (#87).
-link_flags=
+# ThinLTO over the game, its translated code (199 files whose calls to each other can't be inlined
+# otherwise) and the static SDK libraries; lld links it and llvm-ar archives the bitcode. On by
+# default except in Debug (FEAR_LTO=ON or OFF overrides): on the Deck it halved the hitches in
+# F.E.A.R. Files' Sprint fights (#87, docs/LINUX_NATIVE.md). tools/linux/ltext.ld merges the
+# translated code's per-function sections back into one.
+lto="${FEAR_LTO:-}"
+[[ -n "$lto" ]] || { [[ "$config" == Debug ]] && lto=OFF || lto=ON; }
+link_flags= exe_link_flags=
 lto_tools=()
-if [[ "${FEAR_LTO:-OFF}" == ON ]]; then
+if [[ "$lto" == ON ]]; then
   flags="$flags -flto=thin"
   link_flags="-fuse-ld=lld -flto=thin"
+  exe_link_flags="$link_flags -Wl,-T,$root/tools/linux/ltext.ld"
   # The archive tools of the compiler's own LLVM (llvm-ar-21 next to clang 21), else unversioned.
   llvm=$("${CC:-clang}" -dumpversion | cut -d. -f1)
   ar=$(command -v "llvm-ar-$llvm" || command -v llvm-ar) || { echo "llvm-ar is not installed" >&2; exit 1; }
@@ -76,7 +81,7 @@ fi
 args=(--preset "$preset" -B "$build" -DREXSDK_DIR="$sdk"
       -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}"
       "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags"
-      "-DCMAKE_EXE_LINKER_FLAGS=$link_flags" "-DCMAKE_SHARED_LINKER_FLAGS=$link_flags"
+      "-DCMAKE_EXE_LINKER_FLAGS=$exe_link_flags" "-DCMAKE_SHARED_LINKER_FLAGS=$link_flags"
       "${lto_tools[@]}"
       -DREXGLUE_USE_VULKAN=ON -DREXGLUE_GPU_XENOS_STATIC=ON -DREXGLUE_BUILD_TESTS=OFF)
 cd "$port"
@@ -89,4 +94,4 @@ first_time=0
 cmake --build "$build" --parallel "$jobs" --target fear_codegen
 if [[ $first_time -eq 1 ]]; then cmake "${args[@]}"; fi
 cmake --build "$build" --parallel "$jobs"
-echo "Built $build/$name (LTO ${FEAR_LTO:-OFF})"
+echo "Built $build/$name (LTO $lto)"
