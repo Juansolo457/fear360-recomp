@@ -8,13 +8,16 @@
 #   tools/build-deck.sh                          # F.E.A.R.
 #   tools/build-deck.sh --project port-files --jobs 12
 #   tools/build-deck.sh --rebuild-image          # rebuild the container image first
+# Release by default (--config to change): RelWithDebInfo also compiles in the SDK's Tracy zones
+# and perf counters (one atomic add per guest indirect call), and -O2 for the translated code:
+# the heaviest Deck fights ran 18.3 ms a frame against Release's 15.1 (game thread bound).
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image=fear360-deck-build
 glibc_max=2.35
 project=port-nx
-config=RelWithDebInfo
+config=Release
 jobs=$(( $(nproc) > 2 ? $(nproc) - 2 : 1 ))
 rebuild=0
 while [[ $# -gt 0 ]]; do

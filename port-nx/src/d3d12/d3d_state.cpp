@@ -128,7 +128,30 @@ void GuestStateTracker::Sync(uint8_t* base, uint32_t device, uint32_t fn, bool e
             CurrentThreadId(), last_sync_thread_);
       in_packet_ = false;
     }
-    for (uint32_t a = cursor_ + 4; a <= cur; a += 4) Feed(base, a, Load32(base, a));
+    for (uint32_t a = cursor_ + 4; a <= cur;) {
+      // A packet that lies whole in the window is read straight into pkt_ and handled, as Feed
+      // would one dword at a time (on the Steam Deck, Feed's per-dword path was ~4% of the game
+      // thread in fights).
+      if (!in_packet_) {
+        const uint32_t dw = Load32(base, a);
+        const uint32_t type = dw >> 30;
+        if (dw != 0 && type != 2) {
+          const uint32_t need = type == 1 ? 2 : ((dw >> 16) & 0x3FFF) + 1;
+          if (need <= (cur - a) / 4) {
+            header_ = dw;
+            packet_address_ = a;
+            pkt_.resize(need);
+            for (uint32_t i = 0; i < need; ++i) pkt_[i] = Load32(base, a + 4 + i * 4);
+            ++counters_.packets;
+            HandlePacket(base);
+            a += (need + 1) * 4;
+            continue;
+          }
+        }
+      }
+      Feed(base, a, Load32(base, a));
+      a += 4;
+    }
     counters_.dwords += (cur - cursor_) / 4;
   } else {
     // The cursor moved somewhere no hooked jump reported (backwards, or too far).

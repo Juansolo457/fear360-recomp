@@ -34,6 +34,13 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   it into every run, hooking every Vulkan call. SDK patch 0024 (from GRAW's #51 fix) uses it only
   when it's already in the process. Next in the profile: descriptor set allocation per draw
   (~9%) and texture-cache lookups (~5%).
+- Game thread: with RenderDoc gone, the heaviest fights (1,000+ draws) were bound by the game's
+  main thread (a full core: ~69% translated game code, ~17% our hooks, mostly the vertex
+  mirror's page hashing; render thread ~33%, GPU under half busy). RelWithDebInfo compiles in the
+  SDK's Tracy zones and perf counters (an atomic add per guest indirect call) and builds the
+  translated code at -O2; the Deck build is now Release (-O3) with `-g` kept: 1,000-1,200-draw
+  frames went from 18.3 to 15.1 ms median. The state tracker decodes whole packets straight
+  from guest memory (same result; too small to see in the numbers). Next: the page hashing.
 - Not tested yet: audio, the Deck itself.
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
