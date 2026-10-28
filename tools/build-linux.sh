@@ -66,8 +66,10 @@ lto_tools=()
 if [[ "${FEAR_LTO:-OFF}" == ON ]]; then
   flags="$flags -flto=thin"
   link_flags="-fuse-ld=lld -flto=thin"
-  ar=$(command -v llvm-ar-20 || command -v llvm-ar) || { echo "llvm-ar is not installed" >&2; exit 1; }
-  ranlib=$(command -v llvm-ranlib-20 || command -v llvm-ranlib) || {
+  # The archive tools of the compiler's own LLVM (llvm-ar-21 next to clang 21), else unversioned.
+  llvm=$("${CC:-clang}" -dumpversion | cut -d. -f1)
+  ar=$(command -v "llvm-ar-$llvm" || command -v llvm-ar) || { echo "llvm-ar is not installed" >&2; exit 1; }
+  ranlib=$(command -v "llvm-ranlib-$llvm" || command -v llvm-ranlib) || {
     echo "llvm-ranlib is not installed" >&2; exit 1; }
   lto_tools=(-DCMAKE_AR="$ar" -DCMAKE_RANLIB="$ranlib")
 fi

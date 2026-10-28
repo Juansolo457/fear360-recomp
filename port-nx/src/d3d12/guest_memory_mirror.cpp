@@ -126,7 +126,8 @@ bool GuestMemoryMirror::RequestVertices(const DrawState& s, const rex::graphics:
       for (uint32_t i = 0; i < reach_count; ++i)
         if (reach[i].index == b.fetch_constant) r = &reach[i];
       if (!r) {
-        if (reach_count == std::size(reach)) break;  // the rest stay whole
+        // Full: this constant stays whole; later bindings of recorded ones still merge.
+        if (reach_count == std::size(reach)) continue;
         r = &reach[reach_count++];
         *r = {b.fetch_constant, INT64_MAX, INT64_MIN, false};
       }
