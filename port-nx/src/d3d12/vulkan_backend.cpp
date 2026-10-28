@@ -1635,6 +1635,7 @@ void VulkanBackend::AfterSwap(uint64_t frame_index, uint64_t completed) {
   stats_.watch_arm_changed = mirror_.watch_arm_changed.exchange(0, std::memory_order_relaxed);
   stats_.watch_arm_ns = mirror_.watch_arm_ns.exchange(0, std::memory_order_relaxed);
   stats_.hash_pages = mirror_.hash_pages.exchange(0, std::memory_order_relaxed);
+  stats_.narrowed_ranges = mirror_.narrowed_ranges.exchange(0, std::memory_order_relaxed);
   stats_.hash_copies = mirror_.hash_copies.exchange(0, std::memory_order_relaxed);
   gpu_->bindings.EndFrame(completed);
   gpu_->textures->EndFrame(completed);

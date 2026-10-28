@@ -30,6 +30,10 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_coherency_check, false, "F.E.A.R. D3D12",
                     "(stale pages: a write the page watch missed; late pages: data rewritten after "
                     "a draw of the frame read it), and check copy segments against every read. "
                     "Slow (512 MB of host memory, a memcmp of every range read)");
+REXCVAR_DEFINE_BOOL(fear_vertex_index_range, false, "F.E.A.R. D3D12",
+                    "Experiment (#40): copy each vertex range only as far as the draw's vertices "
+                    "reach (its index bounds), not the whole vertex buffer, for shaders that fetch "
+                    "with the plain vertex index; fewer pages hashed in big fights");
 REXCVAR_DEFINE_BOOL(fear_d3d12_implicit_gradients, true, "F.E.A.R. D3D12",
                     "Experiment (Steam Deck shimmer): translate computed-LOD texture fetches in "
                     "pixel shaders with sample_b and the GPU's own derivatives (pgr4-native 0021; "

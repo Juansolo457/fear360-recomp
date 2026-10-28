@@ -1,0 +1,66 @@
+From 0e8f5f5fc6f65415e8c013dde8aefd1d75d93a0d Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 05:52:47 -0700
+Subject: [PATCH] graphics: shaders record whether they may write r0.x
+
+A vertex shader starts with the vertex index in r0.x. A host that copies only the vertices a
+draw's indices reach needs to know the shader's fetches still read that index.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/graphics/pipeline/shader/shader.h | 5 +++++
+ src/graphics/pipeline/shader/translator.cpp   | 8 ++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/include/rex/graphics/pipeline/shader/shader.h b/include/rex/graphics/pipeline/shader/shader.h
+index 4cf3854..8ae7a7b 100644
+--- a/include/rex/graphics/pipeline/shader/shader.h
++++ b/include/rex/graphics/pipeline/shader/shader.h
+@@ -933,6 +933,10 @@ class Shader {
+   // True if the shader overrides the pixel depth.
+   bool writes_depth() const { return writes_depth_; }
+ 
++  // True if an instruction may write r0.x, where a vertex shader starts with the vertex index
++  // (also when a register write uses relative addressing). Valid after AnalyzeUcode.
++  bool writes_register_0_x() const { return writes_register_0_x_; }
++
+   // Whether the shader can have early depth and stencil writing enabled, unless
+   // alpha test or alpha to coverage is enabled.
+   bool implicit_early_z_write_allowed() const {
+@@ -1016,6 +1020,7 @@ class Shader {
+   bool kills_pixels_ = false;
+   bool uses_texture_fetch_instruction_results_ = false;
+   bool writes_depth_ = false;
++  bool writes_register_0_x_ = false;
+ 
+   // Memory export eM write info for each control flow instruction, if there are
+   // any eM writes in the shader.
+diff --git a/src/graphics/pipeline/shader/translator.cpp b/src/graphics/pipeline/shader/translator.cpp
+index e472251..f9eb4d0 100644
+--- a/src/graphics/pipeline/shader/translator.cpp
++++ b/src/graphics/pipeline/shader/translator.cpp
+@@ -545,6 +545,10 @@ void Shader::GatherFetchResultInformation(const InstructionResult& result) {
+   // Fetch instructions can't export - don't need the current memexport count
+   // operand.
+   assert_true(result.storage_target == InstructionStorageTarget::kRegister);
++  if (result.storage_addressing_mode != InstructionStorageAddressingMode::kAbsolute ||
++      (result.storage_index == 0 && (result.GetUsedWriteMask() & 1))) {
++    writes_register_0_x_ = true;
++  }
+   if (result.storage_addressing_mode == InstructionStorageAddressingMode::kAbsolute) {
+     register_static_address_bound_ =
+         std::max(register_static_address_bound_, result.storage_index + uint32_t(1));
+@@ -560,6 +564,10 @@ void Shader::GatherAluResultInformation(const InstructionResult& result, uint32_
+   }
+   switch (result.storage_target) {
+     case InstructionStorageTarget::kRegister:
++      if (result.storage_addressing_mode != InstructionStorageAddressingMode::kAbsolute ||
++          (result.storage_index == 0 && (used_write_mask & 1))) {
++        writes_register_0_x_ = true;
++      }
+       if (result.storage_addressing_mode == InstructionStorageAddressingMode::kAbsolute) {
+         register_static_address_bound_ =
+             std::max(register_static_address_bound_, result.storage_index + uint32_t(1));
+-- 
+2.53.0.windows.1
+
