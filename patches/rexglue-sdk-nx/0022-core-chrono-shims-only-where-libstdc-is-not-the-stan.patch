@@ -1,0 +1,32 @@
+From 6e21f1d9df0323ff985aa212e300d1fd6160795e Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 11:23:44 -0700
+Subject: [PATCH] core: chrono shims only where libstdc++ is not the standard
+ library
+
+The fear-nx patch declared std::chrono::clock_time_conversion and clock_cast on all of Linux;
+libstdc++ 13 (Ubuntu 22.04 with the toolchain PPA, the Steam Deck build) has both, so they
+were redefinitions.
+---
+ include/rex/chrono/chrono.h | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/include/rex/chrono/chrono.h b/include/rex/chrono/chrono.h
+index 1d090a7..56741e4 100644
+--- a/include/rex/chrono/chrono.h
++++ b/include/rex/chrono/chrono.h
+@@ -116,8 +116,9 @@ using XSystemClock = detail::NtSystemClock<detail::Domain::Guest>;
+ 
+ namespace std::chrono {
+ 
+-#if defined(__APPLE__) || defined(__linux__)
+-// The host toolchain's standard library does not expose these C++20 helpers.
++#if defined(__APPLE__) || (defined(__linux__) && !defined(__GLIBCXX__))
++// The host toolchain's standard library does not expose these C++20 helpers (libc++;
++// libstdc++ has had them since GCC 13, the oldest the SDK builds with).
+ template <class, class>
+ struct clock_time_conversion {};
+ 
+-- 
+2.53.0
+

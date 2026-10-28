@@ -9,6 +9,7 @@
 #include <filesystem>
 
 #include <imgui.h>
+#include <rex/logging.h>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -16,6 +17,11 @@
 #endif
 #include <windows.h>
 #include <xinput.h>
+#else
+#include <mutex>
+#include <vector>
+
+#include <SDL3/SDL.h>
 #endif
 
 namespace fear::panel {
@@ -37,6 +43,76 @@ XInputGetStateFn XInputGet() {
   }();
   return function;
 }
+#else
+// XInput's button bits, for the SDL path below.
+constexpr uint16_t XINPUT_GAMEPAD_DPAD_UP = 0x0001;
+constexpr uint16_t XINPUT_GAMEPAD_DPAD_DOWN = 0x0002;
+constexpr uint16_t XINPUT_GAMEPAD_DPAD_LEFT = 0x0004;
+constexpr uint16_t XINPUT_GAMEPAD_DPAD_RIGHT = 0x0008;
+constexpr uint16_t XINPUT_GAMEPAD_A = 0x1000;
+constexpr uint16_t XINPUT_GAMEPAD_B = 0x2000;
+
+// Linux: SDL3's gamepads, opened by the panels themselves. The SDK's SDL driver can't stand in:
+// the game's active callback (fear_app.h) turns it off while a panel is open, and the collection
+// menu opens before the runtime (and its driver) exists. SDL counts subsystem inits, so sharing
+// the gamepad subsystem with the driver is fine. Opening and updating happen on the UI thread
+// (Navigator::Poll); the input thread (GameGetsInput) only reads the opened pads, which SDL locks.
+std::mutex g_sdl_mutex;
+std::vector<SDL_Gamepad*> g_sdl_pads;
+bool g_sdl_initialized = false;  // UI thread
+// Buttons pressed since the last Poll (XINPUT_GAMEPAD_*), from SDL's events: a tap shorter than
+// a frame falls between two reads of the state.
+std::atomic<uint16_t> g_sdl_taps{0};
+
+bool SDLCALL WatchTaps(void*, SDL_Event* event) {
+  if (event->type != SDL_EVENT_GAMEPAD_BUTTON_DOWN) return true;
+  uint16_t bit = 0;
+  switch (event->gbutton.button) {
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: bit = XINPUT_GAMEPAD_DPAD_UP; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: bit = XINPUT_GAMEPAD_DPAD_DOWN; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: bit = XINPUT_GAMEPAD_DPAD_LEFT; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: bit = XINPUT_GAMEPAD_DPAD_RIGHT; break;
+    case SDL_GAMEPAD_BUTTON_SOUTH: bit = XINPUT_GAMEPAD_A; break;
+    case SDL_GAMEPAD_BUTTON_EAST: bit = XINPUT_GAMEPAD_B; break;
+    default: break;
+  }
+  g_sdl_taps.fetch_or(bit);
+  return true;
+}
+
+void UpdateSdlPads() {
+  static bool failed = false;
+  if (failed) return;
+  if (!g_sdl_initialized) {
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+      REXLOG_WARN("F.E.A.R. panels: SDL gamepads unavailable: {}", SDL_GetError());
+      failed = true;
+      return;
+    }
+    SDL_AddEventWatch(WatchTaps, nullptr);
+    g_sdl_initialized = true;
+  }
+  SDL_UpdateGamepads();
+  int count = 0;
+  SDL_JoystickID* ids = SDL_GetGamepads(&count);
+  std::lock_guard<std::mutex> lock(g_sdl_mutex);
+  // Pads that went away are closed; new ones opened (SDL hands back the same one when it's open).
+  std::erase_if(g_sdl_pads, [](SDL_Gamepad* pad) {
+    if (SDL_GamepadConnected(pad)) return false;
+    SDL_CloseGamepad(pad);
+    return true;
+  });
+  for (int i = 0; ids && i < count; ++i) {
+    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
+    if (pad && std::find(g_sdl_pads.begin(), g_sdl_pads.end(), pad) != g_sdl_pads.end()) continue;
+    if ((pad = SDL_OpenGamepad(ids[i]))) {
+      g_sdl_pads.push_back(pad);
+      REXLOG_INFO("F.E.A.R. panels: controller '{}' ({:04x}:{:04x})", SDL_GetGamepadName(pad),
+                  SDL_GetGamepadVendor(pad), SDL_GetGamepadProduct(pad));
+    }
+  }
+  SDL_free(ids);
+}
 #endif
 
 struct PadState {
@@ -49,7 +125,26 @@ struct PadState {
 // slot is slow, so those are asked again once a second.
 PadState ReadPads() {
   PadState out;
-#if defined(_WIN32)
+#if !defined(_WIN32)
+  std::lock_guard<std::mutex> lock(g_sdl_mutex);
+  for (SDL_Gamepad* pad : g_sdl_pads) {
+    const auto button = [pad](SDL_GamepadButton b) { return SDL_GetGamepadButton(pad, b); };
+    if (button(SDL_GAMEPAD_BUTTON_DPAD_UP)) out.buttons |= XINPUT_GAMEPAD_DPAD_UP;
+    if (button(SDL_GAMEPAD_BUTTON_DPAD_DOWN)) out.buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
+    if (button(SDL_GAMEPAD_BUTTON_DPAD_LEFT)) out.buttons |= XINPUT_GAMEPAD_DPAD_LEFT;
+    if (button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) out.buttons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+    if (button(SDL_GAMEPAD_BUTTON_SOUTH)) out.buttons |= XINPUT_GAMEPAD_A;
+    if (button(SDL_GAMEPAD_BUTTON_EAST)) out.buttons |= XINPUT_GAMEPAD_B;
+    // SDL's Y axis points down, XInput's up.
+    const int16_t lx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX);
+    const int16_t ly = int16_t(-std::max<int>(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY), -32767));
+    if (std::abs(lx) > std::abs(out.lx)) out.lx = lx;
+    if (std::abs(ly) > std::abs(out.ly)) out.ly = ly;
+    // SDL's triggers run 0 to 32767; XInput's threshold of 30 of 255.
+    out.triggers |= SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 3855 ||
+                    SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 3855;
+  }
+#else
   static std::atomic<uint32_t> connected{0xF};
   static std::atomic<int64_t> next_scan{0};
   const auto get = XInputGet();
@@ -85,6 +180,8 @@ bool PanelKeysHeld() {
     if (GetAsyncKeyState(key) & 0x8000) return true;
   }
 #endif
+  // Linux: the keys reach the game through the window, and the panels through ImGui; with a panel
+  // just closed there is no ImGui frame to ask from this thread. The controller is the Deck's input.
   return false;
 }
 
@@ -92,18 +189,35 @@ bool PanelKeysHeld() {
 
 uint32_t Navigator::Poll() {
   const double t = ImGui::GetTime();
-  if (opened_ < 0) opened_ = t;
-  const PadState pad = ReadPads();
-  uint32_t now = 0;
-#if defined(_WIN32)
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_UP) || pad.ly > 16000) now |= kUp;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_DOWN) || pad.ly < -16000) now |= kDown;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_LEFT) || pad.lx < -16000) now |= kLeft;
-  if ((pad.buttons & XINPUT_GAMEPAD_DPAD_RIGHT) || pad.lx > 16000) now |= kRight;
-  if (pad.buttons & XINPUT_GAMEPAD_A) now |= kAccept;
-  if (pad.buttons & XINPUT_GAMEPAD_B) now |= kBack;
+  const bool first = opened_ < 0;
+  if (first) opened_ = t;
+  const auto bits = [](uint16_t buttons) {
+    uint32_t out = 0;
+    if (buttons & XINPUT_GAMEPAD_DPAD_UP) out |= kUp;
+    if (buttons & XINPUT_GAMEPAD_DPAD_DOWN) out |= kDown;
+    if (buttons & XINPUT_GAMEPAD_DPAD_LEFT) out |= kLeft;
+    if (buttons & XINPUT_GAMEPAD_DPAD_RIGHT) out |= kRight;
+    if (buttons & XINPUT_GAMEPAD_A) out |= kAccept;
+    if (buttons & XINPUT_GAMEPAD_B) out |= kBack;
+    return out;
+  };
+#if !defined(_WIN32)
+  UpdateSdlPads();
+  // Presses since the last frame, from SDL's events: a press each, even let go before this frame
+  // or with the state wrong (a pad opened mid-press keeps the button down in SDL's state, which
+  // would hold it here for good). From before the panel opened (the press that opened it): none.
+  const uint32_t taps = bits(g_sdl_taps.exchange(0));
+  const uint32_t tapped = first ? 0 : taps;
+#else
+  const uint32_t tapped = 0;
 #endif
-  uint32_t pressed = now & ~held_;
+  const PadState pad = ReadPads();
+  uint32_t now = bits(pad.buttons);
+  if (pad.ly > 16000) now |= kUp;
+  if (pad.ly < -16000) now |= kDown;
+  if (pad.lx < -16000) now |= kLeft;
+  if (pad.lx > 16000) now |= kRight;
+  uint32_t pressed = (now & ~held_) | tapped;
   const uint32_t directions = now & kDirections;
   if (pressed & kDirections) {
     next_repeat_ = t + 0.4;
@@ -204,14 +318,34 @@ void AddFonts(ImFontAtlas* atlas) {
   static const ImWchar ranges[] = {0x0020, 0x00FF, 0};
   ImFontConfig config;
   config.OversampleH = config.OversampleV = 2;
+  // Linux: SteamOS's Noto Sans (Arch's path), then the Debian/Ubuntu paths.
   for (const char* path : {"C:\\Windows\\Fonts\\bahnschrift.ttf",
-                           "C:\\Windows\\Fonts\\segoeui.ttf"}) {
+                           "C:\\Windows\\Fonts\\segoeui.ttf",
+                           "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+                           "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                           "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                           "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"}) {
     std::error_code error;
     if (std::filesystem::exists(path, error)) {
       g_font = atlas->AddFontFromFileTTF(path, 64.0f, &config, ranges);
       if (g_font) return;
     }
   }
+}
+
+void ReleaseControllers() {
+#if !defined(_WIN32)
+  if (!g_sdl_initialized) return;
+  {
+    std::lock_guard<std::mutex> lock(g_sdl_mutex);
+    for (SDL_Gamepad* pad : g_sdl_pads) SDL_CloseGamepad(pad);
+    g_sdl_pads.clear();
+  }
+  SDL_RemoveEventWatch(WatchTaps, nullptr);
+  g_sdl_taps = 0;
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+  g_sdl_initialized = false;
+#endif
 }
 
 bool GameGetsInput() {

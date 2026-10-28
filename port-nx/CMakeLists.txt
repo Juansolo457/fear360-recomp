@@ -103,6 +103,8 @@ fear_stage_runtime_libraries()
 if(WIN32)
     target_link_libraries(fear PRIVATE dbghelp)   # crash reports (src/crash_report.cpp)
     target_link_libraries(fear PRIVATE dxgi)      # the display's vblank (src/display_vblank.cpp)
+else()
+    target_link_libraries(fear PRIVATE SDL3::SDL3)  # the panels' controllers (src/fear_panel.cpp)
 endif()
 # The renderer (cmake/fear_common.cmake). port-files builds it too, for its own Direct3D
 # (FEAR_TITLE_FILES, src/d3d12/fear_d3d.h).

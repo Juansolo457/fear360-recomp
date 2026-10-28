@@ -10,6 +10,11 @@
     python -I tools/steamdeck/make_package.py --settings [out.zip]
         just both games' user/settings.toml (default private/steamdeck/FEAR360-SteamDeck-settings.zip),
         to unpack over an existing install: the Deck settings below, saves untouched
+    python3 -I tools/steamdeck/make_package.py --linux [out.zip]     (on Linux: WSL)
+        the native Linux programs from tools/build-deck.sh (default
+        private/steamdeck/FEAR360-SteamDeck-linux.zip), to unpack over an existing install: each
+        game's program and its libraries, fear-linux.sh (the launcher, no Proton) and
+        README-SteamDeck-Linux.txt. The Proton programs stay; data, saves and settings untouched
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -33,15 +38,18 @@ import sys
 import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-ARGV = [a for a in sys.argv[1:] if a not in ('--programs', '--settings', '--windows')]
+ARGV = [a for a in sys.argv[1:] if a not in ('--programs', '--settings', '--windows', '--linux')]
 PROGRAMS_ONLY = '--programs' in sys.argv[1:]
 SETTINGS_ONLY = '--settings' in sys.argv[1:]
 # --windows: the same package for another Windows PC (a private test copy): a Play F.E.A.R..cmd
 # with the launch options below instead of the Deck's Steam setup.
 WINDOWS = '--windows' in sys.argv[1:]
+# --linux: the native Linux build (tools/build-deck.sh), no Proton (docs/LINUX_NATIVE.md).
+LINUX = '--linux' in sys.argv[1:]
 OUT = ARGV[0] if ARGV else os.path.join(
     REPO, 'private', 'windows' if WINDOWS else 'steamdeck',
     'FEAR360-Windows.zip' if WINDOWS else
+    'FEAR360-SteamDeck-linux.zip' if LINUX else
     'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else
     'FEAR360-SteamDeck-settings.zip' if SETTINGS_ONLY else 'FEAR360-SteamDeck.zip')
 TOP = 'FEAR360-Windows' if WINDOWS else 'FEAR360-SteamDeck'
@@ -127,7 +135,52 @@ def crt_folder():
     return found[-1]
 
 
+def main_linux():
+    """The native Linux update: tools/build-deck.sh's programs and libraries (the build's own
+    shared libraries, found next to each program through its $ORIGIN run path) and the launcher."""
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    count = total = 0
+    versions = []
+    with zipfile.ZipFile(OUT, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as z:
+        def add(src, arc, executable=False):
+            nonlocal count, total
+            info = zipfile.ZipInfo.from_file(src, f'{TOP}/{arc}')
+            # Unix permissions, so the Deck's unzip keeps the programs runnable.
+            info.external_attr = (0o100755 if executable else 0o100644) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(src, 'rb') as f:
+                z.writestr(info, f.read())
+            count += 1
+            total += os.path.getsize(src)
+
+        steamdeck = os.path.join(REPO, 'tools', 'steamdeck')
+        add(os.path.join(steamdeck, 'fear-linux.sh'), 'fear-linux.sh', executable=True)
+        add(os.path.join(steamdeck, 'README-SteamDeck-Linux.txt'), 'README-SteamDeck-Linux.txt')
+        for folder, project, exe, *_ in GAMES:
+            program = exe.removesuffix('.exe')
+            build = os.path.join(REPO, project, 'out', 'build', 'deck-amd64-release')
+            if not os.path.exists(os.path.join(build, program)):
+                raise SystemExit(f'{build}/{program} is missing: run tools/build-deck.sh'
+                                 + ('' if project == 'port-nx' else f' --project {project}'))
+            add(os.path.join(build, program), f'{folder}/{program}', executable=True)
+            for lib in sorted(glob.glob(os.path.join(build, '*.so*'))):
+                add(lib, f'{folder}/{os.path.basename(lib)}', executable=True)
+            text = 'unknown'
+            header = os.path.join(build, 'fear_version', 'fear_version_info.h')
+            if os.path.exists(header):
+                for line in open(header, encoding='utf-8'):
+                    if line.startswith('#define FEAR_VERSION_TEXT '):
+                        text = line.split('"')[1]
+            versions.append(f'{program} (Linux): {text}')
+        z.writestr(f'{TOP}/VERSION-linux.txt', '\n'.join(versions) + '\n')
+    print('version: ' + '; '.join(versions))
+    print(f'{OUT}: {count} files, {total / 2**20:.0f} MB before compression')
+
+
 def main():
+    if LINUX:
+        main_linux()
+        return
     if SETTINGS_ONLY:
         os.makedirs(os.path.dirname(OUT), exist_ok=True)
         with zipfile.ZipFile(OUT, 'w', zipfile.ZIP_DEFLATED) as z:

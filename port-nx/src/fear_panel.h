@@ -82,4 +82,9 @@ void AddFonts(ImFontAtlas* atlas);
 // For InputSystem::SetActiveCallback: whether the game gets the controller and keyboard now.
 bool GameGetsInput();
 
+// Linux: close the panels' own SDL gamepads and their SDL subsystem, before the runtime starts
+// (the collection menu, on the UI thread). Opened first, SDL would announce the controllers to
+// the panels only, and the SDK's driver, starting after, would never see them. Windows: nothing.
+void ReleaseControllers();
+
 }  // namespace fear::panel
