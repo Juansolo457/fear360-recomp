@@ -28,6 +28,12 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   first launcher pinned the timer at 240 Hz on the command line, and Save and restart drops those
   flags (they would override the setting), so every frame rate chosen came back at the SDK's
   60 Hz timer: 30 fps (third Deck test). `FEAR_FPS` now passes `--fear_frame_rate_limit`.
+- Render thread speed: fights ran about 15 µs per draw on the Deck (1.5 on the PC), 50-60 fps at
+  800-1,200 draws. `perf` on the Deck (4 captures in fights): 48-51% of the render thread was
+  `librenderdoc.so`. SteamOS installs RenderDoc system-wide, and the SDK's plain `dlopen` loaded
+  it into every run, hooking every Vulkan call. SDK patch 0024 (from GRAW's #51 fix) uses it only
+  when it's already in the process. Next in the profile: descriptor set allocation per draw
+  (~9%) and texture-cache lookups (~5%).
 - Not tested yet: audio, the Deck itself.
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,

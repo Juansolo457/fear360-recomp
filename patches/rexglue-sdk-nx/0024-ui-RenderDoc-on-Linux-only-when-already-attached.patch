@@ -1,0 +1,50 @@
+From c1a0645e50d68ffe93c10d8c53584e196bb4a7de Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 17:36:25 -0700
+Subject: [PATCH] ui: RenderDoc on Linux only when already attached
+
+SteamOS installs librenderdoc.so system-wide, so CreateIfConnected's plain
+dlopen loaded RenderDoc into every run, hooking every Vulkan call: half the
+render thread's time on the Steam Deck (F.E.A.R., 4 perf captures in fights).
+On Linux the library is used only when it is already in the process
+(RTLD_NOLOAD), i.e. the game was launched under RenderDoc. From
+graw360-recomp's rexglue-bd833a2-linux-crash-renderdoc (#51).
+---
+ src/ui/renderdoc_api.cpp | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/ui/renderdoc_api.cpp b/src/ui/renderdoc_api.cpp
+index c5b4842..b22b941 100644
+--- a/src/ui/renderdoc_api.cpp
++++ b/src/ui/renderdoc_api.cpp
+@@ -12,6 +12,10 @@
+ #include <rex/logging.h>
+ #include <rex/ui/renderdoc_api.h>
+ 
++#if REX_PLATFORM_LINUX
++#include <dlfcn.h>
++#endif
++
+ namespace rex {
+ namespace ui {
+ 
+@@ -29,6 +33,16 @@ std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
+   // Try to load the RenderDoc library. If RenderDoc is attached, the library
+   // should already be loaded into the process and this will increment the
+   // reference count. If not attached, the load will fail and we return nullptr.
++#if REX_PLATFORM_LINUX
++  // Not on Linux: distributions (SteamOS among them) install librenderdoc.so system-wide, so a
++  // plain dlopen succeeds and loads RenderDoc into every run, hooking every Vulkan call. Only a
++  // RenderDoc that is already in the process (launched under it) is used.
++  if (void* attached = dlopen(platform::lib_names::kRenderDoc, RTLD_NOW | RTLD_NOLOAD)) {
++    dlclose(attached);
++  } else {
++    return nullptr;
++  }
++#endif
+   if (!renderdoc_api->library_.Load(platform::lib_names::kRenderDoc)) {
+     return nullptr;
+   }
+-- 
+2.53.0
+
