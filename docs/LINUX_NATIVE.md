@@ -66,13 +66,12 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
   `WINEDLLOVERRIDES` launch options.
 
 ## Gaps in the game's own code on Linux
-- **The panels' controller input** (`fear_panel.cpp`): XInput only, so the collection menu and
-  PC Settings get no controller on Linux. The SDK's `InputSystem::GetState` can't stand in as is:
-  while a panel is open the game's active callback (`fear_app.h`) turns the SDL driver's state off
-  (`sdl_input_driver.cpp`, `is_active()`). Either read SDL3's gamepads directly on Linux, or give
-  the panels a path past the active check.
-- Frame pacing (`display_vblank.cpp`): timer only on Linux. GRAW never solved Vulkan pacing on
-  Linux either (`VK_KHR_present_wait`).
+- **Resolved: the panels' controller input** (`fear_panel.cpp`). It was XInput only, so the
+  collection menu and PC Settings got no controller on Linux; the SDK's `InputSystem::GetState`
+  couldn't stand in, because the game's active callback (`fear_app.h`) turns the SDL driver's
+  state off while a panel is open. The panels now read SDL3's gamepads directly (Status, above).
+- Frame pacing (`display_vblank.cpp`): a timer only on Linux, at twice the frame-rate setting
+  (Status). GRAW never solved Vulkan pacing on Linux either (`VK_KHR_present_wait`).
 - No Linux versions, acceptable at first: the start-up CPU check, the crash report, the sampling
   profiler.
 

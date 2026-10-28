@@ -46,14 +46,43 @@ GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 "$exe" --no-fullscreen --mnk_mode --resoluti
   --game_data_root "$port/assets" --user_data_root "$port/user-smoke" \
   --cache_root "$port/cache-smoke" --log_file "$log" $extra \
   > "$captures/stdout.txt" 2>&1 &
-pid=$!
+pid=$! child=$!
 trap 'kill "$pid" 2>/dev/null || true' EXIT
 
+# The collection's Switch Game starts the other program and the first one exits: follow the
+# newest fear or fearfiles process started after it, so input, screenshots and the stop at the
+# end go to the game that is running.
+replacement() {
+  local p
+  for _ in $(seq 20); do
+    p=$(pgrep -n -x 'fear|fearfiles' 2>/dev/null || true)
+    if [[ -n "$p" && "$p" != "$1" ]]; then echo "$p"; return 0; fi
+    sleep 0.25
+  done
+  return 1
+}
+
 start=$(date +%s)
-next_key=5 next_capture=$capture_every window=""
-while kill -0 "$pid" 2>/dev/null; do
+next_key=5 next_capture=$capture_every window="" switches=0 status=""
+while true; do
   elapsed=$(( $(date +%s) - start ))
   (( elapsed < seconds )) || break
+  if ! kill -0 "$pid" 2>/dev/null; then
+    # Only the program this script started is its child: a replacement's exit code is unknown.
+    code=unknown
+    if [[ "$pid" == "$child" ]]; then wait "$pid" && code=0 || code=$?; fi
+    if [[ "$code" != 0 && "$code" != unknown ]]; then
+      status="exited early ($code)"
+      break
+    fi
+    if next=$(replacement "$pid"); then
+      echo "switched games at $elapsed s: pid $pid -> $next" >&2
+      pid=$next window="" switches=$(( switches + 1 ))
+      continue
+    fi
+    status="exited early ($code)"
+    break
+  fi
   if [[ -z "$window" ]]; then
     window=$(xdotool search --pid "$pid" --onlyvisible 2>/dev/null | tail -1 || true)
   fi
@@ -75,12 +104,13 @@ while kill -0 "$pid" 2>/dev/null; do
   fi
   sleep 0.25
 done
-if kill -0 "$pid" 2>/dev/null; then
-  kill "$pid"; sleep 2; kill -9 "$pid" 2>/dev/null || true
+if [[ -z "$status" ]]; then
+  kill "$pid" 2>/dev/null || true
+  sleep 2
+  kill -9 "$pid" 2>/dev/null || true
   status=stopped
-else
-  wait "$pid" && status=0 || status=$?
-  status="exited ($status)"
 fi
 trap - EXIT
-echo "status=$status log=$log captures=$captures"
+echo "status=$status switches=$switches log=$log captures=$captures"
+# A game that ended before the time was up (a crash, a failed start) fails the run.
+[[ "$status" == stopped ]] || exit 1

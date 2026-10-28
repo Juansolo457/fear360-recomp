@@ -65,17 +65,17 @@ args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_
 
 # An unzip that dropped the executable bits.
 chmod +x "$here/fear/fear" "$here/fearfiles/fearfiles" 2>/dev/null
-if [ ! -f assets/default.xex ]; then
-  echo "No fear/assets/default.xex: unpack this over the FEAR360-SteamDeck folder" | tee -a "$info" >&2
-  exit 1
-fi
-
 program=fear start=()
 if [ "$FEAR_START" = files ]; then
   program=fearfiles start=(--fear_collection_start files)
-  cd "$here/fearfiles" && mkdir -p logs
+  cd "$here/fearfiles" || { echo "No fearfiles folder next to $0" | tee -a "$info" >&2; exit 1; }
+  mkdir -p logs
 elif [ -n "$FEAR_START" ]; then
   start=(--fear_collection_start fear)
+fi
+if [ ! -f assets/default.xex ]; then
+  echo "No $program/assets/default.xex: unpack this over the FEAR360-SteamDeck folder" | tee -a "$info" >&2
+  exit 1
 fi
 "./$program" "${args[@]}" --fear_collection ../collection-linux.toml "${start[@]}" "$@" \
   >> "$here/fear/logs/stdout-$stamp.txt" 2>&1
