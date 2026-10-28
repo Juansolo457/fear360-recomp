@@ -42,7 +42,9 @@ mkdir -p "$captures"
 # X11, so xdotool can find and drive the window.
 cd "$port"
 # shellcheck disable=SC2086
-GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 "$exe" --no-fullscreen --mnk_mode --resolution 720p --headless \
+# FEAR_AUTOPLAY_RUN marks this run's processes: Switch Game passes the environment on.
+run_id="$stamp-$$"
+FEAR_AUTOPLAY_RUN="$run_id" GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 "$exe" --no-fullscreen --mnk_mode --resolution 720p --headless \
   --game_data_root "$port/assets" --user_data_root "$port/user-smoke" \
   --cache_root "$port/cache-smoke" --log_file "$log" $extra \
   > "$captures/stdout.txt" 2>&1 &
@@ -50,20 +52,25 @@ pid=$! child=$!
 trap 'kill "$pid" 2>/dev/null || true' EXIT
 
 # The collection's Switch Game starts the other program and the first one exits: follow the
-# newest fear or fearfiles process started after it, so input, screenshots and the stop at the
-# end go to the game that is running.
+# fear or fearfiles process that carries this run's FEAR_AUTOPLAY_RUN (another copy of the game
+# is left alone), so input, screenshots and the stop at the end go to the game that is running.
 replacement() {
   local p
   for _ in $(seq 20); do
-    p=$(pgrep -n -x 'fear|fearfiles' 2>/dev/null || true)
-    if [[ -n "$p" && "$p" != "$1" ]]; then echo "$p"; return 0; fi
+    for p in $(pgrep -x 'fear|fearfiles' 2>/dev/null || true); do
+      [[ "$p" != "$1" ]] || continue
+      if tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx "FEAR_AUTOPLAY_RUN=$run_id"; then
+        echo "$p"
+        return 0
+      fi
+    done
     sleep 0.25
   done
   return 1
 }
 
 start=$(date +%s)
-next_key=5 next_capture=$capture_every window="" switches=0 status=""
+next_key=5 next_capture=$capture_every window="" switches=0 status="" windows=0
 while true; do
   elapsed=$(( $(date +%s) - start ))
   (( elapsed < seconds )) || break
@@ -85,6 +92,7 @@ while true; do
   fi
   if [[ -z "$window" ]]; then
     window=$(xdotool search --pid "$pid" --onlyvisible 2>/dev/null | tail -1 || true)
+    [[ -z "$window" ]] || windows=$(( windows + 1 ))
   fi
   if [[ -n "$window" ]] && (( elapsed >= next_key )); then
     k="$key"
@@ -109,6 +117,8 @@ if [[ -z "$status" ]]; then
   sleep 2
   kill -9 "$pid" 2>/dev/null || true
   status=stopped
+  # Alive but never showed a window: nothing was driven or captured.
+  (( windows > 0 )) || status="stopped, no window appeared"
 fi
 trap - EXIT
 echo "status=$status switches=$switches log=$log captures=$captures"
