@@ -148,6 +148,11 @@ GAMES = [
 ]
 
 
+def walk_error(error):
+    """os.walk's onerror: a folder it can't read stops the package instead of leaving it out."""
+    raise SystemExit(f'Cannot read {error.filename}: {error.strerror}')
+
+
 def crt_folder():
     """The newest x64 Visual C++ runtime in a Visual Studio 2022 install."""
     found = sorted(glob.glob(r'C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Redist\MSVC'
@@ -207,7 +212,8 @@ def main_linux():
             assets = os.path.join(REPO, project, 'assets')
             if not os.path.exists(os.path.join(assets, 'default.xex')):
                 raise SystemExit(f'{project}/assets is missing (docs/SETUP.md, step 3)')
-            for dirpath, dirnames, filenames in os.walk(assets, followlinks=True):
+            for dirpath, dirnames, filenames in os.walk(assets, followlinks=True,
+                                                        onerror=walk_error):
                 dirnames.sort()
                 for f in sorted(filenames):
                     src = os.path.join(dirpath, f)
@@ -256,7 +262,8 @@ def main():
             total += os.path.getsize(src)
 
         def add_tree(src_root, arc_root, skip=()):
-            for dirpath, dirnames, filenames in os.walk(src_root, followlinks=True):
+            for dirpath, dirnames, filenames in os.walk(src_root, followlinks=True,
+                                                        onerror=walk_error):
                 dirnames.sort()
                 for f in sorted(filenames):
                     src = os.path.join(dirpath, f)
