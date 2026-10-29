@@ -40,6 +40,26 @@ if [[ -d "$sdk" ]]; then
       [[ $submodules -eq 0 ]] || git -C "$sdk" submodule update --init --recursive
       exit 0
     fi
+    # An earlier finished checkout (one commit per patch since $base, no changes of its own)
+    # takes the patches added since, and must then reach the expected tree like a new one.
+    applied=$(git -C "$sdk" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)
+    mapfile -t patches < <(find "$root/patches/rexglue-sdk-nx" -maxdepth 1 -name '*.patch' | sort)
+    if [[ -z "$changes" && $applied -gt 0 && $applied -lt ${#patches[@]} ]] &&
+       git -C "$sdk" merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
+      echo "Updating the patched SDK at $sdk: patches $((applied + 1))-${#patches[@]}"
+      for patch in "${patches[@]:applied}"; do
+        sed 's/\r$//' "$patch" | git -C "$sdk" -c user.name='fear360-recomp setup' \
+          -c user.email=setup@localhost am --quiet
+      done
+      tree=$(git -C "$sdk" rev-parse 'HEAD^{tree}')
+      if [[ "$tree" != "$expected_tree" ]]; then
+        echo "The updated SDK tree is $tree, not $expected_tree: run with --force to replace it" >&2
+        exit 1
+      fi
+      [[ $submodules -eq 0 ]] || git -C "$sdk" submodule update --init --recursive
+      echo "Patched SDK updated at $sdk (tree $tree)."
+      exit 0
+    fi
     echo "$sdk exists but isn't the patched SDK (tree $head): run with --force to replace it" >&2
     exit 1
   fi
