@@ -258,6 +258,14 @@ address = 0x823EAF68
 registers = ["r3", "r4"]
 return_on_true = true
 
+# The string table's lookup (table, ID) -> text, at its start: the help lines of our
+# items (their IDs aren't in the table) come from src/fear_menu.cpp.
+[[entrypoint.midasm_hook]]
+name = "FearMenuHelpText"
+address = 0x82CCDA48
+registers = ["r3", "r4"]
+return_on_true = true
+
 # High-FPS fixes (src/high_fps.h): the AI's update delay (0.01 s) made shorter than a frame, so
 # enemies update every frame above 100 fps (a severed body keeps it). SetNextServerUpdate, at its
 # fmr f31,f1: the character in r3, the delay in f1.

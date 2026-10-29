@@ -276,6 +276,14 @@ address = 0x823FF7E8
 registers = ["r3", "r4"]
 return_on_true = true
 
+# The string table's lookup (table, ID) -> text, at its start: the help lines of our
+# items (their IDs aren't in the table) come from src/fear_menu.cpp.
+[[entrypoint.midasm_hook]]
+name = "FearMenuHelpText"
+address = 0x828797D0
+registers = ["r3", "r4"]
+return_on_true = true
+
 # Debugging (src/fx_debug.cpp, fear_debug_weapon_fire): CClientWeapon::HandleFireKey's check that
 # the weapon is still firing (state 2) before a fire key becomes a shot, and each impact's
 # CWeaponFX::CreateObject. For the pistol's missing impacts.

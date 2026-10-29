@@ -7,6 +7,7 @@
 #   FEAR_FPS=60       the frame rate for this start (default: PC Settings' Frame rate, 120 until
 #                     changed there); a timer at twice it paces the game
 #   FEAR_START=files  skip the menu and start F.E.A.R. Files (fear: F.E.A.R.)
+#   FEAR_GOD=1        the player can't die, in both games (fear_invulnerable: the smoke test, #55)
 # Extra arguments go to the game, e.g.  ./fear-linux.sh --no-fullscreen
 here="$(cd "$(dirname "$0")" && pwd)"
 fps="${FEAR_FPS:-}"
@@ -22,6 +23,7 @@ info="$here/fear/logs/system-$stamp.txt"
 args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user
       --cache_root cache --no-vulkan_allow_present_mode_immediate)
 [ -n "$fps" ] && args+=(--fear_frame_rate_limit "$fps")
+[ "$FEAR_GOD" = 1 ] && args+=(--fear_invulnerable true)
 # (Mailbox presentation, as the Proton package: frames beyond the screen's refresh are dropped,
 # no tearing. ReXGlue's presenter takes immediate first when it may.)
 {

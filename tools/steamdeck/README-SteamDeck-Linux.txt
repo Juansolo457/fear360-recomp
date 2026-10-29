@@ -29,6 +29,7 @@ The frame rate: PC Settings > Frame rate in each game's main menu, 120 fps until
 (Save and restart applies it). Mailbox presentation: no tearing; on the Deck's screen the frames
 beyond its refresh are dropped. FEAR_FPS=60 %command% in the launch options overrides the setting
 in both games. FEAR_START=files starts F.E.A.R. Files without the menu.
+FEAR_GOD=1 %command% makes the player unable to die in both games (for testing).
 Each game keeps its own setting: set both if you want both at 120.
 
 The screen sets the ceiling: no game shows more frames than the display refreshes. The Deck's
