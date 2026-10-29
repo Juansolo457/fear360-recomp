@@ -200,7 +200,7 @@ def main_linux():
             versions.append(f'{program} (Linux): {text}')
             if PROGRAMS_ONLY:
                 continue
-            # The game data, stored as is (mostly compressed already, ~13 GB for both games;
+            # The game data, stored as is (mostly compressed already, ~11 GB for both games;
             # streamed, not read into memory), and the settings. No saves.
             assets = os.path.join(REPO, project, 'assets')
             if not os.path.exists(os.path.join(assets, 'default.xex')):

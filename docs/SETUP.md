@@ -157,7 +157,7 @@ or, for your own Linux PC, `tools/setup-sdk.sh`, then `tools/build-linux.sh` and
 translated code (about 200 MB of C++ per game), so it takes a long while; later ones are quick.
 
 **Play on the Steam Deck:** `make_package.py --linux` writes
-`private/steamdeck/FEAR360-SteamDeck-linux.zip` (about 13 GB): both games' programs, your game
+`private/steamdeck/FEAR360-SteamDeck-linux.zip` (about 11 GB): both games' programs, your game
 data and the Deck's starting settings. Copy it to the Deck, then follow
 `tools/steamdeck/README-SteamDeck-Linux.txt` (it's in the zip): extract it, add `fear-linux.sh` to
 Steam as a non-Steam game, and leave Proton off. The zip contains your game data and programs made

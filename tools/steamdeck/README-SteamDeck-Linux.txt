@@ -14,7 +14,7 @@ What's in it (FEAR360-SteamDeck/)
 
 Setup (Desktop Mode)
   1. Copy the zip to the Deck and extract it where you keep games (e.g. /home/deck/Games). About
-     13 GB once extracted. (Updating an earlier copy: extract over it; your saves stay. A
+     11 GB once extracted. (Updating an earlier copy: extract over it; your saves stay. A
      programs-only update zip leaves your settings alone too.)
   2. Steam > Games > "Add a Non-Steam Game to My Library" > Browse > set the file type to
      "All Files" > FEAR360-SteamDeck/fear-linux.sh > Add.
