@@ -100,6 +100,7 @@ struct DrawStats {
   // the bytes the frame's copies carried.
   uint64_t gpu_mismatch_pages = 0;
   uint64_t reg_mismatches = 0;  // draws whose register file differs from Prepare's
+  uint64_t experiment = 0;  // 1: the frame applied the renderer's experiment settings (#103)
 };
 
 // Prepare's draw path counters (the draw diag of --fear_d3d12_profile).

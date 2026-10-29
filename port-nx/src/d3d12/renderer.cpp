@@ -780,6 +780,7 @@ void NativeRenderer::AppendCsvColumns(const FrameStats& s, uint64_t frame_ns, bo
       Fix3("guest_swap_ms", s.guest_swap_ns / 1e6),
       Fix1("pace_wait_us", s.pace_wait_ns / 1000.0),
       Uint("present", s.present),
+      Uint("exp", ds.experiment),
   };
   AppendCsvCells(cells, header, false, line);
 }

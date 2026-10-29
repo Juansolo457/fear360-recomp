@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -87,7 +88,20 @@ REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_dump_after_vs, "", "F.E.A.R. D3D12",
                       "vertices)");
 REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_skip_vs, "", "F.E.A.R. D3D12",
                       "With --fear_d3d12_api=vulkan, debug: skip every draw whose vertex shader "
-                      "has this ucode hash (16 hex digits, as the draw log prints it)");
+                      "has one of these ucode hashes (16 hex digits, as the draw log prints "
+                      "them, comma-separated). The water (#103): BEB01FADD31A7A59 its surface, "
+                      "3B009B73B980EBB1 the game's particles (splashes, but also all the others)");
+REXCVAR_DEFINE_INT32(fear_d3d12_vulkan_round_copies, 1, "F.E.A.R. D3D12",
+                     "Experiment (#103, the water's copy rounds): of a run of the same color "
+                     "copy into the same image (the game copies the screen again before each "
+                     "piece that refracts it), make only every n-th; the pieces between read "
+                     "the last one made. 0: only the first of each run and frame; 1: all, as "
+                     "the game asks");
+REXCVAR_DEFINE_INT32(fear_d3d12_vulkan_experiment_ab, 0, "F.E.A.R. D3D12",
+                     "Experiment (#103): apply --fear_d3d12_vulkan_skip_vs and "
+                     "--fear_d3d12_vulkan_round_copies only every other this many seconds, the "
+                     "frame CSV's exp column saying which (1: applied), to compare both in one "
+                     "run of the same scene; 0: always applied");
 REXCVAR_DEFINE_INT32(fear_d3d12_vulkan_resolve_dump_frame, -1, "F.E.A.R. D3D12",
                      "The native frame --fear_d3d12_vulkan_resolve_dump dumps (-1: none)");
 REXCVAR_DECLARE(bool, fear_d3d12_render_thread);
@@ -477,7 +491,8 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
     REXLOG_INFO("D3D12 Vulkan: dumping frame {}", dump_at_);
   }
   if ((draw_index >= skip_first_ && draw_index <= skip_last_) ||
-      (skip_vs_ && vs->ucode_data_hash() == skip_vs_)) {
+      (experiment_on_ && !skip_vs_.empty() &&
+       std::find(skip_vs_.begin(), skip_vs_.end(), vs->ucode_data_hash()) != skip_vs_.end())) {
     ++stats_.skipped;
     return;
   }
@@ -968,10 +983,8 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
     ++resolves_skipped_;
     return;
   }
-  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyResolve(p));
   VulkanRenderTargets& targets = gpu_->targets;
   VkCommandBuffer cmd = device_->command_buffer();
-  targets.EndRendering(cmd);
   const uint32_t rows = uint32_t(std::clamp(p.y1, 1, 2048));
   const uint32_t columns = uint32_t(std::max(p.x1, 0));
   VulkanRenderTarget* rt = depth ? targets.GetDepth(cmd, p.regs, rows, columns)
@@ -988,8 +1001,18 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
   const int32_t dx = p.dest_x + (x0 - p.x0), dy = p.dest_y + (y0 - p.y0);
   const int32_t w = std::min(x1 - x0, int32_t(p.dest_width) - dx);
   const int32_t h = std::min(y1 - y0, int32_t(p.dest_height) - dy);
+  const bool fits = w > 0 && h > 0 && dx >= 0 && dy >= 0;
+  const ResolveCopy copy{rt,          rt->content_seq, x0,         y0,
+                         w,           h,               dx,         dy,
+                         p.dest_base, p.dest_format,   p.sample_select,
+                         uint32_t(p.dest_swap), p.dest_number, p.exp_bias};
+  // With the experiments (#103), a round copy left out stays inside the rendering instance:
+  // no copy, no restart.
+  if (!depth && fits && p.copy_command == 1 && !p.clear_flags && ThinRoundCopy(rt, copy)) return;
+  if (gpu_timer_) gpu_timer_->Pass(cmd, GpuTimer::KeyResolve(p));
+  targets.EndRendering(cmd);
   bool copied = false;
-  if (w > 0 && h > 0 && dx >= 0 && dy >= 0) {
+  if (fits) {
     targets.PrepareRead(cmd, rt);
     if (depth) {
       copied = CopyDepth(rt, x0, y0, w, h, dx, dy, p);
@@ -997,10 +1020,6 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
     } else if (p.copy_command == 1) {
       BoundsTrack* track =
           REXCVAR_GET(fear_d3d12_vulkan_resolve_bounds) ? &BoundsTrackOf(rt) : nullptr;
-      const ResolveCopy copy{rt,          rt->content_seq, x0,         y0,
-                             w,           h,               dx,         dy,
-                             p.dest_base, p.dest_format,   p.sample_select,
-                             uint32_t(p.dest_swap), p.dest_number, p.exp_bias};
       copied = CopyColor(rt, x0, y0, w, h, dx, dy, p, track, copy);
       if (copied) {
         ++shader_resolves_;
@@ -1109,6 +1128,36 @@ VulkanBackend::BoundsTrack& VulkanBackend::BoundsTrackOf(const VulkanRenderTarge
   }
   bounds_slot_owner_[track.slot] = rt;
   return track;
+}
+
+bool VulkanBackend::ThinRoundCopy(const VulkanRenderTarget* rt, const ResolveCopy& copy) {
+  if (!stats_.experiment || !REXCVAR_GET(fear_d3d12_vulkan_resolve_bounds)) return false;
+  auto t = bounds_tracks_.find(rt);
+  auto r = gpu_->resolved.find(copy.dest_base);
+  if (t == bounds_tracks_.end() || r == gpu_->resolved.end()) return false;
+  BoundsTrack& track = t->second;
+  // A repeat of the target's last copy (as CopyColor's).
+  if (!track.has_last || !(copy == track.last) || !r->second.written ||
+      r->second.image.image != track.last_dest || r->second.resolve_seq != track.last_dest_seq)
+    return false;
+  if (!track.draws) {
+    // Nothing drawn since (the draws --fear_d3d12_vulkan_skip_vs leaves out): CopyColor would
+    // skip it too, after ending the rendering instance.
+    ++resolves_repeated_;
+    return true;
+  }
+  if (round_copies_ == 1) return false;
+  if (track.run_frame != frame_index_) {  // the frame's first repeat is made
+    track.run_frame = frame_index_;
+    track.run = 0;
+    return false;
+  }
+  if (round_copies_ && ++track.run % round_copies_ == 0) return false;
+  // Left out: the destination keeps the last copy made, and the target's slot keeps
+  // collecting the draws' bounds for the next one made (past kDrawBoundsMaxDraws, that one
+  // copies the whole rectangle).
+  ++resolves_thinned_;
+  return true;
 }
 
 void VulkanBackend::ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot) {
@@ -1800,7 +1849,25 @@ void VulkanBackend::BeginFrame(uint64_t frame_index) {
   const std::string skip = REXCVAR_GET(fear_d3d12_vulkan_skip_draws);
   if (!skip.empty() && std::sscanf(skip.c_str(), "%u-%u", &skip_first_, &skip_last_) != 2)
     skip_first_ = UINT32_MAX;
-  skip_vs_ = std::strtoull(REXCVAR_GET(fear_d3d12_vulkan_skip_vs).c_str(), nullptr, 16);
+  skip_vs_.clear();
+  {
+    const std::string list = REXCVAR_GET(fear_d3d12_vulkan_skip_vs);
+    for (const char* p = list.c_str(); *p;) {
+      char* end = nullptr;
+      const uint64_t hash = std::strtoull(p, &end, 16);
+      if (end == p) break;
+      if (hash) skip_vs_.push_back(hash);
+      p = *end == ',' ? end + 1 : end;
+    }
+  }
+  round_copies_ = uint32_t(std::max(REXCVAR_GET(fear_d3d12_vulkan_round_copies), 0));
+  // --fear_d3d12_vulkan_experiment_ab: applied in the odd windows of that many seconds.
+  const int32_t ab = REXCVAR_GET(fear_d3d12_vulkan_experiment_ab);
+  const int64_t seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::steady_clock::now().time_since_epoch())
+                              .count();
+  experiment_on_ = ab <= 0 || (seconds / ab) % 2 == 1;
+  stats_.experiment = experiment_on_ && (!skip_vs_.empty() || round_copies_ != 1);
   {
     // <hash>[:<vertex count>]
     const std::string after = REXCVAR_GET(fear_d3d12_vulkan_dump_after_vs);
@@ -2077,8 +2144,9 @@ Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
                 gpu_->resolved.size(),
                 front_buffer_found_ ? "shown" : "not found");
     REXLOG_INFO("D3D12 Vulkan resolve bounds: {} color resolves cut to the draws' bounds, {} "
-                "skipped (nothing drawn since the same copy); {} targets tracked",
-                resolves_partial_, resolves_repeated_, bounds_tracks_.size());
+                "skipped (nothing drawn since the same copy), {} left out "
+                "(--fear_d3d12_vulkan_round_copies); {} targets tracked",
+                resolves_partial_, resolves_repeated_, resolves_thinned_, bounds_tracks_.size());
     REXLOG_INFO("D3D12 Vulkan resolve reads: of the copies replaced by another, read by 0 draws "
                 "{}, 1 draw {}, 2-3 draws {}, 4 or more {}",
                 resolve_reads_[0], resolve_reads_[1], resolve_reads_[2], resolve_reads_[3]);

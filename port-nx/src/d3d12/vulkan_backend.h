@@ -38,6 +38,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rex::graphics {
 class SpirvShader;
@@ -142,7 +143,12 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   bool pipeline_wait_ = false;
   // --fear_d3d12_vulkan_skip_draws: this frame's draw count, and the range skipped.
   uint32_t frame_draw_ = 0;
-  uint64_t skip_vs_ = 0;  // --fear_d3d12_vulkan_skip_vs
+  std::vector<uint64_t> skip_vs_;  // --fear_d3d12_vulkan_skip_vs
+  // Experiments (#103): --fear_d3d12_vulkan_round_copies, and whether this frame applies them
+  // and skip_vs_ (--fear_d3d12_vulkan_experiment_ab).
+  uint32_t round_copies_ = 1;
+  bool experiment_on_ = true;
+  uint64_t resolves_thinned_ = 0;  // repeated copies left out by round_copies_
   uint64_t dump_after_vs_ = 0;  // --fear_d3d12_vulkan_dump_after_vs
   std::unordered_set<uint64_t> coverage_ps_;  // --fear_d3d12_vulkan_coverage_ps (empty: off)
   bool coverage_parsed_ = false;
@@ -205,10 +211,15 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
     ResolveCopy last;           // the target's last color resolve
     VkImage last_dest = VK_NULL_HANDLE;  // its destination image, and that image's copies
     uint64_t last_dest_seq = 0;          // (ResolvedImage::resolve_seq) after it
+    // --fear_d3d12_vulkan_round_copies: the repeats of the last copy so far in this frame,
+    // made or left out.
+    uint64_t run_frame = UINT64_MAX;
+    uint32_t run = 0;
     // The pattern broke (a copy the shader couldn't make): nothing is known any more.
     void Break() {
       tracking = bounds_valid = expand = has_last = false;
       draws = 0;
+      run = 0;
     }
   };
   std::unordered_map<const VulkanRenderTarget*, BoundsTrack> bounds_tracks_;
@@ -219,6 +230,9 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint64_t resolve_reads_[4] = {};  // CountResolveReads: read by 0, 1, 2-3, 4+ draws
   void CountResolveReads(ResolvedImage* r);
   BoundsTrack& BoundsTrackOf(const VulkanRenderTarget* rt);
+  // The experiments (#103): whether to leave out this color copy, a repeat of its target's
+  // last one with nothing drawn since, or one --fear_d3d12_vulkan_round_copies thins out.
+  bool ThinRoundCopy(const VulkanRenderTarget* rt, const ResolveCopy& copy);
   // Resets the slot (every slot the first time): a fill of 0xFFFFFFFF between the barriers the
   // vertex shaders' atomics and the resolve shader's reads need. Outside rendering.
   void ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot);
