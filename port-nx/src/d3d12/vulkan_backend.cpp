@@ -112,6 +112,7 @@ struct VulkanBackend::ResolvedImage {
   uint32_t width = 0, height = 0;
   bool written = false;
   uint64_t resolve_seq = 0;  // copies into it so far (the resolve bounds)
+  uint32_t reads = 0;        // draws that bound it since the last copy (the resolve reads log)
   // Of the color resolves into it: the texels written from (0, 0) (the image the present pass
   // shows, as D3D12's ResolvedImage), the destination format (xenos::TextureFormat) and the
   // exponent bias of the last one (the front buffer's log).
@@ -252,6 +253,7 @@ bool VulkanBackend::Initialize(const Options& o) {
     VulkanResolvedImage out;
     auto it = gpu->resolved.find(address);
     if (it != gpu->resolved.end() && it->second.written) {
+      ++it->second.reads;
       out.image = it->second.image.image;
       out.format = it->second.format;
       out.format_signed = it->second.format_signed;
@@ -1416,9 +1418,17 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
   b[2].dstAccessMask = b[1].dstAccessMask;
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, rt_stages | kReaders, 0, 0,
                           nullptr, 0, nullptr, barriers, b);
+  CountResolveReads(r);
   r->written = true;
   ++r->resolve_seq;
   return true;
+}
+
+// The resolve reads log: how many draws read a destination's previous copy before this one
+// replaced it. Copies nothing read could share one copy with the next.
+void VulkanBackend::CountResolveReads(ResolvedImage* r) {
+  if (r->resolve_seq) ++resolve_reads_[r->reads == 0 ? 0 : r->reads == 1 ? 1 : r->reads < 4 ? 2 : 3];
+  r->reads = 0;
 }
 
 bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, int32_t w,
@@ -1528,6 +1538,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kReaders, 0, 0,
                           nullptr, 0, nullptr, 2, b);
+  CountResolveReads(r);
   r->written = true;
   ++r->resolve_seq;
   return true;
@@ -1946,6 +1957,9 @@ Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
     REXLOG_INFO("D3D12 Vulkan resolve bounds: {} color resolves cut to the draws' bounds, {} "
                 "skipped (nothing drawn since the same copy); {} targets tracked",
                 resolves_partial_, resolves_repeated_, bounds_tracks_.size());
+    REXLOG_INFO("D3D12 Vulkan resolve reads: of the copies replaced by another, read by 0 draws "
+                "{}, 1 draw {}, 2-3 draws {}, 4 or more {}",
+                resolve_reads_[0], resolve_reads_[1], resolve_reads_[2], resolve_reads_[3]);
     const VulkanTextureStats& t = gpu_->textures->stats();
     REXLOG_INFO("D3D12 Vulkan textures: {} textures, {} created ({} with mips), {} "
                 "uploads ({} KB), {} resolved binds ({} mismatched), {} unsupported, {} failed; "

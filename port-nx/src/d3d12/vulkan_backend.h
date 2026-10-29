@@ -199,6 +199,8 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint32_t bounds_next_slot_ = 0;
   bool bounds_buffer_ready_ = false;  // filled once before its first use
   uint64_t resolves_partial_ = 0, resolves_repeated_ = 0;
+  uint64_t resolve_reads_[4] = {};  // CountResolveReads: read by 0, 1, 2-3, 4+ draws
+  void CountResolveReads(ResolvedImage* r);
   BoundsTrack& BoundsTrackOf(const VulkanRenderTarget* rt);
   // Resets the slot (every slot the first time): a fill of 0xFFFFFFFF between the barriers the
   // vertex shaders' atomics and the resolve shader's reads need. Outside rendering.
