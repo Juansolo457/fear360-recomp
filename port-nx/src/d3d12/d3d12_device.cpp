@@ -139,9 +139,56 @@ void D3D12Device::WaitIdle() {
   WaitForSingleObject(idle_event_.get(), INFINITE);
 }
 
+namespace {
+
+// GpuTimer's queries on D3D12: a timestamp query heap, resolved at each frame's end into its
+// slot of a readback buffer.
+class D3D12Timestamps final : public GpuTimestamps {
+ public:
+  bool Initialize(ID3D12Device* device, uint32_t count) {
+    D3D12_QUERY_HEAP_DESC qd = {};
+    qd.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    qd.Count = count;
+    return !Failed(device->CreateQueryHeap(&qd, IID_PPV_ARGS(heap_.GetAddressOf())),
+                   "CreateQueryHeap(timestamp)") &&
+           CreateBuffer(device, D3D12_HEAP_TYPE_READBACK, uint64_t(count) * sizeof(uint64_t),
+                        D3D12_RESOURCE_STATE_COPY_DEST, "timestamp readback", &readback_);
+  }
+  void Write(void* list, uint32_t query) override {
+    static_cast<ID3D12GraphicsCommandList*>(list)->EndQuery(
+        heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query);
+  }
+  void Resolve(void* list, uint32_t first, uint32_t count) override {
+    static_cast<ID3D12GraphicsCommandList*>(list)->ResolveQueryData(
+        heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, first, count, readback_.Get(),
+        uint64_t(first) * sizeof(uint64_t));
+  }
+  const uint64_t* Map(uint32_t first, uint32_t count) override {
+    const D3D12_RANGE range = {size_t(first) * sizeof(uint64_t),
+                               size_t(first + count) * sizeof(uint64_t)};
+    void* data = nullptr;
+    if (FAILED(readback_->Map(0, &range, &data))) return nullptr;
+    return static_cast<const uint64_t*>(data) + first;
+  }
+  void Unmap() override {
+    const D3D12_RANGE none = {0, 0};
+    readback_->Unmap(0, &none);
+  }
+
+ private:
+  ComPtr<ID3D12QueryHeap> heap_;
+  ComPtr<ID3D12Resource> readback_;
+};
+
+}  // namespace
+
 bool D3D12Device::EnableGpuTimer() {
+  uint64_t frequency = 0;
+  if (Failed(queue_->GetTimestampFrequency(&frequency), "GetTimestampFrequency")) return false;
+  auto stamps = std::make_unique<D3D12Timestamps>();
+  if (!stamps->Initialize(device_.Get(), kFramesInFlight * GpuTimer::kMaxQueries)) return false;
   auto timer = std::make_unique<GpuTimer>();
-  if (!timer->Initialize(device_.Get(), queue_.Get(), kFramesInFlight)) return false;
+  if (!timer->Initialize(std::move(stamps), frequency, kFramesInFlight)) return false;
   timer->BeginFrame(list_.Get(), slot_);
   gpu_timer_ = std::move(timer);
   return true;

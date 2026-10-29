@@ -1,6 +1,7 @@
 // D3D12 renderer: the Vulkan backend's resolve shaders (vulkan_resolve.h).
 #include "vulkan_resolve.h"
 
+#include "shaders/bytecode/bounds_dispatch.h"
 #include "shaders/bytecode/color_resolve_1x.h"
 #include "shaders/bytecode/color_resolve_msaa.h"
 #include "shaders/bytecode/depth_resolve_1x.h"
@@ -19,16 +20,18 @@ VulkanResolveShaders::~VulkanResolveShaders() {
   VkDevice d = device_.device();
   if (!d) return;
   const VulkanDevice::Functions& fn = device_.fn();
-  for (VkPipeline p : {depth_1x_, depth_msaa_, color_1x_, color_msaa_})
+  for (VkPipeline p : {depth_1x_, depth_msaa_, color_1x_, color_msaa_, bounds_dispatch_})
     if (p) fn.vkDestroyPipeline(d, p, nullptr);
-  for (VkPipelineLayout l : {layout_, depth_layout_})
+  for (VkPipelineLayout l : {layout_, depth_layout_, bounds_layout_})
     if (l) fn.vkDestroyPipelineLayout(d, l, nullptr);
-  for (VkDescriptorSetLayout l : {set_layout_, depth_set_layout_})
+  for (VkDescriptorSetLayout l : {set_layout_, depth_set_layout_, bounds_set_layout_})
     if (l) fn.vkDestroyDescriptorSetLayout(d, l, nullptr);
+  if (bounds_pool_) fn.vkDestroyDescriptorPool(d, bounds_pool_, nullptr);
   if (sampler_) fn.vkDestroySampler(d, sampler_, nullptr);
 }
 
-bool VulkanResolveShaders::Initialize() {
+bool VulkanResolveShaders::Initialize(VkBuffer draw_bounds) {
+  draw_bounds_ = draw_bounds;
   VkDevice d = device_.device();
   const VulkanDevice::Functions& fn = device_.fn();
   VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -67,7 +70,8 @@ bool VulkanResolveShaders::Initialize() {
   };
   constexpr VkDescriptorType kSource = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   constexpr VkDescriptorType kStorage = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  if (!make_layouts({kSource, kStorage}, &set_layout_, &layout_) ||
+  constexpr VkDescriptorType kBuffer = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  if (!make_layouts({kSource, kStorage, kBuffer}, &set_layout_, &layout_) ||
       !make_layouts({kSource, kStorage, kStorage, kSource}, &depth_set_layout_, &depth_layout_)) {
     REXLOG_ERROR("D3D12 Vulkan: resolve set or pipeline layouts failed");
     return false;
@@ -88,6 +92,54 @@ bool VulkanResolveShaders::Initialize() {
     fn.vkDestroyShaderModule(d, module, nullptr);
     return r == VK_SUCCESS;
   };
+  // bounds_dispatch.comp: one storage buffer, the draw bounds buffer, in a set of its own.
+  {
+    VkDescriptorSetLayoutBinding b{};
+    b.binding = 0;
+    b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    b.descriptorCount = 1;
+    b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    li.bindingCount = 1;
+    li.pBindings = &b;
+    const VkPushConstantRange pc{VK_SHADER_STAGE_COMPUTE_BIT, 0, 5 * sizeof(uint32_t)};
+    VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    pli.setLayoutCount = 1;
+    pli.pSetLayouts = &bounds_set_layout_;
+    pli.pushConstantRangeCount = 1;
+    pli.pPushConstantRanges = &pc;
+    const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+    VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pi.maxSets = 1;
+    pi.poolSizeCount = 1;
+    pi.pPoolSizes = &size;
+    if (fn.vkCreateDescriptorSetLayout(d, &li, nullptr, &bounds_set_layout_) != VK_SUCCESS ||
+        fn.vkCreatePipelineLayout(d, &pli, nullptr, &bounds_layout_) != VK_SUCCESS ||
+        fn.vkCreateDescriptorPool(d, &pi, nullptr, &bounds_pool_) != VK_SUCCESS) {
+      REXLOG_ERROR("D3D12 Vulkan: resolve bounds layouts failed");
+      return false;
+    }
+    VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    ai.descriptorPool = bounds_pool_;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts = &bounds_set_layout_;
+    if (fn.vkAllocateDescriptorSets(d, &ai, &bounds_set_) != VK_SUCCESS) {
+      REXLOG_ERROR("D3D12 Vulkan: resolve bounds descriptor set failed");
+      return false;
+    }
+    const VkDescriptorBufferInfo info{draw_bounds_, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w.dstSet = bounds_set_;
+    w.dstBinding = 0;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    w.pBufferInfo = &info;
+    fn.vkUpdateDescriptorSets(d, 1, &w, 0, nullptr);
+  }
+  if (!create(kBoundsDispatch, sizeof(kBoundsDispatch), bounds_layout_, &bounds_dispatch_)) {
+    REXLOG_ERROR("D3D12 Vulkan: resolve bounds pipeline failed");
+    return false;
+  }
   if (!create(kDepthResolve1x, sizeof(kDepthResolve1x), depth_layout_, &depth_1x_) ||
       !create(kDepthResolveMsaa, sizeof(kDepthResolveMsaa), depth_layout_, &depth_msaa_)) {
     REXLOG_ERROR("D3D12 Vulkan: depth resolve pipelines failed");
@@ -117,10 +169,37 @@ void VulkanResolveShaders::RecordDepth(VkCommandBuffer cmd, bool msaa, VkDescrip
 void VulkanResolveShaders::RecordColor(VkCommandBuffer cmd, bool msaa, VkDescriptorSet set,
                                        const ColorParams& p) {
   const VulkanDevice::Functions& fn = device_.fn();
+  const bool bounded = p.bounds != kNoBounds;
+  if (bounded) {
+    // The slot's box into the dispatch (bounds_dispatch.comp), then visible to the indirect
+    // dispatch and the resolve shader.
+    const uint32_t pc[5] = {uint32_t(p.src_x), uint32_t(p.src_y), p.width, p.height, p.bounds};
+    fn.vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bounds_dispatch_);
+    fn.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bounds_layout_, 0, 1,
+                               &bounds_set_, 0, nullptr);
+    fn.vkCmdPushConstants(cmd, bounds_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), pc);
+    fn.vkCmdDispatch(cmd, 1, 1, 1);
+    VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.buffer = draw_bounds_;
+    b.offset = 0;
+    b.size = VK_WHOLE_SIZE;
+    b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    b.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+    fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            0, 0, nullptr, 1, &b, 0, nullptr);
+  }
   fn.vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, msaa ? color_msaa_ : color_1x_);
   fn.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &set, 0, nullptr);
   fn.vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(p), &p);
-  fn.vkCmdDispatch(cmd, (p.width + 7) / 8, (p.height + 7) / 8, 1);
+  if (bounded) {
+    // kArgsBase (64 words) + slot * 8 words, as the shaders read it.
+    fn.vkCmdDispatchIndirect(cmd, draw_bounds_, (64u + (p.bounds & 0xFFu) * 8u) * sizeof(uint32_t));
+  } else {
+    fn.vkCmdDispatch(cmd, (p.width + 7) / 8, (p.height + 7) / 8, 1);
+  }
 }
 
 VkFormat VulkanResolveShaders::ColorStorageFormat(uint32_t dest_format) {

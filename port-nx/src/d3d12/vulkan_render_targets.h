@@ -43,6 +43,9 @@ struct VulkanRenderTarget {
   bool initialized = false;  // in its attachment layout (false: just created, UNDEFINED)
   uint64_t last_frame = 0;
   uint64_t fill_seq = 0;  // EDRAM fills up to this sequence are applied (SyncEdram)
+  // Bumped by every write outside the draws: a new image, its zeroing, clears and EDRAM fills
+  // (the resolve bounds, vulkan_backend.h).
+  uint64_t content_seq = 0;
 };
 
 struct VulkanBoundTargets {
@@ -75,6 +78,9 @@ class VulkanRenderTargets {
   // Before reading rt outside a draw (resolve sources): zeroed if new, and the EDRAM fills
   // over its tiles since its last use applied. Ends the open rendering instance.
   void PrepareRead(VkCommandBuffer cmd, VulkanRenderTarget* rt);
+  // A color target's layout between and during draws: COLOR_ATTACHMENT_OPTIMAL, or GENERAL with
+  // fear_d3d12_vulkan_rt_general, so a resolve reads it with no layout change. Read once.
+  static VkImageLayout ColorLayout();
   // A depth target's depth or stencil aspect view (created on first use), for sampling.
   VkImageView DepthView(VulkanRenderTarget* rt);
   VkImageView StencilView(VulkanRenderTarget* rt);

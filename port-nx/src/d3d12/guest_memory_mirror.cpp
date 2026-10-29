@@ -21,6 +21,7 @@
 #endif
 
 REXCVAR_DECLARE(bool, fear_vertex_index_range);
+REXCVAR_DECLARE(int32_t, fear_d3d12_hot_exact_kb);
 
 namespace fear::d3d12 {
 
@@ -38,6 +39,7 @@ bool GuestMemoryMirror::Initialize(rex::memory::Memory* memory_in, Sink* sink,
   quick_rewrites = std::make_unique<std::atomic<uint8_t>[]>(kPageCount);
   copy_hash = std::make_unique<std::atomic<uint64_t>[]>(kPageCount);
   hot_hashes = std::make_unique<uint16_t[]>(kPageCount);
+  exact_hash = std::make_unique<uint64_t[]>(kPageCount);
   pending = std::make_unique<std::atomic<uint64_t>[]>(kPageCount / 64);
   segment_word_epoch = std::make_unique<uint32_t[]>(kPageCount / 64);
   segment_pages = std::make_unique<uint64_t[]>(kPageCount / 64);
@@ -50,6 +52,10 @@ bool GuestMemoryMirror::Initialize(rex::memory::Memory* memory_in, Sink* sink,
   arm_thread = std::thread([this] { WatchThread(); });
   index_ranges = REXCVAR_GET(fear_vertex_index_range);
   if (index_ranges) REXLOG_INFO("D3D12 draw: vertex ranges from the index bounds");
+  hot_exact_bytes = uint32_t(std::max(0, REXCVAR_GET(fear_d3d12_hot_exact_kb))) << 10;
+  if (hot_exact_bytes)
+    REXLOG_INFO("D3D12 draw: ranges up to {} KB on hot pages copied to the byte",
+                hot_exact_bytes >> 10);
 #if defined(_WIN32)
   SetThreadDescription(arm_thread.native_handle(), L"D3D12 watches");
 #endif
@@ -266,12 +272,26 @@ bool GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length, bool watch
                                       std::vector<VertexCopy>& out) {
   if (!length) return true;
   if (!InSharedMemory(start, length)) return false;
-  const bool exact = !watch || upload_every_draw.load(std::memory_order_relaxed);
+  bool exact = !watch || upload_every_draw.load(std::memory_order_relaxed);
+  // --fear_d3d12_hot_exact_kb: a short range on a hot page (the game rewrites it, like the
+  // particles' per-draw vertices) is copied to the byte as an exact range, so the copy segment
+  // tests it byte for byte: the chunks the game appends to one page don't overlap, where their
+  // whole pages would.
+  bool hot_exact = false;
+  if (!exact && hot_exact_bytes && length <= hot_exact_bytes) {
+    const uint32_t first = start >> kPageShift, last = (start + length - 1) >> kPageShift;
+    for (uint32_t p = first; p <= last && !hot_exact; ++p)
+      hot_exact = (hot[p >> 6].load(std::memory_order_relaxed) >> (p & 63)) & 1;
+    exact = hot_exact;
+  }
   if (preparing) draw_reads.emplace_back(start, start + length, exact);
   const uint64_t fence = upload_fence;
   PrepareDiag& pd = *diag_;
   auto copy = [&](uint32_t from, uint32_t size) {
-    if (preparing && !segment_conflict) segment_conflict = SegmentReads(from, from + size);
+    if (preparing && !segment_conflict) {
+      segment_conflict = SegmentReads(from, from + size);
+      segment_conflict_exact = segment_conflict && exact;
+    }
     if (coherency && preparing) CheckSegmentCopy(from, size);
     if (!sink_->MapShared(from, size)) return false;
     Upload a;
@@ -289,7 +309,7 @@ bool GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length, bool watch
     ++*uploads_;
     return true;
   };
-  if (exact) {
+  if (exact && !hot_exact) {
     ++pd.unwatched;
     return copy(start, length);
   }
@@ -299,6 +319,40 @@ bool GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length, bool watch
   const uint32_t trace_request =
       trace.file ? trace.request.fetch_add(1, std::memory_order_relaxed) : 0;
   const uint32_t frame = watch_frame.load(std::memory_order_relaxed);
+  if (hot_exact) {
+    // Aging as for hashed hot pages below, on exact_hash (copy_hash is cleared here): a hot
+    // page unchanged over kHotMaxHashes requests is watched again, and its ranges go back to
+    // whole-page copies that are made only when it changes.
+    uint64_t hashed = 0;
+    for (uint32_t q = first; q <= last; ++q) {
+      const uint32_t w = q >> 6;
+      const uint64_t bit = 1ull << (q & 63);
+      ++hashed;
+      const uint64_t hash = PageHash(q);
+      if (hash != exact_hash[q]) {
+        exact_hash[q] = hash;
+        hot_hashes[q] = 0;
+      } else if ((hot[w].load(std::memory_order_relaxed) & bit) &&
+                 !(pending[w].load(std::memory_order_relaxed) & bit) &&
+                 ++hot_hashes[q] >= kHotMaxHashes) {
+        hot[w].fetch_and(~bit, std::memory_order_relaxed);
+        quick_rewrites[q].store(0, std::memory_order_relaxed);
+        armed_frame[q].store(frame, std::memory_order_relaxed);
+        pending[w].fetch_or(bit, std::memory_order_relaxed);
+        QueueArm(q, q + 1, trace_request);
+      }
+      // Shared memory now holds part of the page newer than its copy_hash says: a later
+      // whole-page request copies the page again instead of trusting that hash (if the guest
+      // wrote the old bytes back, it would match and leave these newer ones in place).
+      copy_hash[q].store(0, std::memory_order_relaxed);
+    }
+    SetPageBits(valid.get(), first, last + 1, false);
+    hash_pages.fetch_add(hashed, std::memory_order_relaxed);
+    ++pd.unwatched;
+    if (!copy(start, length)) return false;
+    if (coherency) CheckRequest(start, length);
+    return true;
+  }
   // Hashed pages whose content changed, copied in runs of adjacent pages.
   uint32_t changed_first = 0, changed_end = 0;
   auto copy_changed = [&] {

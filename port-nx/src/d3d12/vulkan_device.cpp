@@ -2,6 +2,7 @@
 #include "vulkan_device.h"
 
 #include "clock.h"
+#include "gpu_timer.h"
 
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
@@ -25,11 +26,13 @@ bool VulkanDevice::Check(VkResult r, const char* what) {
 VulkanDevice::~VulkanDevice() {
   if (!device_) return;
   fn_.vkDeviceWaitIdle(device_);
+  gpu_timer_.reset();  // its query pool
   for (Frame& f : frames_) {
     if (f.fence) fn_.vkDestroyFence(device_, f.fence, nullptr);
     if (f.pool) fn_.vkDestroyCommandPool(device_, f.pool, nullptr);
   }
   if (timestamps_) fn_.vkDestroyQueryPool(device_, timestamps_, nullptr);
+  if (coverage_) fn_.vkDestroyQueryPool(device_, coverage_, nullptr);
 }
 
 bool VulkanDevice::Initialize(rex::ui::vulkan::VulkanProvider& provider) {
@@ -159,12 +162,18 @@ bool VulkanDevice::BeginSlot() {
     completed_ = std::max(completed_, f.number);
     fn_.vkResetFences(device_, 1, &f.fence);
     if (f.timed) CollectGpuTime(slot_);
+    if (coverage_) CollectCoverage(slot_);
   }
   fn_.vkResetCommandPool(device_, f.pool, 0);
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   if (!Check(fn_.vkBeginCommandBuffer(f.cmd, &bi), "vkBeginCommandBuffer")) return false;
   f.timed = false;
+  // Outside any rendering instance: the timer resets the slot's queries here.
+  if (gpu_timer_) gpu_timer_->BeginFrame(f.cmd, slot_);
+  if (coverage_) {
+    fn_.vkCmdResetQueryPool(f.cmd, coverage_, slot_ * kCoverageQueries, kCoverageQueries);
+  }
   if (timestamps_) {
     fn_.vkCmdResetQueryPool(f.cmd, timestamps_, 2 * slot_, 2);
     fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps_, 2 * slot_);
@@ -210,7 +219,71 @@ void VulkanDevice::CollectGpuTime(uint32_t slot) {
   gpu_last_recorded_ns_ = frames_[slot].recorded_ns;
 }
 
+bool VulkanDevice::EnableCoverage() {
+  if (coverage_) return true;
+  // The sample counts need precise queries (a plain one may only say "some").
+  if (!provider_->vulkan_device()->properties().occlusionQueryPrecise) {
+    REXLOG_WARN("D3D12 Vulkan: no precise occlusion queries on this device: no coverage counts");
+    return false;
+  }
+  VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+  qp.queryType = VK_QUERY_TYPE_OCCLUSION;
+  qp.queryCount = kFramesInFlight * kCoverageQueries;
+  if (!Check(fn_.vkCreateQueryPool(device_, &qp, nullptr, &coverage_), "vkCreateQueryPool")) {
+    coverage_ = VK_NULL_HANDLE;
+    return false;
+  }
+  // The open command buffer's frame wasn't reset at its start; nothing is recorded in it yet
+  // (the backend enables this as it starts), so this is outside any rendering instance.
+  fn_.vkCmdResetQueryPool(frames_[slot_].cmd, coverage_, slot_ * kCoverageQueries,
+                          kCoverageQueries);
+  return true;
+}
+
+int32_t VulkanDevice::BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles,
+                                    uint32_t format) {
+  std::vector<CoverageDraw>& draws = coverage_pending_[slot_];
+  if (!coverage_) return -1;
+  if (draws.size() >= kCoverageQueries) {
+    ++coverage_dropped_;  // reported with the counts (TakeCoverageDropped)
+    return -1;
+  }
+  const uint32_t query = slot_ * kCoverageQueries + uint32_t(draws.size());
+  draws.push_back({tag, 0, target_samples, triangles, format});
+  fn_.vkCmdBeginQuery(frames_[slot_].cmd, coverage_, query, VK_QUERY_CONTROL_PRECISE_BIT);
+  return int32_t(query);
+}
+
+void VulkanDevice::EndCoverage(int32_t query) {
+  if (query >= 0) fn_.vkCmdEndQuery(frames_[slot_].cmd, coverage_, uint32_t(query));
+}
+
+void VulkanDevice::CollectCoverage(uint32_t slot) {
+  std::vector<CoverageDraw>& draws = coverage_pending_[slot];
+  ++coverage_frames_;
+  if (draws.empty()) return;
+  std::vector<uint64_t> samples(draws.size());
+  // The frame's fence was waited for, so every result is there; none is waited for.
+  if (fn_.vkGetQueryPoolResults(device_, coverage_, slot * kCoverageQueries,
+                                uint32_t(draws.size()), samples.size() * sizeof(uint64_t),
+                                samples.data(), sizeof(uint64_t),
+                                VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+    // Bounded when nothing takes them (the stats log off): past the cap they count as dropped.
+    constexpr size_t kMaxDone = 1 << 18;
+    for (size_t i = 0; i < draws.size(); ++i) {
+      if (coverage_done_.size() >= kMaxDone) {
+        coverage_dropped_ += draws.size() - i;
+        break;
+      }
+      draws[i].samples = samples[i];
+      coverage_done_.push_back(draws[i]);
+    }
+  }
+  draws.clear();
+}
+
 bool VulkanDevice::Submit(Frame& f) {
+  if (gpu_timer_) gpu_timer_->EndFrame(f.cmd);
   if (timestamps_) {
     const uint32_t slot = uint32_t(&f - frames_.data());
     fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps_,
@@ -295,6 +368,66 @@ bool VulkanDevice::EndFrame(bool present, PresentPass& pass) {
   times_.submit_ns = NowNs() - t0;
   slot_ = (slot_ + 1) % kFramesInFlight;
   return BeginSlot();
+}
+
+namespace {
+
+// GpuTimer's queries on Vulkan: a timestamp query pool, its results read back once the frame's
+// fence was waited for (no WAIT_BIT: a result that isn't there is skipped, never waited for).
+// The ticks are masked to the queue's valid bits.
+class VulkanTimestamps final : public GpuTimestamps {
+ public:
+  VulkanTimestamps(const VulkanDevice::Functions& fn, VkDevice device, uint64_t mask)
+      : fn_(fn), device_(device), mask_(mask) {}
+  ~VulkanTimestamps() override {
+    if (pool_) fn_.vkDestroyQueryPool(device_, pool_, nullptr);
+  }
+  bool Initialize(uint32_t count) {
+    VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    qp.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qp.queryCount = count;
+    return fn_.vkCreateQueryPool(device_, &qp, nullptr, &pool_) == VK_SUCCESS;
+  }
+  void Write(void* list, uint32_t query) override {
+    fn_.vkCmdWriteTimestamp(static_cast<VkCommandBuffer>(list),
+                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pool_, query);
+  }
+  void Reset(void* list, uint32_t first, uint32_t count) override {
+    fn_.vkCmdResetQueryPool(static_cast<VkCommandBuffer>(list), pool_, first, count);
+  }
+  const uint64_t* Map(uint32_t first, uint32_t count) override {
+    ticks_.resize(count);
+    if (fn_.vkGetQueryPoolResults(device_, pool_, first, count, count * sizeof(uint64_t),
+                                  ticks_.data(), sizeof(uint64_t),
+                                  VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+      return nullptr;
+    for (uint64_t& t : ticks_) t &= mask_;
+    return ticks_.data();
+  }
+
+ private:
+  const VulkanDevice::Functions& fn_;
+  VkDevice device_;
+  uint64_t mask_;
+  VkQueryPool pool_ = VK_NULL_HANDLE;
+  std::vector<uint64_t> ticks_;
+};
+
+}  // namespace
+
+bool VulkanDevice::EnableGpuTimer() {
+  // The frame timestamps' setup found the queue's: without them, no timing.
+  if (!timestamps_ || tick_ns_ <= 0.0) return false;
+  auto stamps = std::make_unique<VulkanTimestamps>(fn_, device_, tick_mask_);
+  if (!stamps->Initialize(kFramesInFlight * GpuTimer::kMaxQueries)) return false;
+  auto timer = std::make_unique<GpuTimer>();
+  const uint64_t frequency = uint64_t(1e9 / tick_ns_ + 0.5);
+  if (!timer->Initialize(std::move(stamps), frequency, kFramesInFlight)) return false;
+  // The open command buffer's frame: its queries are reset at the start of BeginFrame, which
+  // records nothing else before them.
+  timer->BeginFrame(frames_[slot_].cmd, slot_);
+  gpu_timer_ = std::move(timer);
+  return true;
 }
 
 }  // namespace fear::d3d12

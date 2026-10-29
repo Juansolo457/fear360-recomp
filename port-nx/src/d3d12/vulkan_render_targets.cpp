@@ -14,7 +14,19 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_d24_as_float, false, "F.E.A.R. D3D12",
                     "With --fear_d3d12_api=vulkan, debug: 24-bit depth on a 32-bit float buffer even "
                     "where the GPU has D24, as on GPUs without it (AMD's, the Steam Deck's)");
 
+REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_rt_general, false, "F.E.A.R. D3D12",
+                    "Keep color render targets in the GENERAL layout, drawn to and read by the "
+                    "resolves without a layout change each copy (the water's copy per piece). "
+                    "Read at startup");
+
 namespace fear::d3d12 {
+
+VkImageLayout VulkanRenderTargets::ColorLayout() {
+  static const VkImageLayout layout = REXCVAR_GET(fear_d3d12_vulkan_rt_general)
+                                          ? VK_IMAGE_LAYOUT_GENERAL
+                                          : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  return layout;
+}
 
 namespace {
 
@@ -146,6 +158,7 @@ bool VulkanRenderTargets::Create(VulkanRenderTarget* rt, uint32_t width, uint32_
   rt->image = image;
   rt->view = view;
   rt->initialized = false;
+  ++rt->content_seq;
   rt->width = ii.extent.width;
   rt->height = height;
   return true;
@@ -240,7 +253,7 @@ void VulkanRenderTargets::BeginRendering(VkCommandBuffer cmd, VulkanRenderTarget
       b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
       b.srcAccessMask = b.dstAccessMask =
           VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-      b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      b.oldLayout = b.newLayout = ColorLayout();
     }
     width = std::min(width, rt->width);
     height = std::min(height, rt->height);
@@ -259,7 +272,7 @@ void VulkanRenderTargets::BeginRendering(VkCommandBuffer cmd, VulkanRenderTarget
     colors[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     if (!color[i]) continue;  // imageView VK_NULL_HANDLE: no attachment at this index
     colors[i].imageView = color[i]->view;
-    colors[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colors[i].imageLayout = ColorLayout();
     colors[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     colors[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   }
@@ -324,6 +337,7 @@ bool VulkanRenderTargets::Bind(VkCommandBuffer cmd, const SurfaceRegs& regs, uin
 
 void VulkanRenderTargets::Initialize(VkCommandBuffer cmd, VulkanRenderTarget* rt) {
   if (rt->initialized) return;
+  ++rt->content_seq;
   EndRendering(cmd);
   const VulkanDevice::Functions& fn = device_.fn();
   const VkImageSubresourceRange range{
@@ -358,7 +372,7 @@ void VulkanRenderTargets::Initialize(VkCommandBuffer cmd, VulkanRenderTarget* rt
                       VK_ACCESS_SHADER_READ_BIT;
     stages = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
   } else {
-    b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    b.newLayout = ColorLayout();
     b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                       VK_ACCESS_TRANSFER_READ_BIT;
     stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -373,6 +387,7 @@ void VulkanRenderTargets::Initialize(VkCommandBuffer cmd, VulkanRenderTarget* rt
 void VulkanRenderTargets::ClearRects(VkCommandBuffer cmd, VulkanRenderTarget* rt,
                                      const VkClearAttachment& att, const Rect* rects,
                                      size_t count) {
+  ++rt->content_seq;
   VulkanRenderTarget* none[1] = {nullptr};
   if (rt->depth)
     BeginRendering(cmd, none, 0, rt);

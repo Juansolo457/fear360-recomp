@@ -11,8 +11,9 @@
 //   kD24FS8 (unorm24 for kD24S8), which textures of k_24_8 / k_24_8_FLOAT at the destination
 //   bind.
 // Each takes one descriptor set (GENERAL storage views, sources with their own sampler). Color:
-// binding 0 the source, 1 the destination. Depth: 0 the depth aspect, 1 the R32_SFLOAT image,
-// 2 the bits (R32_UINT), 3 the stencil aspect.
+// binding 0 the source, 1 the destination, 2 the draw bounds buffer (ColorParams::bounds).
+// Depth: 0 the depth aspect, 1 the R32_SFLOAT image, 2 the bits (R32_UINT), 3 the stencil
+// aspect.
 //
 // Threading: the recording thread.
 #pragma once
@@ -29,7 +30,8 @@ class VulkanResolveShaders {
   explicit VulkanResolveShaders(VulkanDevice& device) : device_(device) {}
   ~VulkanResolveShaders();
 
-  bool Initialize();
+  // `draw_bounds`: the draw bounds buffer (vulkan_backend.h), for bounded color copies.
+  bool Initialize(VkBuffer draw_bounds);
 
   VkDescriptorSetLayout set_layout() const { return set_layout_; }  // color
   VkDescriptorSetLayout depth_set_layout() const { return depth_set_layout_; }
@@ -42,6 +44,8 @@ class VulkanResolveShaders {
     uint32_t depth_format = 0;  // xenos::DepthRenderTargetFormat
     uint32_t host_sample = 0;   // MSAA sources
   };
+  static constexpr uint32_t kNoBounds = 0xFFFFFFFFu;    // ColorParams::bounds
+  static constexpr uint32_t kBoundsExpand = 0x80000000u;
   struct ColorParams {
     int32_t src_x = 0, src_y = 0;
     uint32_t width = 0, height = 0;
@@ -50,8 +54,16 @@ class VulkanResolveShaders {
     uint32_t src_format = 0;   // xenos::ColorRenderTargetFormat
     uint32_t flags = 0;  // 2: red/blue swap, 4-6: sample select, 8-10: samples, 12-14: number
     int32_t exp_bias = 0;
+    // The resolve bounds (vulkan_backend.h): kNoBounds copies the whole rectangle; else bits
+    // 0-7 the slot of the draw bounds buffer whose box (plus a margin) the copy is cut to,
+    // and kBoundsExpand to widen the box by its own size on each side (rectangle lists: the
+    // fourth vertex is made from the other three and can lie outside them).
+    uint32_t bounds = kNoBounds;
   };
-  // Record a copy with `set` (set_layout()) bound.
+  // Record a copy with `set` (set_layout()) bound. A bounded color copy (ColorParams::bounds)
+  // first turns its slot into an indirect dispatch over the tiles the box touches
+  // (bounds_dispatch.comp), then dispatches that: the draws' bounds must be visible to compute
+  // shaders already.
   void RecordDepth(VkCommandBuffer cmd, bool msaa, VkDescriptorSet set, const DepthParams& p);
   void RecordColor(VkCommandBuffer cmd, bool msaa, VkDescriptorSet set, const ColorParams& p);
 
@@ -71,6 +83,13 @@ class VulkanResolveShaders {
   VkPipelineLayout layout_ = VK_NULL_HANDLE, depth_layout_ = VK_NULL_HANDLE;
   VkPipeline depth_1x_ = VK_NULL_HANDLE, depth_msaa_ = VK_NULL_HANDLE;
   VkPipeline color_1x_ = VK_NULL_HANDLE, color_msaa_ = VK_NULL_HANDLE;
+  // bounds_dispatch.comp: its own layout and one set, the draw bounds buffer, written once.
+  VkBuffer draw_bounds_ = VK_NULL_HANDLE;
+  VkDescriptorSetLayout bounds_set_layout_ = VK_NULL_HANDLE;
+  VkPipelineLayout bounds_layout_ = VK_NULL_HANDLE;
+  VkPipeline bounds_dispatch_ = VK_NULL_HANDLE;
+  VkDescriptorPool bounds_pool_ = VK_NULL_HANDLE;
+  VkDescriptorSet bounds_set_ = VK_NULL_HANDLE;
   std::unordered_map<VkFormat, bool> storage_support_;
 };
 

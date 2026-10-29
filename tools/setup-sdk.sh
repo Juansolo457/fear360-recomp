@@ -15,7 +15,7 @@ sdk="${FEAR_SDK_DIR:-$root/third_party/rexglue-sdk-nx}"
 source=https://github.com/rexglue/rexglue-sdk.git
 base=c94f5ebdcb3c9d1a460ca48e04f9758448f8d518        # ReXGlue v0.10.0
 fear_nx_tree=c7fb3c0f1a588b268115bf0dceb24f0c26eb1ae0 # after patch 0000
-expected_tree=a22f63566434d736922c6bd52149a51500590862 # after the last patch (as setup-sdk.ps1)
+expected_tree=661594d7480499c7b447ec5b92f05a143d6c8f57 # after the last patch (as setup-sdk.ps1)
 force=0
 submodules=1
 while [[ $# -gt 0 ]]; do
@@ -38,6 +38,26 @@ if [[ -d "$sdk" ]]; then
     if [[ "$head" == "$expected_tree" && -z "$changes" ]]; then
       echo "Patched SDK at $sdk already (tree $head); --force replaces it"
       [[ $submodules -eq 0 ]] || git -C "$sdk" submodule update --init --recursive
+      exit 0
+    fi
+    # An earlier finished checkout (one commit per patch since $base, no changes of its own)
+    # takes the patches added since, and must then reach the expected tree like a new one.
+    applied=$(git -C "$sdk" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)
+    mapfile -t patches < <(find "$root/patches/rexglue-sdk-nx" -maxdepth 1 -name '*.patch' | sort)
+    if [[ -z "$changes" && $applied -gt 0 && $applied -lt ${#patches[@]} ]] &&
+       git -C "$sdk" merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
+      echo "Updating the patched SDK at $sdk: patches $((applied + 1))-${#patches[@]}"
+      for patch in "${patches[@]:applied}"; do
+        sed 's/\r$//' "$patch" | git -C "$sdk" -c user.name='fear360-recomp setup' \
+          -c user.email=setup@localhost am --quiet
+      done
+      tree=$(git -C "$sdk" rev-parse 'HEAD^{tree}')
+      if [[ "$tree" != "$expected_tree" ]]; then
+        echo "The updated SDK tree is $tree, not $expected_tree: run with --force to replace it" >&2
+        exit 1
+      fi
+      [[ $submodules -eq 0 ]] || git -C "$sdk" submodule update --init --recursive
+      echo "Patched SDK updated at $sdk (tree $tree)."
       exit 0
     fi
     echo "$sdk exists but isn't the patched SDK (tree $head): run with --force to replace it" >&2

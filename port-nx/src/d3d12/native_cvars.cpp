@@ -35,6 +35,13 @@ REXCVAR_DEFINE_BOOL(fear_vertex_index_range, true, "F.E.A.R. D3D12",
                     "bounds), not the whole vertex buffer, for shaders that fetch with the plain "
                     "vertex index; fewer pages hashed in big fights (#40, #88). On by default "
                     "since 0.9: every Deck test since #88 ran with it");
+REXCVAR_DEFINE_INT32(fear_d3d12_hot_exact_kb, 64, "F.E.A.R. D3D12",
+                     "Copy a vertex or index range of at most this many KB that touches a hot "
+                     "page (data the game keeps rewriting, like the particles' vertices) to the "
+                     "byte, tested for overlap byte for byte, instead of as whole 4 KB pages: "
+                     "chunks the game appends to one page then share a copy segment instead of "
+                     "breaking it at every draw (each break drains the GPU). On the Deck's water "
+                     "fights, 300-700 upload batches a frame became 1-6. 0: off. Read at startup");
 REXCVAR_DEFINE_BOOL(fear_d3d12_implicit_gradients, true, "F.E.A.R. D3D12",
                     "Experiment (Steam Deck shimmer): translate computed-LOD texture fetches in "
                     "pixel shaders with sample_b and the GPU's own derivatives (pgr4-native 0021; "

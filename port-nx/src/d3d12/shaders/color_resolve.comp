@@ -15,6 +15,7 @@ layout(push_constant) uniform Params {
   uint src_format;    // xenos::ColorRenderTargetFormat
   uint flags;         // 2: red/blue swap, 4-6: sample select, 8-10: samples, 12-14: number
   int exp_bias;
+  uint bounds;        // 0xFFFFFFFF: all of it; else bits 0-7 the draw bounds slot, bit 31 expand
 } p;
 
 #if MSAA
@@ -25,6 +26,12 @@ layout(set = 0, binding = 0) uniform sampler2D src;
 // R8 / R16 / R32 / R32G32 / R32G32B32A32_UINT by the destination's texel size (written without
 // a format qualifier: shaderStorageImageWriteWithoutFormat).
 layout(set = 0, binding = 1) uniform writeonly uimage2D dst;
+// The draw bounds buffer (vulkan_backend.h). With p.bounds the copy is an indirect dispatch
+// over just the tiles the draws since the previous copy reached (bounds_dispatch.comp wrote it):
+// its first tile in the rectangle is at words kArgsBase + slot * 8 + 3 and 4. The rest of the
+// destination holds the previous copy.
+layout(std430, set = 0, binding = 2) readonly buffer DrawBounds { uint draw_bounds[]; };
+const uint kArgsBase = 64u;  // VulkanBackend::kDrawBoundsSlots * 4
 
 uint SampleSelect() { return (p.flags >> 4) & 7u; }
 uint SampleCount() { return (p.flags >> 8) & 7u; }
@@ -117,7 +124,12 @@ uvec4 PackDest(vec4 c) {
 }
 
 void main() {
-  uvec2 id = gl_GlobalInvocationID.xy;
+  uvec2 tile = gl_WorkGroupID.xy;
+  if (p.bounds != 0xFFFFFFFFu) {
+    uint a = kArgsBase + (p.bounds & 0xFFu) * 8u;
+    tile += uvec2(draw_bounds[a + 3u], draw_bounds[a + 4u]);
+  }
+  uvec2 id = tile * 8u + gl_LocalInvocationID.xy;
   if (any(greaterThanEqual(id, p.size))) return;
   vec4 c = Convert(LoadColor(p.src_origin + ivec2(id)));
   imageStore(dst, ivec2(p.dest_origin + id), PackDest(c));

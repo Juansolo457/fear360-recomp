@@ -1,0 +1,330 @@
+From a06b52f19d5be1432802b5f5106c63d667286307 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 22:45:24 -0700
+Subject: [PATCH] graphics: vertex shaders record the draw's screen bounds for
+ the host
+
+With kSysFlag_DrawBounds in the system constants, a vertex shader's main ends by taking the
+host position through the viewport the constants give (draw_bounds_scale, draw_bounds_offset)
+to pixels, adding a point's radius, and keeping the minimum and maximum over the draw's
+vertices in its slot (draw_bounds_slot) of a new storage buffer, set 0 binding 2, with
+unsigned atomic minimums (the maximums stored negated against a bias, so one fill resets a
+slot). A vertex behind the camera opens the slot to everything.
+
+For a host that copies only what the draws since the previous resolve reached, when a game
+resolves the frame after every effect it draws (fear360-recomp #100).
+---
+ .../pipeline/shader/spirv_translator.h        |  30 +++
+ .../pipeline/shader/spirv_translator.cpp      | 204 ++++++++++++++++++
+ 2 files changed, 234 insertions(+)
+
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+index 54e3eb1..4e506ba 100644
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -152,6 +152,10 @@ class SpirvShaderTranslator : public ShaderTranslator {
+     // should be safe at least temporarily).
+     kSysFlag_FSIDepthStencilEarlyWrite_Shift,
+ 
++    // fear360-recomp: vertex shaders record the draw's screen bounds in the draw bounds buffer
++    // (CompleteVertexShaderDrawBounds).
++    kSysFlag_DrawBounds_Shift,
++
+     kSysFlag_Count,
+ 
+     // For HostVertexShaderType kVertex, if fullDrawIndexUint32 is not
+@@ -199,6 +203,7 @@ class SpirvShaderTranslator : public ShaderTranslator {
+     kSysFlag_FSIDepthWrite = 1u << kSysFlag_FSIDepthWrite_Shift,
+     kSysFlag_FSIStencilTest = 1u << kSysFlag_FSIStencilTest_Shift,
+     kSysFlag_FSIDepthStencilEarlyWrite = 1u << kSysFlag_FSIDepthStencilEarlyWrite_Shift,
++    kSysFlag_DrawBounds = 1u << kSysFlag_DrawBounds_Shift,
+   };
+   static_assert(kSysFlag_Count <= 32, "Too many flags in the system constants");
+ 
+@@ -307,8 +312,24 @@ class SpirvShaderTranslator : public ShaderTranslator {
+     uint32_t vertex_index_max;
+     float tessellation_factor_range_min;
+     float tessellation_factor_range_max;
++
++    // fear360-recomp, with kSysFlag_DrawBounds: the slot of the draw bounds buffer the draw's
++    // bounds go to, and the viewport that takes a vertex's NDC position to pixels (pixel =
++    // ndc * scale + offset). Padded so the float2s don't straddle a 16-byte boundary.
++    uint32_t draw_bounds_slot;
++    uint32_t draw_bounds_padding[2];
++    float draw_bounds_scale[2];
++    float draw_bounds_offset[2];
+   };
+ 
++  // fear360-recomp: the draw bounds buffer, uint[] at this binding of
++  // kDescriptorSetSharedMemoryAndEdram (vertex stage). Four words per slot: the minimum x and y
++  // of the draw's vertices in pixels as x + kDrawBoundsBias, then the maximum x and y as
++  // kDrawBoundsBias - x, each kept with an unsigned atomic minimum, so a fill of 0xFFFFFFFF
++  // resets a slot. A host resolves the words back and reads the box they bound.
++  static constexpr uint32_t kDrawBoundsBinding = 2;
++  static constexpr int32_t kDrawBoundsBias = 1 << 30;
++
+   enum ConstantBuffer : uint32_t {
+     kConstantBufferSystem,
+     kConstantBufferFloatVertex,
+@@ -573,6 +594,10 @@ class SpirvShaderTranslator : public ShaderTranslator {
+   void StartVertexOrTessEvalShaderBeforeMain();
+   void StartVertexOrTessEvalShaderInMain();
+   void CompleteVertexOrTessEvalShaderInMain();
++  // fear360-recomp: at the end of a vertex shader's main, with kSysFlag_DrawBounds set, records
++  // the vertex's screen position (position_ptr: the host position output) in the draw's slot
++  // of the draw bounds buffer.
++  void CompleteVertexShaderDrawBounds(spv::Id position_ptr);
+ 
+   void StartFragmentShaderBeforeMain();
+   void StartFragmentShaderInMain();
+@@ -879,6 +904,9 @@ class SpirvShaderTranslator : public ShaderTranslator {
+     kSystemConstantEdramRTKeepMask,
+     kSystemConstantEdramRTClamp,
+     kSystemConstantEdramBlendConstant,
++    kSystemConstantDrawBoundsSlot,
++    kSystemConstantDrawBoundsScale,
++    kSystemConstantDrawBoundsOffset,
+   };
+   spv::Id uniform_system_constants_;
+   // gpu_specialize_texture_signs: one specialization constant per word of
+@@ -890,6 +918,8 @@ class SpirvShaderTranslator : public ShaderTranslator {
+ 
+   spv::Id buffers_shared_memory_;
+   spv::Id buffer_edram_;
++  // fear360-recomp: the draw bounds buffer (vertex shaders; NoResult in the others).
++  spv::Id buffer_draw_bounds_;
+ 
+   // Not using combined images and samplers because
+   // maxPerStageDescriptorSamplers is often lower than
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+index 983d0be..65e0021 100644
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -323,6 +323,9 @@ void SpirvShaderTranslator::StartTranslation() {
+       {"edram_rt_keep_mask", offsetof(SystemConstants, edram_rt_keep_mask), type_uint4_array_2},
+       {"edram_rt_clamp", offsetof(SystemConstants, edram_rt_clamp), type_float4_array_4},
+       {"edram_blend_constant", offsetof(SystemConstants, edram_blend_constant), type_float4_},
++      {"draw_bounds_slot", offsetof(SystemConstants, draw_bounds_slot), type_uint_},
++      {"draw_bounds_scale", offsetof(SystemConstants, draw_bounds_scale), type_float2_},
++      {"draw_bounds_offset", offsetof(SystemConstants, draw_bounds_offset), type_float2_},
+   };
+   id_vector_temp_.clear();
+   id_vector_temp_.reserve(rex::countof(system_constants));
+@@ -470,6 +473,33 @@ void SpirvShaderTranslator::StartTranslation() {
+     }
+   }
+ 
++  // fear360-recomp: the draw bounds buffer (CompleteVertexShaderDrawBounds), uint[], declared
++  // as the shared memory is.
++  buffer_draw_bounds_ = spv::NoResult;
++  if (is_vertex_shader()) {
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(builder_->makeRuntimeArray(type_uint_));
++    builder_->addDecoration(id_vector_temp_.back(), spv::DecorationArrayStride, sizeof(uint32_t));
++    spv::Id type_draw_bounds = builder_->makeStructType(id_vector_temp_, "XeDrawBounds");
++    builder_->addMemberName(type_draw_bounds, 0, "draw_bounds");
++    builder_->addMemberDecoration(type_draw_bounds, 0, spv::DecorationCoherent);
++    builder_->addMemberDecoration(type_draw_bounds, 0, spv::DecorationOffset, 0);
++    builder_->addDecoration(type_draw_bounds, features_.spirv_version >= spv::Spv_1_3
++                                                  ? spv::DecorationBlock
++                                                  : spv::DecorationBufferBlock);
++    buffer_draw_bounds_ = builder_->createVariable(spv::NoPrecision,
++                                                   features_.spirv_version >= spv::Spv_1_3
++                                                       ? spv::StorageClassStorageBuffer
++                                                       : spv::StorageClassUniform,
++                                                   type_draw_bounds, "xe_draw_bounds");
++    builder_->addDecoration(buffer_draw_bounds_, spv::DecorationDescriptorSet,
++                            int(kDescriptorSetSharedMemoryAndEdram));
++    builder_->addDecoration(buffer_draw_bounds_, spv::DecorationBinding, int(kDrawBoundsBinding));
++    if (features_.spirv_version >= spv::Spv_1_4) {
++      main_interface_.push_back(buffer_draw_bounds_);
++    }
++  }
++
+   if (is_vertex_shader()) {
+     StartVertexOrTessEvalShaderBeforeMain();
+   } else if (is_pixel_shader()) {
+@@ -2828,6 +2858,180 @@ void SpirvShaderTranslator::CompleteVertexOrTessEvalShaderInMain() {
+     }
+     builder_->createStore(position, position_ptr);
+   }
++
++  CompleteVertexShaderDrawBounds(position_ptr);
++}
++
++void SpirvShaderTranslator::CompleteVertexShaderDrawBounds(spv::Id position_ptr) {
++  // fear360-recomp: the screen bounds of a draw's vertices, for a host that copies only what
++  // the draws since the previous resolve reached when a game resolves the frame after every
++  // effect it draws. The host position (the output as stored, after the point sprite
++  // expansion) goes through the viewport in the system constants to pixels, a point's radius
++  // is added, and the draw's slot of the draw bounds buffer takes the minimum and maximum of
++  // every vertex as four unsigned minimums (kDrawBoundsBias: the header). A vertex behind the
++  // camera (W <= 0) opens the slot to everything: the primitive is clipped, not bounded.
++  if (buffer_draw_bounds_ == spv::NoResult) {
++    return;
++  }
++  spv::Id bounds_enabled = builder_->createBinOp(
++      spv::OpINotEqual, type_bool_,
++      builder_->createBinOp(
++          spv::OpBitwiseAnd, type_uint_, main_system_constant_flags_,
++          builder_->makeUintConstant(static_cast<unsigned int>(kSysFlag_DrawBounds))),
++      const_uint_0_);
++  SpirvBuilder::IfBuilder if_bounds(bounds_enabled, spv::SelectionControlDontFlattenMask,
++                                    *builder_);
++
++  spv::Id position = builder_->createLoad(position_ptr, spv::NoPrecision);
++  spv::Id position_w = builder_->createCompositeExtract(position, type_float_, 3);
++  uint_vector_temp_.clear();
++  uint_vector_temp_.push_back(0);
++  uint_vector_temp_.push_back(1);
++  spv::Id position_xy =
++      builder_->createRvalueSwizzle(spv::NoPrecision, type_float2_, position, uint_vector_temp_);
++  spv::Id w_positive =
++      builder_->createBinOp(spv::OpFOrdGreaterThan, type_bool_, position_w, const_float_0_);
++  spv::Id ndc_xy = builder_->createBinOp(
++      spv::OpFDiv, type_float2_, position_xy,
++      builder_->smearScalar(spv::NoPrecision, position_w, type_float2_));
++
++  // To pixels.
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(builder_->makeIntConstant(kSystemConstantDrawBoundsScale));
++  spv::Id scale =
++      builder_->createLoad(builder_->createAccessChain(spv::StorageClassUniform,
++                                                       uniform_system_constants_, id_vector_temp_),
++                           spv::NoPrecision);
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(builder_->makeIntConstant(kSystemConstantDrawBoundsOffset));
++  spv::Id offset =
++      builder_->createLoad(builder_->createAccessChain(spv::StorageClassUniform,
++                                                       uniform_system_constants_, id_vector_temp_),
++                           spv::NoPrecision);
++  spv::Id pixel_xy = builder_->createBinOp(
++      spv::OpFAdd, type_float2_, builder_->createBinOp(spv::OpFMul, type_float2_, ndc_xy, scale),
++      offset);
++
++  // A point's radius in pixels: its diameter in guest pixels (the vertex's where the shader
++  // writes one and it's non-negative, else the constant one) through the diameter-to-NDC-radius
++  // constant (zero except for point lists) and the viewport's scale.
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(builder_->makeIntConstant(kSystemConstantPointConstantDiameter));
++  spv::Id diameter =
++      builder_->createLoad(builder_->createAccessChain(spv::StorageClassUniform,
++                                                       uniform_system_constants_, id_vector_temp_),
++                           spv::NoPrecision);
++  if (current_shader().writes_point_size_edge_flag_kill_vertex() & 0b001) {
++    assert_true(var_main_point_size_edge_flag_kill_vertex_ != spv::NoResult);
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(const_int_0_);
++    spv::Id vertex_diameter = builder_->createLoad(
++        builder_->createAccessChain(spv::StorageClassFunction,
++                                    var_main_point_size_edge_flag_kill_vertex_, id_vector_temp_),
++        spv::NoPrecision);
++    diameter = builder_->createTriOp(
++        spv::OpSelect, type_float2_,
++        builder_->smearScalar(spv::NoPrecision,
++                              builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool_,
++                                                    vertex_diameter, const_float_0_),
++                              type_bool2_),
++        builder_->smearScalar(spv::NoPrecision, vertex_diameter, type_float2_), diameter);
++  }
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(
++      builder_->makeIntConstant(kSystemConstantPointScreenDiameterToNdcRadius));
++  spv::Id diameter_to_ndc_radius =
++      builder_->createLoad(builder_->createAccessChain(spv::StorageClassUniform,
++                                                       uniform_system_constants_, id_vector_temp_),
++                           spv::NoPrecision);
++  spv::Id radius = builder_->createUnaryBuiltinCall(
++      type_float2_, ext_inst_glsl_std_450_, GLSLstd450FAbs,
++      builder_->createBinOp(
++          spv::OpFMul, type_float2_,
++          builder_->createBinOp(spv::OpFMul, type_float2_, diameter, diameter_to_ndc_radius),
++          scale));
++  spv::Id low = builder_->createBinOp(spv::OpFSub, type_float2_, pixel_xy, radius);
++  spv::Id high = builder_->createBinOp(spv::OpFAdd, type_float2_, pixel_xy, radius);
++
++  // Whole pixels, clamped to what the encoding holds before the conversion to integers (which
++  // is undefined for values the integer can't hold).
++  spv::Id limit =
++      builder_->smearScalar(spv::NoPrecision, builder_->makeFloatConstant(536870912.0f),
++                            type_float2_);
++  spv::Id limit_negative =
++      builder_->smearScalar(spv::NoPrecision, builder_->makeFloatConstant(-536870912.0f),
++                            type_float2_);
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(low);
++  id_vector_temp_.push_back(limit_negative);
++  id_vector_temp_.push_back(limit);
++  low = builder_->createBuiltinCall(type_float2_, ext_inst_glsl_std_450_, GLSLstd450FClamp,
++                                    id_vector_temp_);
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(high);
++  id_vector_temp_.push_back(limit_negative);
++  id_vector_temp_.push_back(limit);
++  high = builder_->createBuiltinCall(type_float2_, ext_inst_glsl_std_450_, GLSLstd450FClamp,
++                                     id_vector_temp_);
++  spv::Id low_int = builder_->createUnaryOp(
++      spv::OpConvertFToS, type_int2_,
++      builder_->createUnaryBuiltinCall(type_float2_, ext_inst_glsl_std_450_, GLSLstd450Floor,
++                                       low));
++  spv::Id high_int = builder_->createUnaryOp(
++      spv::OpConvertFToS, type_int2_,
++      builder_->createUnaryBuiltinCall(type_float2_, ext_inst_glsl_std_450_, GLSLstd450Ceil,
++                                       high));
++
++  // The four words: min x and y as x + bias, max x and y as bias - x. Behind the camera, 0:
++  // the minimum of everything.
++  spv::Id bias = builder_->smearScalar(spv::NoPrecision, builder_->makeIntConstant(kDrawBoundsBias),
++                                       type_int2_);
++  spv::Id min_encoded = builder_->createUnaryOp(
++      spv::OpBitcast, type_uint2_, builder_->createBinOp(spv::OpIAdd, type_int2_, low_int, bias));
++  spv::Id max_encoded = builder_->createUnaryOp(
++      spv::OpBitcast, type_uint2_, builder_->createBinOp(spv::OpISub, type_int2_, bias, high_int));
++  spv::Id w_positive2 = builder_->smearScalar(spv::NoPrecision, w_positive, type_bool2_);
++  spv::Id zero2 = SpirvSmearScalarResultOrConstant(const_uint_0_, type_uint2_);
++  min_encoded = builder_->createTriOp(spv::OpSelect, type_uint2_, w_positive2, min_encoded, zero2);
++  max_encoded = builder_->createTriOp(spv::OpSelect, type_uint2_, w_positive2, max_encoded, zero2);
++
++  // Into the slot.
++  id_vector_temp_.clear();
++  id_vector_temp_.push_back(builder_->makeIntConstant(kSystemConstantDrawBoundsSlot));
++  spv::Id slot =
++      builder_->createLoad(builder_->createAccessChain(spv::StorageClassUniform,
++                                                       uniform_system_constants_, id_vector_temp_),
++                           spv::NoPrecision);
++  spv::Id slot_base = builder_->createBinOp(spv::OpShiftLeftLogical, type_uint_, slot,
++                                            builder_->makeUintConstant(2));
++  const spv::Id words[4] = {
++      builder_->createCompositeExtract(min_encoded, type_uint_, 0),
++      builder_->createCompositeExtract(min_encoded, type_uint_, 1),
++      builder_->createCompositeExtract(max_encoded, type_uint_, 0),
++      builder_->createCompositeExtract(max_encoded, type_uint_, 1),
++  };
++  const spv::StorageClass draw_bounds_storage_class = features_.spirv_version >= spv::Spv_1_3
++                                                          ? spv::StorageClassStorageBuffer
++                                                          : spv::StorageClassUniform;
++  spv::Id scope = builder_->makeUintConstant(static_cast<unsigned int>(spv::ScopeDevice));
++  spv::Id semantics =
++      builder_->makeUintConstant(static_cast<unsigned int>(spv::MemorySemanticsMaskNone));
++  for (uint32_t i = 0; i < 4; ++i) {
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(const_int_0_);
++    id_vector_temp_.push_back(
++        builder_->createBinOp(spv::OpIAdd, type_uint_, slot_base, builder_->makeUintConstant(i)));
++    spv::Id word_ptr = builder_->createAccessChain(draw_bounds_storage_class, buffer_draw_bounds_,
++                                                   id_vector_temp_);
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(word_ptr);
++    id_vector_temp_.push_back(scope);
++    id_vector_temp_.push_back(semantics);
++    id_vector_temp_.push_back(words[i]);
++    builder_->createOp(spv::OpAtomicUMin, type_uint_, id_vector_temp_);
++  }
++
++  if_bounds.makeEndIf();
+ }
+ 
+ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
+-- 
+2.53.0.windows.1
+
