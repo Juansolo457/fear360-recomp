@@ -118,6 +118,7 @@ class GuestMemoryMirror {
   // segment reads.
   std::vector<Read> draw_reads;
   bool preparing = false, segment_conflict = false;
+  bool segment_conflict_exact = false;  // the conflicting copy was an exact range (diagnostic)
   static uint64_t PageMask(uint32_t w, uint32_t first, uint32_t last) {
     uint64_t m = ~0ull;
     if (w == first >> 6) m &= ~0ull << (first & 63);

@@ -356,13 +356,17 @@ void VulkanBackend::Prepare(const DrawState& state, uint64_t upload_tag, DrawPre
   // Straight into the batch: copies made before a failed range still go out (their pages are
   // marked valid already).
   mirror_.preparing = true;
-  mirror_.segment_conflict = false;
+  mirror_.segment_conflict = mirror_.segment_conflict_exact = false;
   mirror_.draw_reads.clear();
   // Fans draw natively, their indices read from shared memory: copied like any other's.
   prep->upload_ok = indexed_ok && mirror_.RequestVertices(state, *prep->vs, *copies, false);
   mirror_.preparing = false;
   if (mirror_.segment_conflict ||
       mirror_.segment_exact.size() >= GuestMemoryMirror::kSegmentExactLimit) {
+    (mirror_.segment_conflict ? segments_conflict_ : segments_limit_)
+        .fetch_add(1, std::memory_order_relaxed);
+    if (mirror_.segment_conflict_exact)
+      segments_conflict_exact_.fetch_add(1, std::memory_order_relaxed);
     mirror_.NewSegment();
     prep->copy_segment = true;
   }
@@ -1945,14 +1949,21 @@ void VulkanBackend::LogGpuTiming() {
   }
   if (gpu_timer_) gpu_timer_->Log();  // the costliest passes
   const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
+  const uint64_t seg_batch = segments_batch_.exchange(0, std::memory_order_relaxed);
+  const uint64_t seg_conflict = segments_conflict_.exchange(0, std::memory_order_relaxed);
+  const uint64_t seg_limit = segments_limit_.exchange(0, std::memory_order_relaxed);
+  const uint64_t seg_exact = segments_conflict_exact_.exchange(0, std::memory_order_relaxed);
   if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;
   const double n = double(w.frames);
   REXLOG_INFO("D3D12 Vulkan GPU: {} frames, per frame {:.2f} ms (max {:.2f}), idle between "
-              "frames {:.2f} ms{}",
+              "frames {:.2f} ms{}; copy segments per frame: {:.1f} batches, {:.1f} conflicts "
+              "({:.1f} on exact ranges), {:.1f} exact limit",
               w.frames, w.sum_ms / n, w.max_ms, w.idle_ms / n,
               w.ambiguous ? fmt::format(", {} left out (past the timestamp counter's range)",
                                         w.ambiguous)
-                          : std::string());
+                          : std::string(),
+              double(seg_batch) / n, double(seg_conflict) / n, double(seg_exact) / n,
+              double(seg_limit) / n);
 }
 
 void VulkanBackend::AddPrepareCounters(const PrepareCounters& c) {

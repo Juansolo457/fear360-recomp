@@ -271,7 +271,10 @@ bool GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length, bool watch
   const uint64_t fence = upload_fence;
   PrepareDiag& pd = *diag_;
   auto copy = [&](uint32_t from, uint32_t size) {
-    if (preparing && !segment_conflict) segment_conflict = SegmentReads(from, from + size);
+    if (preparing && !segment_conflict) {
+      segment_conflict = SegmentReads(from, from + size);
+      segment_conflict_exact = segment_conflict && exact;
+    }
     if (coherency && preparing) CheckSegmentCopy(from, size);
     if (!sink_->MapShared(from, size)) return false;
     Upload a;

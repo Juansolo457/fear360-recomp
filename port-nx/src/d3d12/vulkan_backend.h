@@ -32,6 +32,7 @@
 
 #include <rex/graphics/xenos.h>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -59,7 +60,10 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
 
   bool Initialize(const Options& options) override;
 
-  void BeginCopySegment() override { mirror_.NewSegment(); }
+  void BeginCopySegment() override {
+    mirror_.NewSegment();
+    segments_batch_.fetch_add(1, std::memory_order_relaxed);
+  }
   void Prepare(const DrawState& state, uint64_t upload_tag, DrawPrep* prep,
                std::vector<VertexCopy>* copies, std::vector<AuditRange>* audit) override;
   void StartAudit(uint32_t frames) override {}
@@ -147,6 +151,11 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   void DescribeCoverageDraw(const rex::graphics::SpirvShader& ps, const DrawState& state,
                             const VulkanPipelineKey& key, const VulkanRenderTarget& rt);
   std::unordered_set<std::string> coverage_described_;
+  // Why copy segments start (logged with the GPU timing): a new batch, a draw's copy
+  // overwriting memory the segment reads, or kSegmentExactLimit exact intervals. Counted on
+  // the guest thread (Prepare, BeginCopySegment), read on the render thread.
+  std::atomic<uint64_t> segments_batch_{0}, segments_conflict_{0}, segments_limit_{0};
+  std::atomic<uint64_t> segments_conflict_exact_{0};  // of the conflicts, on an exact range
   int64_t dump_at_ = -1;         // the frame it picked (-1: none yet)
   uint32_t dump_after_count_ = 0;
   uint32_t skip_first_ = UINT32_MAX, skip_last_ = 0;
