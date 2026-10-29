@@ -136,6 +136,17 @@ tools/build-linux.sh --project port-files
 For the Steam Deck, `tools/build-deck.sh` builds in an Ubuntu 22.04 container (podman), so the
 game runs on SteamOS's older glibc.
 
+Optional, faster on the Deck: profile-guided optimization (PGO) from your own play. The profile
+comes from running the game's code, so it isn't in the repository; each player makes their own:
+
+1. Build the training version: `FEAR_PGO=generate tools/build-deck.sh` (and `--project
+   port-files`), then `python3 -I tools/steamdeck/make_package.py --linux --pgogen`.
+2. Play it for 5-10 minutes per game, in the heavy fights (it runs slower while it counts). Each
+   game writes `pgo-raw/*.profraw` beside its program.
+3. `tools/pgo-merge.sh --project port-nx <F.E.A.R.'s pgo-raw folder>`, and the same with
+   `--project port-files` for F.E.A.R. Files.
+4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there.
+
 ## When something goes wrong
 
 - **"default.xex is not the supported executable":** the disc is a different version from the

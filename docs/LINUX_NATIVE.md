@@ -64,6 +64,24 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
     off). lld 20 left the translated code's per-function `.ltext.*` sections apart (100,000+,
     past the ELF section index fields, so binutils' `objdump` failed); `tools/linux/ltext.ld`
     merges them. A docked 120 Hz retest is #89.
+  - **Measured** (#91, #92, PR #95; Sprint, 90 Hz, profiling on, field of view 90): in the
+    1,000+ draw fights the frame took 11.5 ms and the GPU 8.2 ms, so the slow frames were CPU
+    bound; the game's own Direct3D work was 0.2-0.5 ms a frame and its waits 0.
+  - **PGO** (#87): `FEAR_PGO=generate` training builds, a session per game on the Deck
+    (F.E.A.R.: Rooftop; Files: Sprint), `tools/pgo-merge.sh`, then the builds use the profiles.
+    Sprint at the 360's field of view (70), 90 Hz:
+
+    | | Frames below 60 fps | Hitches over 33 ms | p99 |
+    |---|---|---|---|
+    | Stage C, field of view 90 | 2.81% | 0.59% | 26.2 ms |
+    | + ThinLTO, field of view 90 | 1.85% | 0.29% | 22.2 ms |
+    | + PGO, field of view 70, GPU locked at 1600 MHz | 0.83% | 0.17% | 15.8 ms |
+    | + PGO, field of view 70, stock GPU clock | 0.55% | 0.06% | 14.7 ms |
+
+    The last two change PGO and the field of view at once (70 drew 1,400+ draws in 16 frames,
+    90 in 500-1,100). With them the big fights became GPU-paced (GPU 12.0 ms of a 12.4 ms
+    frame). The GPU times differ between runs more than the scenes explain (light scenes 3.8 ms
+    in the measurement run, 7.1 here): not understood yet.
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux; add `--nolto` for
   a `FEAR_LTO=OFF tools/build-deck.sh` build), an update zip over
   the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
