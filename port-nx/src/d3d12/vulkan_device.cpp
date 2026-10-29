@@ -221,6 +221,11 @@ void VulkanDevice::CollectGpuTime(uint32_t slot) {
 
 bool VulkanDevice::EnableCoverage() {
   if (coverage_) return true;
+  // The sample counts need precise queries (a plain one may only say "some").
+  if (!provider_->vulkan_device()->properties().occlusionQueryPrecise) {
+    REXLOG_WARN("D3D12 Vulkan: no precise occlusion queries on this device: no coverage counts");
+    return false;
+  }
   VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
   qp.queryType = VK_QUERY_TYPE_OCCLUSION;
   qp.queryCount = kFramesInFlight * kCoverageQueries;
@@ -238,7 +243,11 @@ bool VulkanDevice::EnableCoverage() {
 int32_t VulkanDevice::BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles,
                                     uint32_t format) {
   std::vector<CoverageDraw>& draws = coverage_pending_[slot_];
-  if (!coverage_ || draws.size() >= kCoverageQueries) return -1;
+  if (!coverage_) return -1;
+  if (draws.size() >= kCoverageQueries) {
+    ++coverage_dropped_;  // reported with the counts (TakeCoverageDropped)
+    return -1;
+  }
   const uint32_t query = slot_ * kCoverageQueries + uint32_t(draws.size());
   draws.push_back({tag, 0, target_samples, triangles, format});
   fn_.vkCmdBeginQuery(frames_[slot_].cmd, coverage_, query, VK_QUERY_CONTROL_PRECISE_BIT);

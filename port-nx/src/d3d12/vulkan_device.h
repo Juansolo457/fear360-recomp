@@ -236,6 +236,7 @@ class VulkanDevice {
   // are (once BeginSlot has waited for the frame's fence). `tag` names the draw (its pixel
   // shader's hash), `target_samples` is its color target's size in samples. BeginCoverage
   // returns the query, or -1 when the frame's kCoverageQueries are used up; EndCoverage takes it.
+  static constexpr uint32_t kCoverageQueries = 512;  // per frame-in-flight slot
   struct CoverageDraw {
     uint64_t tag = 0, samples = 0;
     uint32_t target_samples = 0, triangles = 0;
@@ -248,6 +249,8 @@ class VulkanDevice {
   // The draws collected since the last call, and the frames they came from.
   std::vector<CoverageDraw> TakeCoverage() { return std::exchange(coverage_done_, {}); }
   uint64_t TakeCoverageFrames() { return std::exchange(coverage_frames_, 0); }
+  // Draws not counted since the last call: past a frame's kCoverageQueries.
+  uint64_t TakeCoverageDropped() { return std::exchange(coverage_dropped_, 0); }
 
   const Functions& fn() const { return fn_; }
   VkDevice device() const { return device_; }
@@ -295,11 +298,11 @@ class VulkanDevice {
   GpuWindow gpu_window_;
   std::unique_ptr<GpuTimer> gpu_timer_;
 
-  static constexpr uint32_t kCoverageQueries = 512;  // per frame-in-flight slot
   VkQueryPool coverage_ = VK_NULL_HANDLE;
   std::array<std::vector<CoverageDraw>, kFramesInFlight> coverage_pending_;  // per slot, in order
   std::vector<CoverageDraw> coverage_done_;
   uint64_t coverage_frames_ = 0;
+  uint64_t coverage_dropped_ = 0;
 };
 
 }  // namespace fear::d3d12

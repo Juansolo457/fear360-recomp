@@ -275,6 +275,9 @@ class GuestMemoryMirror {
   // PageHash of the page taken just before its last whole-page copy, 0: none or not copied.
   std::unique_ptr<std::atomic<uint64_t>[]> copy_hash;
   std::unique_ptr<uint16_t[]> hot_hashes;  // hashes since the content last changed
+  // --fear_d3d12_hot_exact_kb: the PageHash at the page's last exact request, for the aging
+  // (hot_hashes counts the requests since it changed). Guest thread only, like hot_hashes.
+  std::unique_ptr<uint64_t[]> exact_hash;
   uint64_t PageHash(uint32_t page) const {
     return XXH3_64bits(membase + (size_t(page) << kPageShift), 1u << kPageShift) | 1;
   }

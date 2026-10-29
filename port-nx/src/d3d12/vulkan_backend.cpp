@@ -1911,6 +1911,10 @@ void VulkanBackend::LogGpuTiming() {
                   tag, n / frames, double(s.samples) / n, s.covers / n, s.target, s.max_covers,
                   s.max_samples, double(s.triangles) / n, formats);
     }
+    // Past a frame's queries: the counts above leave these draws out (truncated).
+    if (const uint64_t dropped = device_->TakeCoverageDropped())
+      REXLOG_INFO("D3D12 Vulkan coverage: {} draws not counted (over {} a frame): counts truncated",
+                  dropped, VulkanDevice::kCoverageQueries);
   }
   if (gpu_timer_) gpu_timer_->Log();  // the costliest passes
   const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
