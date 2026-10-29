@@ -35,12 +35,18 @@ def last_snapshot(out_dir, paths):
 def drop_unreached(src, dst):
     with open(src, encoding='utf-8', errors='surrogateescape') as f:
         text = f.read()
-    blocks = text.split('\n\n')
-    kept, dropped = [], 0
+    # The header (":ir" and its comment, written straight above the first function with no
+    # blank line between them) is kept apart, so dropping that function can't drop it.
+    header = []
+    lines = text.split('\n')
+    while lines and (lines[0].startswith('#') or lines[0].startswith(':')):
+        header.append(lines.pop(0))
+    blocks = '\n'.join(lines).split('\n\n')
+    kept, dropped, functions = [], 0, 0
     for block in blocks:
         lines = block.split('\n')
         if '# Counter Values:' not in lines:
-            kept.append(block)  # the header (":ir" and its comment) or trailing whitespace
+            kept.append(block)  # trailing whitespace
             continue
         start = lines.index('# Counter Values:') + 1
         values = []
@@ -52,9 +58,11 @@ def drop_unreached(src, dst):
             dropped += 1
         else:
             kept.append(block)
+            functions += 1
     with open(dst, 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('\n\n'.join(kept))
-    print(f'dropped {dropped} unreached function(s), kept {len(kept) - 1}')
+        # As llvm-profdata wrote it: the header straight above the first function.
+        f.write('\n'.join(header + ['\n\n'.join(kept)]))
+    print(f'dropped {dropped} unreached function(s), kept {functions}')
 
 
 def main():

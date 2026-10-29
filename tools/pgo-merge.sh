@@ -57,8 +57,12 @@ elif command -v podman >/dev/null && podman image exists "$image"; then
   }
 else
   llvm=$("${CC:-clang}" -dumpversion | cut -d. -f1)
+  # clang's own: llvm-profdata-<major>, or a plain llvm-profdata of that major version.
   tool=$(command -v "llvm-profdata-$llvm") || {
-    echo "llvm-profdata-$llvm (clang $llvm's) is not installed: set FEAR_PGO_PROFDATA" >&2; exit 1; }
+    tool=$(command -v llvm-profdata) &&
+      [[ "$("$tool" --version | sed -nE 's/.*LLVM version ([0-9]+).*/\1/p' | head -1)" == "$llvm" ]]
+  } || {
+    echo "no llvm-profdata of clang $llvm's version: set FEAR_PGO_PROFDATA" >&2; exit 1; }
   echo "llvm-profdata: $tool, for builds on this host (clang $llvm)"
   profdata() { "$tool" "$@"; }
 fi
