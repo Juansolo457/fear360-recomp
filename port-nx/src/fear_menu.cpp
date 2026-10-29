@@ -282,7 +282,8 @@ bool FearMenuHelpText(PPCRegister& r3, PPCRegister& r4) {
   const uint32_t id = r4.u32;
   if (!id) return false;
   for (size_t i = 0; i < kItemCount; ++i) {
-    if (g_help_ids[i].load(std::memory_order_relaxed) == id) {
+    // Acquire: the ID is stored after its text (FearMenuAddItems), so the text is there too.
+    if (g_help_ids[i].load(std::memory_order_acquire) == id) {
       r3.u64 = g_helps[i].load(std::memory_order_relaxed);
       return true;
     }

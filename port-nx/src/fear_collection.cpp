@@ -217,10 +217,10 @@ class CollectionMenu final : public Panel {
       } else {
         help = "Quit to the desktop.";
       }
+      // Wrapped short of the A prompt: an error (message_, a missing program's path) can be long.
       const float bottom = size.y * 0.86f;
-      draw->PushClipRect(ImVec2(left, bottom), ImVec2(size.x * 0.72f, bottom + em * 1.2f), true);
-      text(0.8f, ImVec2(left + em * 0.05f, bottom), kSelected, help.c_str());
-      draw->PopClipRect();
+      draw->AddText(font, em * 0.8f, ImVec2(left + em * 0.05f, bottom), kSelected, help.c_str(),
+                    nullptr, size.x * 0.6f);
       // The A prompt, bottom right, and the version under the title's subtitle line.
       const char* prompt = "A  Select";
       const ImVec2 prompt_size = font->CalcTextSizeA(em * 0.9f, FLT_MAX, 0.0f, prompt);
