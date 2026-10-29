@@ -115,6 +115,22 @@ args=(--preset "$preset" -B "$build" -DREXSDK_DIR="$sdk"
       -DREXGLUE_USE_VULKAN=ON -DREXGLUE_GPU_XENOS_STATIC=ON -DREXGLUE_BUILD_TESTS=OFF)
 cd "$port"
 cmake "${args[@]}"
+# The SDK writes its libraries (libfmt.a, librexruntime.so...) to one folder for every build
+# folder, <SDK>/out/<platform> (its CMakeLists.txt). After another build folder (another game,
+# FEAR_LTO or FEAR_PGO) wrote them, this one's ninja finds them newer than its own record and
+# links the other's: with ThinLTO and PGO, modules with different profiles that won't link. So
+# they go when the last writer was another build folder, and this one links its own again.
+for sdk_out in "$sdk"/out/*/; do
+  [[ -d "$sdk_out" && "$(cat "$sdk_out.fear-build" 2>/dev/null)" != "$build" ]] || continue
+  rm -f "$sdk_out"*.a "$sdk_out"*.so "$sdk_out"*.so.*
+done
+# Ninja doesn't track the profile's contents: a new one rebuilds everything.
+pgo_stamp="$build/.fear-pgo-profile"
+pgo_sum=none
+[[ "$pgo" == use ]] && pgo_sum=$(sha256sum "$profile" | cut -d' ' -f1)
+if [[ -f "$pgo_stamp" && "$(cat "$pgo_stamp")" != "$pgo_sum" ]]; then
+  cmake --build "$build" --target clean
+fi
 # Generate (again) when the executable or fear_manifest.toml changed (a no-op otherwise), then
 # reconfigure once if the generated sources didn't exist yet (the configure above created no
 # fear_recomp target without them), then build.
@@ -123,4 +139,6 @@ first_time=0
 cmake --build "$build" --parallel "$jobs" --target fear_codegen
 if [[ $first_time -eq 1 ]]; then cmake "${args[@]}"; fi
 cmake --build "$build" --parallel "$jobs"
+for sdk_out in "$sdk"/out/*/; do echo "$build" > "$sdk_out.fear-build"; done
+echo "$pgo_sum" > "$pgo_stamp"
 echo "Built $build/$name (LTO $lto, PGO $pgo)"
