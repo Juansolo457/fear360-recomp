@@ -44,6 +44,10 @@ build_rel="$project/out/build/deck-amd64-${config,,}"
 lto="${FEAR_LTO:-}"
 [[ -n "$lto" ]] || { [[ "$config" == Debug ]] && lto=OFF || lto=ON; }
 [[ "$lto" == ON || "$config" == Debug ]] || build_rel="$build_rel-nolto"
+# FEAR_PGO as tools/build-linux.sh; the instrumented training build (generate) gets a folder of
+# its own, so the optimized one isn't rebuilt from scratch each time.
+pgo="${FEAR_PGO:-}"
+[[ "$pgo" == generate ]] && build_rel="$build_rel-pgogen"
 # The disc files: a project's assets may be a link out of the tree; the link's target is mounted
 # read-only at the same path so it resolves.
 mounts=(-v "$root:/src")
@@ -55,7 +59,7 @@ for assets in "$root"/port*/assets; do
   [[ " ${mounts[*]} " == *" $real:$real:ro "* ]] || mounts+=(-v "$real:$real:ro")
 done
 podman run --rm --userns=keep-id "${mounts[@]}" -w /src -e HOME=/tmp \
-  -e FEAR_SDK_DIR="$sdk" -e FEAR_BUILD_DIR="/src/$build_rel" -e FEAR_LTO="$lto" "$image" \
+  -e FEAR_SDK_DIR="$sdk" -e FEAR_BUILD_DIR="/src/$build_rel" -e FEAR_LTO="$lto" -e FEAR_PGO="$pgo" "$image" \
   bash -c "tools/setup-sdk.sh && tools/build-linux.sh --project $project --config $config --jobs $jobs"
 
 # The newest glibc symbol version each binary needs, and libstdc++'s for the record (libstdc++ 13
@@ -82,4 +86,4 @@ for f in "$root/$build_rel"/*; do
   fi
 done
 [[ $fail -eq 0 ]] || exit 1
-echo "Deck build: $build_rel (LTO $lto)"
+echo "Deck build: $build_rel (LTO $lto, PGO ${pgo:-default})"

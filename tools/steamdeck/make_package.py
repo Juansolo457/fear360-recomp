@@ -39,7 +39,7 @@ import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 ARGV = [a for a in sys.argv[1:]
-        if a not in ('--programs', '--settings', '--windows', '--linux', '--nolto')]
+        if a not in ('--programs', '--settings', '--windows', '--linux', '--nolto', '--pgogen')]
 PROGRAMS_ONLY = '--programs' in sys.argv[1:]
 SETTINGS_ONLY = '--settings' in sys.argv[1:]
 # --windows: the same package for another Windows PC (a private test copy): a Play F.E.A.R..cmd
@@ -49,6 +49,9 @@ WINDOWS = '--windows' in sys.argv[1:]
 LINUX = '--linux' in sys.argv[1:]
 # --nolto (or FEAR_LTO=OFF): the programs of FEAR_LTO=OFF tools/build-deck.sh, without ThinLTO.
 NO_LTO = '--nolto' in sys.argv[1:] or os.environ.get('FEAR_LTO') == 'OFF'
+# --pgogen (or FEAR_PGO=generate): the instrumented PGO training build (FEAR_PGO=generate
+# tools/build-deck.sh), which writes pgo-raw/*.profraw beside each game.
+PGO_GEN = '--pgogen' in sys.argv[1:] or os.environ.get('FEAR_PGO') == 'generate'
 OUT = ARGV[0] if ARGV else os.path.join(
     REPO, 'private', 'windows' if WINDOWS else 'steamdeck',
     'FEAR360-Windows.zip' if WINDOWS else
@@ -162,10 +165,12 @@ def main_linux():
         for folder, project, exe, *_ in GAMES:
             program = exe.removesuffix('.exe')
             build = os.path.join(REPO, project, 'out', 'build',
-                                 'deck-amd64-release' + ('-nolto' if NO_LTO else ''))
+                                 'deck-amd64-release' + ('-nolto' if NO_LTO else '')
+                                 + ('-pgogen' if PGO_GEN else ''))
             if not os.path.exists(os.path.join(build, program)):
                 raise SystemExit(f'{build}/{program} is missing: run '
-                                 + ('FEAR_LTO=OFF ' if NO_LTO else '') + 'tools/build-deck.sh'
+                                 + ('FEAR_LTO=OFF ' if NO_LTO else '')
+                                 + ('FEAR_PGO=generate ' if PGO_GEN else '') + 'tools/build-deck.sh'
                                  + ('' if project == 'port-nx' else f' --project {project}'))
             add(os.path.join(build, program), f'{folder}/{program}', executable=True)
             for lib in sorted(glob.glob(os.path.join(build, '*.so*'))):

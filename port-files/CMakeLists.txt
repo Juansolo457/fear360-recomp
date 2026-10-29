@@ -63,6 +63,7 @@ set(FEAR_SOURCES
     ${HOST}/look_tuning.cpp
     ${HOST}/difficulty.cpp
     ${HOST}/pipeline_warmup.cpp
+    ${HOST}/pgo.cpp
     ${HOST}/native/native_system.cpp
 )
 
