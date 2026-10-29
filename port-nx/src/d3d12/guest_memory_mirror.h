@@ -98,6 +98,9 @@ class GuestMemoryMirror {
   // --fear_vertex_index_range (read at Initialize): a vertex range is copied only as far as the
   // draw's vertices reach, from its index bounds (IndexBounds), not the whole fetch constant.
   bool index_ranges = false;
+  // --fear_d3d12_hot_exact_kb (read at Initialize), in bytes: a range up to this long that
+  // touches a hot page is copied and tracked as an exact range (RequestRange). 0: off.
+  uint32_t hot_exact_bytes = 0;
 
   // Copy segments (DrawRenderer::Prepare): what the current segment's draws read. Watched
   // ranges are copied in whole pages, so their reads are kept one bit per page, valid in the

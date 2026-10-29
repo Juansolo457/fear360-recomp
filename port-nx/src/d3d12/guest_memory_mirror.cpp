@@ -21,6 +21,7 @@
 #endif
 
 REXCVAR_DECLARE(bool, fear_vertex_index_range);
+REXCVAR_DECLARE(int32_t, fear_d3d12_hot_exact_kb);
 
 namespace fear::d3d12 {
 
@@ -50,6 +51,10 @@ bool GuestMemoryMirror::Initialize(rex::memory::Memory* memory_in, Sink* sink,
   arm_thread = std::thread([this] { WatchThread(); });
   index_ranges = REXCVAR_GET(fear_vertex_index_range);
   if (index_ranges) REXLOG_INFO("D3D12 draw: vertex ranges from the index bounds");
+  hot_exact_bytes = uint32_t(std::max(0, REXCVAR_GET(fear_d3d12_hot_exact_kb))) << 10;
+  if (hot_exact_bytes)
+    REXLOG_INFO("D3D12 draw: ranges up to {} KB on hot pages copied to the byte",
+                hot_exact_bytes >> 10);
 #if defined(_WIN32)
   SetThreadDescription(arm_thread.native_handle(), L"D3D12 watches");
 #endif
@@ -266,7 +271,17 @@ bool GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length, bool watch
                                       std::vector<VertexCopy>& out) {
   if (!length) return true;
   if (!InSharedMemory(start, length)) return false;
-  const bool exact = !watch || upload_every_draw.load(std::memory_order_relaxed);
+  bool exact = !watch || upload_every_draw.load(std::memory_order_relaxed);
+  // --fear_d3d12_hot_exact_kb: a short range on a hot page (the game rewrites it, like the
+  // particles' per-draw vertices) is copied to the byte as an exact range, so the copy segment
+  // tests it byte for byte: the chunks the game appends to one page don't overlap, where their
+  // whole pages would. The pages' valid bits and hashes are left as they are (the copy only
+  // makes shared memory more current), so watched requests still find what changes.
+  if (!exact && hot_exact_bytes && length <= hot_exact_bytes) {
+    const uint32_t first = start >> kPageShift, last = (start + length - 1) >> kPageShift;
+    for (uint32_t p = first; p <= last && !exact; ++p)
+      exact = (hot[p >> 6].load(std::memory_order_relaxed) >> (p & 63)) & 1;
+  }
   if (preparing) draw_reads.emplace_back(start, start + length, exact);
   const uint64_t fence = upload_fence;
   PrepareDiag& pd = *diag_;
