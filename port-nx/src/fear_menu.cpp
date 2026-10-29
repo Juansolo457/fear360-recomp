@@ -2,6 +2,7 @@
 
 #include "fear_menu.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -29,27 +30,48 @@ struct MenuCode {
   // whose word goes on the stack (80(r1)).
   int layout[5];
   int stack_word;
+  uint32_t game_items;  // the game's own list: Campaign/Extraction Point ... Options
 };
 // F.E.A.R. (565507D9): Build sub_823FF3C0, OnCommand sub_823FF7E8.
-constexpr MenuCode kFear = {0x824A7288, 0x824AA8B0, 0x82001C4A, {27, 26, 25, 24, 23}, 28};
+constexpr MenuCode kFear = {0x824A7288, 0x824AA8B0, 0x82001C4A, {27, 26, 25, 24, 23}, 28, 4};
 // F.E.A.R. Files (565507E8): Build sub_823EAAC0, OnCommand sub_823EAF68.
-constexpr MenuCode kFiles = {0x823E2388, 0x823E5948, 0x82000C38, {28, 27, 26, 25, 24}, 29};
+constexpr MenuCode kFiles = {0x823E2388, 0x823E5948, 0x82000C38, {28, 27, 26, 25, 24}, 29, 5};
 constexpr MenuCode kCode = fear::title::kFiles ? kFiles : kFear;
 
 constexpr uint32_t kShowSlot = 160;    // the control's Show(bool) in its method table
 constexpr uint32_t kNoMenuFlag = 432;  // CScreenMain byte: built without the list
 
+// Our items go in a second column beside the game's (#80): below Options they ran into the help
+// line at the bottom of the screen. CBaseScreen::AddControl (both games) places a control at the
+// screen's cursor and moves the cursor down by the control's height plus the screen's spacing;
+// the cursor is moved to the column's top first and put back after.
+constexpr uint32_t kControls = 0xC4;     // CBaseScreen: the controls, a vector (begin +4, end +8)
+constexpr uint32_t kCursor = 0x104;      // CBaseScreen: the next control's position (x, y)
+constexpr uint32_t kBasePosSlot = 0x3C;  // control method: its position (into r3's buffer)
+// The second column's left edge, from the game's first item, in the menu's 640-wide units: past
+// the widest game item (Instant action, left of the bright middle of the background; Files:
+// Perseus Mandate Campaign, which ends near 357), from screenshots (2026-10-28).
+constexpr int32_t kColumnOffset = fear::title::kFiles ? 330 : 220;
+
 constexpr uint32_t kCommandSettings = 9001;
 constexpr uint32_t kCommandQuit = 9002;
 constexpr uint32_t kCommandSwitch = 9003;
 
+// The help line under the menu while an item is selected. A control's help is a string ID, which
+// the screen looks up in the game's string table (an unknown one shows "[ERROR: Invalid String
+// ID]"): ours get IDs of their own, and FearMenuHelpText answers the lookup for them.
 struct Item {
   const char16_t* text;
   uint32_t command;
+  const char* help_id;
+  const char16_t* help;
 };
-constexpr Item kItems[] = {{u"PC Settings", kCommandSettings},
-                           {u"Switch Game", kCommandSwitch},
-                           {u"Quit to Desktop", kCommandQuit}};
+constexpr Item kItems[] = {
+    {u"PC Settings", kCommandSettings, "Fear360_Help_PCSettings",
+     u"Change the display, controls and gameplay options."},
+    {u"Switch Game", kCommandSwitch, "Fear360_Help_SwitchGame",
+     u"Play the other game in the collection."},
+    {u"Quit to Desktop", kCommandQuit, "Fear360_Help_Quit", u"Quit the game."}};
 constexpr size_t kItemCount = sizeof(kItems) / sizeof(kItems[0]);
 
 std::mutex g_mutex;
@@ -57,6 +79,10 @@ fear::menu::Actions g_actions;
 uint32_t g_screen = 0;
 uint32_t g_controls[kItemCount] = {};
 uint32_t g_texts[kItemCount] = {};
+// Guest copies, kept for the process: the help IDs and their text. FearMenuHelpText reads them
+// without the lock (each is written once, before the control that uses it exists).
+std::atomic<uint32_t> g_help_ids[kItemCount] = {};
+std::atomic<uint32_t> g_helps[kItemCount] = {};
 
 rex::memory::Memory* GuestMemory() { return rex::system::kernel_memory(); }
 uint8_t* Base() { return GuestMemory()->virtual_membase(); }
@@ -84,6 +110,15 @@ uint32_t GuestText(std::u16string_view text) {
     *out++ = uint8_t(c);
   }
   out[0] = out[1] = 0;
+  return address;
+}
+
+// A guest C string, kept for the life of the process.
+uint32_t GuestCString(std::string_view text) {
+  const uint32_t address = GuestMemory()->SystemHeapAlloc(uint32_t(text.size() + 1));
+  if (!address) return 0;
+  std::memcpy(Base() + address, text.data(), text.size());
+  Base()[address + text.size()] = 0;
   return address;
 }
 
@@ -155,6 +190,27 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
   const Gprs gpr = {{&r23, &r24, &r25, &r26, &r27, &r28, &r29}};
   const PPCContext saved = *ctx;
   const uint32_t sp = saved.r1.u32;
+
+  // The second column's top: the game's first item's position.
+  const uint32_t cursor_x = Load32(screen + kCursor), cursor_y = Load32(screen + kCursor + 4);
+  const uint32_t begin = Load32(screen + kControls + 4), end = Load32(screen + kControls + 8);
+  bool column = false;
+  if (end > begin && (end - begin) / 4 >= kCode.game_items) {
+    const uint32_t first = Load32(end - 4 * kCode.game_items);
+    static uint32_t pos = 0;  // the method's output (8 bytes), kept for the process
+    if (!pos) pos = GuestMemory()->SystemHeapAlloc(8);
+    if (first && pos) {
+      ctx->r3.u64 = pos;
+      ctx->r4.u64 = first;
+      Call(*ctx, Load32(Load32(first) + kBasePosSlot));
+      const int32_t x = int32_t(Load32(pos)), y = int32_t(Load32(pos + 4));
+      REXLOG_INFO("F.E.A.R. menu: first item at ({}, {}), cursor ({}, {}), spacing {}", x, y,
+                  int32_t(cursor_x), int32_t(cursor_y), int32_t(Load32(screen + 0xD4)));
+      Store32(screen + kCursor, uint32_t(x + kColumnOffset));
+      Store32(screen + kCursor + 4, uint32_t(y));
+      column = true;
+    }
+  }
   uint32_t controls[kItemCount] = {};
   std::vector<std::u16string_view> added;
   for (size_t i = 0; i < kItemCount; ++i) {
@@ -162,17 +218,20 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
     {
       std::lock_guard<std::mutex> lock(g_mutex);
       if (!g_texts[i]) g_texts[i] = GuestText(kItems[i].text);
+      if (!g_helps[i]) g_helps[i] = GuestText(kItems[i].help);
+      if (g_helps[i] && !g_help_ids[i]) g_help_ids[i] = GuestCString(kItems[i].help_id);
     }
     if (!g_texts[i]) continue;
+    const uint32_t help = g_help_ids[i] ? g_help_ids[i].load() : kCode.empty_help;
     Store32(sp + 80, gpr(kCode.stack_word).u32);
     Base()[sp + 95] = 0;      // fixed width: no
     Store32(sp + 100, 0);     // font: the screen's
     Store32(sp + 108, 0);     // font size: the screen's
     Store32(sp + 112, kItems[i].command);
-    Store32(sp + 116, kCode.empty_help);
+    Store32(sp + 116, help);
     ctx->r3.u64 = screen;
     ctx->r4.u64 = g_texts[i];
-    ctx->r5.u64 = (uint64_t(kItems[i].command) << 32) | kCode.empty_help;
+    ctx->r5.u64 = (uint64_t(kItems[i].command) << 32) | help;
     ctx->r6 = gpr(kCode.layout[0]);
     ctx->r7 = gpr(kCode.layout[1]);
     ctx->r8 = gpr(kCode.layout[2]);
@@ -187,6 +246,10 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
     Show(*ctx, control, false);  // like the game's items, until Press Start is accepted
     controls[i] = control;
     added.push_back(kItems[i].text);
+  }
+  if (column) {
+    Store32(screen + kCursor, cursor_x);
+    Store32(screen + kCursor + 4, cursor_y);
   }
   *ctx = saved;
 
@@ -211,6 +274,20 @@ void FearMenuShowItems(PPCRegister& r1, PPCRegister& r31) {
     if (control) Show(*ctx, control, true);
   }
   *ctx = saved;
+}
+
+// The string table's lookup (table, ID) -> text, at its start: our help IDs return our text
+// without the table. The screen passes the control's own ID pointer, so the address is enough.
+bool FearMenuHelpText(PPCRegister& r3, PPCRegister& r4) {
+  const uint32_t id = r4.u32;
+  if (!id) return false;
+  for (size_t i = 0; i < kItemCount; ++i) {
+    if (g_help_ids[i].load(std::memory_order_relaxed) == id) {
+      r3.u64 = g_helps[i].load(std::memory_order_relaxed);
+      return true;
+    }
+  }
+  return false;
 }
 
 // CScreenMain::OnCommand(command, param1, param2): ours return 1 (handled) without the game.

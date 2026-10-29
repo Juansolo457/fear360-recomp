@@ -2,6 +2,8 @@
 
 #include "fear_collection.h"
 
+#include <algorithm>
+#include <cfloat>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -101,35 +103,140 @@ class CollectionMenu final : public Panel {
     if (input & kDown) selected_ = (selected_ + 1) % rows;
     if (input & kAccept) Act(selected_);
 
-    if (BeginPanel("##fear_collection", 30.0f)) {
-      PushFont(1.3f);
-      ImGui::TextUnformatted("F.E.A.R. COLLECTION");
-      PopFont();
-      ImGui::SameLine();
-      ImGui::TextDisabled("%s", fear::version::Text());
-      ImGui::Separator();
-      for (int i = 0; i < int(titles_.size()); ++i) {
-        const Title& title = titles_[i];
-        std::string label = title.name;
-        if (!installed_[i]) label += "  (not found)";
-        if (Row(label.c_str(), i, selected_)) Act(i);
-        if (!title.subtitle.empty()) Dim(title.subtitle.c_str());
-      }
-      ImGui::Separator();
-      if (Row("Quit", rows - 1, selected_)) Act(rows - 1);
-      ImGui::Separator();
-      if (!message_.empty()) {
-        ImGui::TextWrapped("%s", message_.c_str());
-      } else if (selected_ < int(titles_.size()) && !installed_[selected_]) {
-        Dim(("Not found: " + titles_[selected_].exe.string()).c_str());
-      } else {
-        Dim("Switch Game in a game's main menu comes back here.");
-      }
-    }
-    EndPanel();
+    DrawMenu(ImGui::GetIO().DisplaySize);
   }
 
  private:
+  // The game's menu look (#43): a full-screen backdrop in the main menus' dark teal with faint
+  // scanlines, the title large over a spaced subtitle, each game's name large with its subtitle
+  // smaller and dimmer under it, the selected one in the menus' pale yellow beside a teal bar, Quit
+  // smaller and apart, and the help line and the A prompt where the game puts its own.
+  static constexpr ImU32 kWhite = IM_COL32(232, 238, 236, 255);
+  static constexpr ImU32 kSelected = IM_COL32(236, 226, 160, 255);  // the menus' highlight
+  static constexpr ImU32 kTeal = IM_COL32(110, 190, 172, 255);
+  static constexpr ImU32 kDimTeal = IM_COL32(120, 150, 142, 255);
+  static constexpr ImU32 kGrey = IM_COL32(130, 138, 136, 255);
+
+  // A selectable row: the mouse moving over it selects it, a click picks it.
+  bool HitRow(int index, ImVec2 min, ImVec2 max) {
+    ImGui::SetCursorScreenPos(min);
+    ImGui::PushID(index);
+    const bool clicked = ImGui::InvisibleButton("##row", ImVec2(max.x - min.x, max.y - min.y));
+    const ImGuiIO& io = ImGui::GetIO();
+    if (ImGui::IsItemHovered() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
+      selected_ = index;
+    }
+    ImGui::PopID();
+    if (clicked) selected_ = index;
+    return clicked;
+  }
+
+  void DrawMenu(ImVec2 size) {
+    const float em = FontSize();
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(size);
+    ImGui::SetNextWindowFocus();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    PushFont();
+    ImFont* font = ImGui::GetFont();
+    const bool open = ImGui::Begin(
+        "##fear_collection", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav);
+    if (open) {
+      ImDrawList* draw = ImGui::GetWindowDrawList();
+      // The backdrop: the main menus' teal, darker at the bottom, and scanlines.
+      draw->AddRectFilledMultiColor(ImVec2(0.0f, 0.0f), size, IM_COL32(8, 38, 34, 255),
+                                    IM_COL32(4, 26, 26, 255), IM_COL32(2, 10, 10, 255),
+                                    IM_COL32(3, 16, 15, 255));
+      const float line = std::max(2.0f, em * 0.09f);
+      for (float y = 0.0f; y < size.y; y += line * 2.0f) {
+        draw->AddRectFilled(ImVec2(0.0f, y), ImVec2(size.x, y + line), IM_COL32(0, 0, 0, 40));
+      }
+      const auto text = [&](float scale, ImVec2 pos, ImU32 color, const char* string) {
+        draw->AddText(font, em * scale, pos, color, string);
+      };
+
+      const float left = size.x * 0.12f;
+      // What this is (#97): the two games, then the recompilation and the platform it was built for.
+#ifdef _WIN32
+      constexpr const char* kSubtitle = "XBOX 360  STATIC RECOMPILATION  FOR PC";
+#else
+      constexpr const char* kSubtitle = "XBOX 360  STATIC RECOMPILATION  FOR LINUX";
+#endif
+      float y = size.y * 0.16f;
+      text(2.2f, ImVec2(left, y), kWhite, "F.E.A.R.  &  F.E.A.R. Files");
+      y += em * 2.4f;
+      text(0.85f, ImVec2(left + em * 0.08f, y), kTeal, kSubtitle);
+      y += em * 3.0f;
+
+      const float row_width = std::max(size.x * 0.45f, em * 16.0f);
+      const int titles = int(titles_.size());
+      for (int i = 0; i < titles; ++i) {
+        const Title& title = titles_[i];
+        const float height = em * (title.subtitle.empty() ? 1.9f : 2.8f);
+        const ImVec2 min(left - em * 0.7f, y), max(left + row_width, y + height);
+        if (HitRow(i, min, max)) Act(i);
+        const bool on = selected_ == i;
+        if (on) {
+          draw->AddRectFilled(min, ImVec2(min.x + em * 0.16f, max.y), kTeal);
+          draw->AddRectFilledMultiColor(ImVec2(min.x + em * 0.16f, min.y), max,
+                                        IM_COL32(110, 190, 172, 46), IM_COL32(110, 190, 172, 0),
+                                        IM_COL32(110, 190, 172, 0), IM_COL32(110, 190, 172, 46));
+        }
+        std::string name = title.name;
+        if (!installed_[i]) name += "  (not found)";
+        text(1.6f, ImVec2(left, y + em * 0.1f), on ? kSelected : kWhite, name.c_str());
+        if (!title.subtitle.empty()) {
+          text(0.85f, ImVec2(left + em * 0.05f, y + em * 1.85f), on ? kTeal : kDimTeal,
+               title.subtitle.c_str());
+        }
+        y += height + em * 0.5f;
+      }
+      y += em * 0.6f;
+      {
+        const ImVec2 min(left - em * 0.7f, y), max(left + row_width * 0.5f, y + em * 1.4f);
+        if (HitRow(titles, min, max)) Act(titles);
+        const bool on = selected_ == titles;
+        if (on) draw->AddRectFilled(min, ImVec2(min.x + em * 0.16f, max.y), kTeal);
+        text(1.05f, ImVec2(left, y + em * 0.12f), on ? kSelected : kGrey, "Quit to Desktop");
+      }
+
+      // The help line, as the game's: what the selected row does, in the highlight colour.
+      std::string help;
+      if (!message_.empty()) {
+        help = message_;
+      } else if (selected_ < titles && !installed_[selected_]) {
+        help = "Not found: " + titles_[selected_].exe.string();
+      } else if (selected_ < titles) {
+        // "Play F.E.A.R." ends its own sentence.
+        const std::string& name = titles_[selected_].name;
+        help = "Play " + name + (name.ends_with('.') ? "" : ".") +
+               " Switch Game in its main menu comes back here.";
+      } else {
+        help = "Quit to the desktop.";
+      }
+      const float bottom = size.y * 0.86f;
+      draw->PushClipRect(ImVec2(left, bottom), ImVec2(size.x * 0.72f, bottom + em * 1.2f), true);
+      text(0.8f, ImVec2(left + em * 0.05f, bottom), kSelected, help.c_str());
+      draw->PopClipRect();
+      // The A prompt, bottom right, and the version under the title's subtitle line.
+      const char* prompt = "A  Select";
+      const ImVec2 prompt_size = font->CalcTextSizeA(em * 0.9f, FLT_MAX, 0.0f, prompt);
+      const ImVec2 prompt_pos(size.x * 0.88f - prompt_size.x, size.y * 0.9f);
+      draw->AddCircleFilled(ImVec2(prompt_pos.x + em * 0.32f, prompt_pos.y + em * 0.48f),
+                            em * 0.42f, IM_COL32(90, 170, 60, 255));
+      text(0.9f, prompt_pos, kWhite, prompt);
+      text(0.6f, ImVec2(left + em * 0.08f, size.y * 0.16f + em * 3.6f), kGrey,
+           fear::version::Text());
+    }
+    ImGui::End();
+    PopFont();
+    ImGui::PopStyleVar(2);
+  }
+
+
   void Act(int row) {
     if (closing_) return;
     if (row == int(titles_.size())) {
@@ -173,8 +280,7 @@ class CollectionMenu final : public Panel {
   std::vector<bool> installed_;
   std::function<void()> start_;
   std::string message_;
-  bool closing_ = false;
-};
+  bool closing_ = false;};
 
 }  // namespace
 
