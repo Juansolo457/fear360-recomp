@@ -16,7 +16,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $sdk = Join-Path $root 'third_party\rexglue-sdk-nx'
 $base = 'c94f5ebdcb3c9d1a460ca48e04f9758448f8d518'      # ReXGlue v0.10.0
 $fearNxTree = 'c7fb3c0f1a588b268115bf0dceb24f0c26eb1ae0' # after patch 0000
-$expectedTree = 'a22327cbd06716e49057aaf79a45163ea60093ac' # after the last patch
+$expectedTree = '661594d7480499c7b447ec5b92f05a143d6c8f57' # after the last patch
 
 function Invoke-Git {
     & git.exe @args
