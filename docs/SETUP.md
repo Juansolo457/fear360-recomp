@@ -164,8 +164,10 @@ Steam as a non-Steam game, and leave Proton off. The zip contains your game data
 from your discs: keep it to yourself. Later updates: `--linux --programs` makes a small zip of
 just the programs to extract over it.
 
-**Play on your own Linux PC:** the same package runs on any x86-64 Linux with glibc 2.35 or newer
-and a Vulkan 1.3 GPU: extract it anywhere and run `./fear-linux.sh` in its `FEAR360-SteamDeck`
+**Play on your own Linux PC:** the same package runs on an x86-64 Linux with a CPU with AVX2 and
+FMA (x86-64-v3), glibc 2.35 or newer, libstdc++ 13 or newer (`GLIBCXX_3.4.32`; SteamOS and
+current distributions have it, Ubuntu 22.04 needs the toolchain PPA's) and a Vulkan 1.3 GPU:
+extract it anywhere and run `./fear-linux.sh` in its `FEAR360-SteamDeck`
 folder (`./fear-linux.sh --no-fullscreen` for a window). `tools/build-linux.sh`'s builds are for
 development: each game's program is in `<project>/out/build/linux-amd64-relwithdebinfo/`, run
 from the game's folder with the flags `fear-linux.sh` passes (`--game_data_root`,
