@@ -1,6 +1,6 @@
 # The native Linux and Steam Deck build
 
-Started 2026-10-27 on branch `linux-native`. The goal: F.E.A.R. and F.E.A.R. Files as native
+Started 2026-10-27 on branch `linux-native`; first released in 0.9. The goal: F.E.A.R. and F.E.A.R. Files as native
 Linux programs on the Vulkan backend ([VULKAN_RENDERER.md](VULKAN_RENDERER.md)), and no Proton for
 Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no renderer choice there.
 
@@ -82,12 +82,17 @@ Linux or the Steam Deck at all. Linux draws with Vulkan only; there is no render
     90 in 500-1,100). With them the big fights became GPU-paced (GPU 12.0 ms of a 12.4 ms
     frame). The GPU times differ between runs more than the scenes explain (light scenes 3.8 ms
     in the measurement run, 7.1 here): not understood yet.
+- 0.9, the first release for Linux and the Deck: `fear_vertex_index_range` on by
+  default (every Deck test since #88 ran with it), the main menus' items in their own column with
+  help lines (#80), the collection menu restyled (#43, #97), `FEAR_GOD=1` in the launcher for the
+  smoke test (#55).
 - The package: `python3 -I tools/steamdeck/make_package.py --linux` (on Linux; add `--nolto` for
-  a `FEAR_LTO=OFF tools/build-deck.sh` build), an update zip over
-  the Proton package's folder: `fear-linux.sh`, the programs and their libraries,
-  `README-SteamDeck-Linux.txt`.
+  a `FEAR_LTO=OFF tools/build-deck.sh` build) is standalone: `fear-linux.sh`, each game's program
+  and libraries, its game data and starting settings, `README-SteamDeck-Linux.txt`. No Proton
+  package needed. `--linux --programs` is the update zip: the programs, libraries, launcher and
+  README only.
 
-## Where it starts
+## Where it started (2026-10-27)
 - `tools/setup-sdk.sh`, `tools/build-linux.sh` and `tools/build-deck.sh` (podman, Ubuntu 22.04,
   glibc 2.35) are written but have never run.
 - WSL (Ubuntu, clang 21, podman) has what GRAW's native Deck builds used. A clone on WSL's own

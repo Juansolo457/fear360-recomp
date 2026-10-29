@@ -1,4 +1,8 @@
-# Build and play from your own disc (Windows)
+# Build and play from your own disc
+
+**0.9 supports Linux and the Steam Deck:** see [Linux and Steam Deck](#linux-and-steam-deck).
+The Windows steps below still build the games, but the Windows build hasn't been tested for this
+release.
 
 This project ships **source only**. There is no download that contains the game: the game's
 code is translated from your copy of the Xbox 360 disc on your own PC, and the game data comes
@@ -108,45 +112,82 @@ Direct3D 12 renderer later. All of them are described at the top of `tools/launc
 **PC textures.** If you also own the PC version, you can build a pack of its higher-resolution
 textures ([TEXTURES.md](TEXTURES.md)), but the Direct3D 12 renderer can't use it yet.
 
-**Steam Deck:** experimental. Build on a Windows PC as above, then package and copy it over:
-`tools/steamdeck/README-SteamDeck.txt`.
+**Steam Deck:** use the native Linux build below.
 
-## Linux (in progress)
+## Linux and Steam Deck
 
-A native Linux x86-64 build on the renderer's Vulkan backend is being written
-([VULKAN_RENDERER.md](VULKAN_RENDERER.md)): **not built or tested yet**, so expect it not to work
-for now. What it will take, on Ubuntu 22.04 or newer (other distributions: the same libraries):
+The games as native Linux programs on the renderer's Vulkan backend ([LINUX_NATIVE.md](LINUX_NATIVE.md)):
+no Proton, no Wine. The Steam Deck is what 0.9 was tested on.
 
-- clang 20 or newer with its lld, llvm-ar and llvm-ranlib (the builds use ThinLTO;
-  `FEAR_LTO=OFF` builds without it and needs none of the three), CMake 3.25+, Ninja, Git,
-  Python 3, and a GPU with Vulkan 1.3 (the Steam Deck's has it);
-- the SDK's system libraries:
-  `sudo apt install libgtk-3-dev libx11-xcb-dev libxss-dev libvulkan-dev libwayland-dev
-  libwayland-bin wayland-protocols libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev
-  libpipewire-0.3-dev` (on 22.04 also libstdc++ 13 from the toolchain PPA:
-  `tools/linux/deck.Containerfile` has the whole setup);
-- the discs dumped as in step 3, then:
+**Where to build:** a Linux x86-64 PC, or WSL2 (Ubuntu) on a Windows PC. In WSL, clone into
+WSL's own file system (`~/`), not under `/mnt/c`: a Windows checkout's CRLF line endings break
+the SDK's FFmpeg build. The disc dumps can stay on the Windows side; link them into each game's
+`assets` folder.
+
+**What you need:**
+- For the Steam Deck: [podman](https://podman.io/). `tools/build-deck.sh` builds in an Ubuntu 22.04
+  container (`tools/linux/deck.Containerfile`, made on first use), so the programs run on
+  SteamOS's glibc, and brings its own clang 20.
+- For your own Linux PC instead: clang 20 or newer with its lld, llvm-ar and llvm-ranlib (the
+  builds use ThinLTO; `FEAR_LTO=OFF` builds without it), CMake 3.25+, Ninja, and the SDK's system
+  libraries: `sudo apt install libgtk-3-dev libx11-xcb-dev libxss-dev libvulkan-dev
+  libwayland-dev libwayland-bin wayland-protocols libxkbcommon-dev libdecor-0-dev libasound2-dev
+  libpulse-dev libpipewire-0.3-dev` (on 22.04 also libstdc++ 13 from the toolchain PPA; the
+  Containerfile has the whole setup). To play: a GPU with Vulkan 1.3 and a CPU with AVX2 and FMA.
+- Either way: Git, Python 3, and your discs dumped as in step 3 (`python3 -I tools/xdvdfs.py`).
+
+**Build:**
 
 ```
-tools/setup-sdk.sh
-tools/build-linux.sh
-tools/build-linux.sh --project port-files
+git clone https://github.com/Juansolo457/fear360-recomp
+cd fear360-recomp
 ```
 
-For the Steam Deck, `tools/build-deck.sh` builds in an Ubuntu 22.04 container (podman), so the
-game runs on SteamOS's older glibc.
+then, for the Steam Deck (the container sets up its own patched SDK, as `tools/setup-sdk.sh`
+does):
+
+```
+tools/build-deck.sh
+tools/build-deck.sh --project port-files
+python3 -I tools/steamdeck/make_package.py --linux
+```
+
+or, for your own Linux PC, `tools/setup-sdk.sh`, then `tools/build-linux.sh` and
+`tools/build-linux.sh --project port-files`. The first build compiles the SDK and each game's
+translated code (about 200 MB of C++ per game), so it takes a long while; later ones are quick.
+
+**Play on the Steam Deck:** `make_package.py --linux` writes
+`private/steamdeck/FEAR360-SteamDeck-linux.zip` (about 11 GB): both games' programs, your game
+data and the Deck's starting settings. Copy it to the Deck, then follow
+`tools/steamdeck/README-SteamDeck-Linux.txt` (it's in the zip): extract it, add `fear-linux.sh` to
+Steam as a non-Steam game, and leave Proton off. The zip contains your game data and programs made
+from your discs: keep it to yourself. Later updates: `--linux --programs` makes a small zip of
+just the programs to extract over it.
+
+**Play on your own Linux PC:** the same package runs on an x86-64 Linux with a CPU with AVX2 and
+FMA (x86-64-v3), glibc 2.35 or newer, libstdc++ 13 or newer (`GLIBCXX_3.4.32`; SteamOS and
+current distributions have it, Ubuntu 22.04 needs the toolchain PPA's) and a Vulkan 1.3 GPU:
+extract it anywhere and run `./fear-linux.sh` in its `FEAR360-SteamDeck`
+folder (`./fear-linux.sh --no-fullscreen` for a window). `tools/build-linux.sh`'s builds are for
+development: each game's program is in `<project>/out/build/linux-amd64-relwithdebinfo/`, run
+from the game's folder with the flags `fear-linux.sh` passes (`--game_data_root`,
+`--user_data_root`, `--cache_root`).
 
 Optional, faster on the Deck: profile-guided optimization (PGO) from your own play. The profile
 comes from running the game's code, so it isn't in the repository; each player makes their own:
 
 1. Build the training version: `FEAR_PGO=generate tools/build-deck.sh` (and `--project
-   port-files`), then `python3 -I tools/steamdeck/make_package.py --linux --pgogen`.
+   port-files`), then `python3 -I tools/steamdeck/make_package.py --linux --pgogen --programs`
+   (`private/steamdeck/FEAR360-SteamDeck-linux-pgogen.zip`), and extract that zip over your
+   install on the Deck.
 2. Play it for 5-10 minutes per game, in the heavy fights (it runs slower while it counts). Each
    game writes `pgo-raw/*.profraw` beside its program.
 3. `tools/pgo-merge.sh --for deck --project port-nx <F.E.A.R.'s pgo-raw folder>`, and the same
    with `--project port-files` for F.E.A.R. Files (`--for host` for builds made with
    `tools/build-linux.sh` on your own Linux PC).
-4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there.
+4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there. Then
+   `make_package.py --linux --programs` and extract that update zip over the install, in place of
+   the training build.
 
 ## When something goes wrong
 

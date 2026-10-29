@@ -30,10 +30,11 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_coherency_check, false, "F.E.A.R. D3D12",
                     "(stale pages: a write the page watch missed; late pages: data rewritten after "
                     "a draw of the frame read it), and check copy segments against every read. "
                     "Slow (512 MB of host memory, a memcmp of every range read)");
-REXCVAR_DEFINE_BOOL(fear_vertex_index_range, false, "F.E.A.R. D3D12",
-                    "Experiment (#40): copy each vertex range only as far as the draw's vertices "
-                    "reach (its index bounds), not the whole vertex buffer, for shaders that fetch "
-                    "with the plain vertex index; fewer pages hashed in big fights");
+REXCVAR_DEFINE_BOOL(fear_vertex_index_range, true, "F.E.A.R. D3D12",
+                    "Copy each vertex range only as far as the draw's vertices reach (its index "
+                    "bounds), not the whole vertex buffer, for shaders that fetch with the plain "
+                    "vertex index; fewer pages hashed in big fights (#40, #88). On by default "
+                    "since 0.9: every Deck test since #88 ran with it");
 REXCVAR_DEFINE_INT32(fear_d3d12_hot_exact_kb, 64, "F.E.A.R. D3D12",
                      "Copy a vertex or index range of at most this many KB that touches a hot "
                      "page (data the game keeps rewriting, like the particles' vertices) to the "

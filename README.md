@@ -1,12 +1,12 @@
 # F.E.A.R. 360 Recompiled
 
-The Xbox 360 F.E.A.R. and *F.E.A.R. Files*, running natively on PC. A native Direct3D 12 renderer, evenly paced high frame rates, a controller in your hands.
+The Xbox 360 F.E.A.R. and *F.E.A.R. Files*, running natively on Linux, the Steam Deck and PC. A native renderer (Vulkan on Linux, Direct3D 12 on Windows), evenly paced high frame rates, a controller in your hands.
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v0.1.5](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only and early: both games boot and play on the new Direct3D 12 renderer, with EchoPatch's high-frame-rate fixes. **Next: 1.0**, once every level of both games has been played to the end without a crash ([Road to 1.0](#road-to-10)).
+**Latest release: [v0.9.0](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only: **native Linux and the Steam Deck** (no Proton), both games, 60 fps and more on the Deck. The Windows build compiles from the same source but wasn't tested for 0.9. **Next: 1.0**, once every level of both games has been played to the end without a crash ([Road to 1.0](#road-to-10)).
 
 ## Why
 
@@ -37,12 +37,12 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ✅ Saving and *Continue game* | checkpoints save and *Continue game* picks them up: "was able to jump into a saved game no issues"; every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
 | ⏳ PC textures in place of the 360's low-res ones | a local pack built from your PC copy (4,710 textures at 4× the pixels, [docs/TEXTURES.md](docs/TEXTURES.md)); the Direct3D 12 renderer can't use it yet |
-| ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": two entries added to the game's own menu (under Options) open a settings panel (window, frame rate, anti-aliasing, texture filtering and sharpness, field of view, right stick, aim assist, enemy AI, EchoPatch's options, the interval select, animation timing, bloom; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
+| ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": entries added to the game's own menu (in their own column, with help lines like the game's, #80) open a settings panel (window, frame rate, anti-aliasing, texture filtering and sharpness, field of view, right stick, aim assist, enemy AI, EchoPatch's options, the interval select, animation timing, bloom; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
 | ✅ Shaders built before play | every start builds the pipelines earlier runs stored before the game's first frame, on all cores ("PREPARING SHADERS" when it takes a moment), so a scene seen before doesn't stutter (`port-nx/src/pipeline_warmup.h`) |
-| ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu before either game loads, *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
+| ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu in the game's style before either game loads (#43), *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays on the same Direct3D 12 renderer (its Direct3D mapped on its own) with F.E.A.R.'s fixes; still to do: the smoke plumes, its own effects ([#51](https://github.com/Juansolo457/fear360-recomp/issues/51)), an optimisation pass and the full play-through ([#57](https://github.com/Juansolo457/fear360-recomp/issues/57)). The collection: [docs/FILES.md](docs/FILES.md) |
-| ⏳ Steam Deck (Proton), experimental | on the Direct3D 12 renderer: a median frame of 8.4 ms over the first four levels; first-run shader stutter and blood marks still to check (#28, #40); `tools/steamdeck/README-SteamDeck.txt` |
-| ⏳ Linux | through Proton, as on the Steam Deck; a native build on the renderer's Vulkan backend is being written, not tested yet ([#74](https://github.com/Juansolo457/fear360-recomp/issues/74), [docs/VULKAN_RENDERER.md](docs/VULKAN_RENDERER.md)) |
+| ✅ Steam Deck, native Linux (0.9) | no Proton: Vulkan straight on the Deck's driver, ThinLTO and optional PGO. With the 360's settings at 90 Hz, under 1% of frames below 60 fps in the heaviest fights (F.E.A.R. Files' Sprint, F.E.A.R.'s Rooftop); `tools/steamdeck/README-SteamDeck-Linux.txt`, [docs/LINUX_NATIVE.md](docs/LINUX_NATIVE.md) |
+| ✅ Linux | the same native build (`tools/build-linux.sh`), Vulkan 1.3 ([docs/SETUP.md](docs/SETUP.md#linux-and-steam-deck)) |
 | ⏳ Windows on ARM64 | scoped, not started ([#73](https://github.com/Juansolo457/fear360-recomp/issues/73)) |
 | ⏳ Android (ARM64) | scoped, not started; needs a renderer path, since the games are Direct3D 12 only ([#44](https://github.com/Juansolo457/fear360-recomp/issues/44)) |
 
@@ -57,15 +57,23 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ *F.E.A.R. Files* [#57](https://github.com/Juansolo457/fear360-recomp/issues/57) | both campaigns (37 levels) and Instant Action (8 maps), each to the end |
 | ⏳ Crashes and bugs found on the way | each one its own issue, fixed before 1.0 |
 
-**Known issues** in v0.1.5: the Direct3D 12 renderer draws at 1280×720 for now and can't use the PC texture pack yet ([NATIVE_RENDERER](docs/NATIVE_RENDERER.md#native-punch-list)); slow-mo firefights can drop below 120 fps; no blood marks on the Steam Deck yet; a GPU load spike in Interval 2's closing sequence ([#41](https://github.com/Juansolo457/fear360-recomp/issues/41)); a plain collection menu ([#43](https://github.com/Juansolo457/fear360-recomp/issues/43)); the 360-only Holiday bonus mission not checked yet ([#39](https://github.com/Juansolo457/fear360-recomp/issues/39)); on the Steam Deck, the controller drops for about a second at story autosaves ([#36](https://github.com/Juansolo457/fear360-recomp/issues/36)).
+**Known issues** in v0.9: the renderer draws at 1280×720 for now and can't use the PC texture pack yet ([NATIVE_RENDERER](docs/NATIVE_RENDERER.md#native-punch-list)); slow-mo firefights can drop below 120 fps; no blood marks on the Steam Deck yet; a GPU load spike in Interval 2's closing sequence ([#41](https://github.com/Juansolo457/fear360-recomp/issues/41)); docked at 120 Hz not retested yet ([#89](https://github.com/Juansolo457/fear360-recomp/issues/89)); the 360-only Holiday bonus mission not checked yet ([#39](https://github.com/Juansolo457/fear360-recomp/issues/39)); on the Steam Deck, the controller drops for about a second at story autosaves ([#36](https://github.com/Juansolo457/fear360-recomp/issues/36)).
 
 **Other open work:** performance (the Steam Deck [#40](https://github.com/Juansolo457/fear360-recomp/issues/40), the renderer's GPU cost [#37](https://github.com/Juansolo457/fear360-recomp/issues/37), lower-end PCs [#58](https://github.com/Juansolo457/fear360-recomp/issues/58)); PC parity with EchoPatch ([#2](https://github.com/Juansolo457/fear360-recomp/issues/2)); keyboard and mouse ([#59](https://github.com/Juansolo457/fear360-recomp/issues/59)); rumble and gyro aiming ([#26](https://github.com/Juansolo457/fear360-recomp/issues/26)); Instant Action extras ([#60](https://github.com/Juansolo457/fear360-recomp/issues/60), [#61](https://github.com/Juansolo457/fear360-recomp/issues/61)); visual checks against the 360 ([#45](https://github.com/Juansolo457/fear360-recomp/issues/45) to [#52](https://github.com/Juansolo457/fear360-recomp/issues/52)); upscaling ([#72](https://github.com/Juansolo457/fear360-recomp/issues/72)); Windows on ARM64, Linux and Android ([#73](https://github.com/Juansolo457/fear360-recomp/issues/73), [#74](https://github.com/Juansolo457/fear360-recomp/issues/74), [#44](https://github.com/Juansolo457/fear360-recomp/issues/44)). [All open issues](https://github.com/Juansolo457/fear360-recomp/issues).
 
 Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent handoff: [docs/HANDOFF.md](docs/HANDOFF.md). How it all fits together, where the time goes, and how to help: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Build and run (Windows)
+## Build and run
 
-Releases are source only: you build the game from your own discs ([the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest)). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
+**Linux and the Steam Deck (0.9):** [docs/SETUP.md, Linux and Steam Deck](docs/SETUP.md#linux-and-steam-deck): build in the Deck container, package, then add `fear-linux.sh` to Steam (or run it on any Linux PC):
+
+```bash
+tools/build-deck.sh                                   # F.E.A.R.
+tools/build-deck.sh --project port-files              # F.E.A.R. Files
+python3 -I tools/steamdeck/make_package.py --linux    # private/steamdeck/FEAR360-SteamDeck-linux.zip
+```
+
+**Windows** (builds, not tested for 0.9): releases are source only: you build the game from your own discs ([the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest)). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
 
 ```powershell
 pwsh -NoProfile -File tools/setup-sdk.ps1                      # the patched ReXGlue SDK

@@ -11,10 +11,14 @@
         just both games' user/settings.toml (default private/steamdeck/FEAR360-SteamDeck-settings.zip),
         to unpack over an existing install: the Deck settings below, saves untouched
     python3 -I tools/steamdeck/make_package.py --linux [out.zip]     (on Linux: WSL)
-        the native Linux programs from tools/build-deck.sh (default
-        private/steamdeck/FEAR360-SteamDeck-linux.zip), to unpack over an existing install: each
-        game's program and its libraries, fear-linux.sh (the launcher, no Proton) and
-        README-SteamDeck-Linux.txt. The Proton programs stay; data, saves and settings untouched
+        the native Linux package, standalone (default private/steamdeck/FEAR360-SteamDeck-linux.zip):
+        each game's program from tools/build-deck.sh and its libraries, its assets/ (game data)
+        and user/settings.toml (LINUX_SETTINGS), fear-linux.sh (the launcher, no Proton) and
+        README-SteamDeck-Linux.txt. No saves
+    python3 -I tools/steamdeck/make_package.py --linux --programs [out.zip]
+        just the Linux programs, their libraries, the launcher and the README (default
+        private/steamdeck/FEAR360-SteamDeck-linux-update.zip), to unpack over an existing install:
+        data, saves and settings untouched
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -55,6 +59,9 @@ PGO_GEN = '--pgogen' in sys.argv[1:] or os.environ.get('FEAR_PGO') == 'generate'
 OUT = ARGV[0] if ARGV else os.path.join(
     REPO, 'private', 'windows' if WINDOWS else 'steamdeck',
     'FEAR360-Windows.zip' if WINDOWS else
+    # A training build's zip has its own name, so the normal update zip is still there after.
+    'FEAR360-SteamDeck-linux-pgogen.zip' if LINUX and PGO_GEN else
+    'FEAR360-SteamDeck-linux-update.zip' if LINUX and PROGRAMS_ONLY else
     'FEAR360-SteamDeck-linux.zip' if LINUX else
     'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else
     'FEAR360-SteamDeck-settings.zip' if SETTINGS_ONLY else 'FEAR360-SteamDeck.zip')
@@ -85,6 +92,16 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
                  'fear_profile_hz = 200\n')
+# The native Linux package's (--linux): the Deck baseline, the 360's settings at up to 120 fps
+# with MSAA off (the rest are the defaults: field of view 70, no bloom). No timer or SDL lines:
+# Linux paces from a timer at twice the frame rate on its own (docs/LINUX_NATIVE.md), and SDL
+# reads the pads natively. Everything here is a PC Settings choice, so Save keeps it.
+LINUX_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
+                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
+                  '# The Steam Deck baseline: the 360\'s settings at up to 120 fps, MSAA off.\n'
+                  'fullscreen = true\n'
+                  'fear_frame_rate_limit = 120\n'
+                  'fear_d3d12_msaa = false\n')
 # Windows: the Deck's settings without hid_sdl_hidapi = "off", which is for Proton's SDL. On
 # Windows the games read controllers through XInput by default (fear_app.h): SDL found no usable
 # pad in the game on a work laptop, 2026-10-23 (#54).
@@ -131,6 +148,11 @@ GAMES = [
 ]
 
 
+def walk_error(error):
+    """os.walk's onerror: a folder it can't read stops the package instead of leaving it out."""
+    raise SystemExit(f'Cannot read {error.filename}: {error.strerror}')
+
+
 def crt_folder():
     """The newest x64 Visual C++ runtime in a Visual Studio 2022 install."""
     found = sorted(glob.glob(r'C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Redist\MSVC'
@@ -142,8 +164,9 @@ def crt_folder():
 
 
 def main_linux():
-    """The native Linux update: tools/build-deck.sh's programs and libraries (the build's own
-    shared libraries, found next to each program through its $ORIGIN run path) and the launcher."""
+    """The native Linux package: tools/build-deck.sh's programs and libraries (the build's own
+    shared libraries, found next to each program through its $ORIGIN run path), the launcher and,
+    unless --programs, each game's data and settings."""
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     count = total = 0
     versions = []
@@ -182,6 +205,29 @@ def main_linux():
                     if line.startswith('#define FEAR_VERSION_TEXT '):
                         text = line.split('"')[1]
             versions.append(f'{program} (Linux): {text}')
+            if PROGRAMS_ONLY:
+                continue
+            # The game data, stored as is (mostly compressed already, ~11 GB for both games;
+            # streamed, not read into memory), and the settings. No saves.
+            assets = os.path.join(REPO, project, 'assets')
+            if not os.path.exists(os.path.join(assets, 'default.xex')):
+                raise SystemExit(f'{project}/assets is missing (docs/SETUP.md, step 3)')
+            for dirpath, dirnames, filenames in os.walk(assets, followlinks=True,
+                                                        onerror=walk_error):
+                dirnames.sort()
+                for f in sorted(filenames):
+                    src = os.path.join(dirpath, f)
+                    rel = os.path.relpath(src, assets).replace(os.sep, '/')
+                    info = zipfile.ZipInfo.from_file(src, f'{TOP}/{folder}/assets/{rel}')
+                    info.external_attr = 0o100644 << 16
+                    info.compress_type = zipfile.ZIP_STORED
+                    with open(src, 'rb') as fin, z.open(info, 'w', force_zip64=True) as fout:
+                        while chunk := fin.read(1 << 24):
+                            fout.write(chunk)
+                    count += 1
+                    total += os.path.getsize(src)
+            z.writestr(f'{TOP}/{folder}/user/settings.toml', LINUX_SETTINGS)
+            print(f'{folder}: {count} files, {total / 2**30:.1f} GB so far', flush=True)
         z.writestr(f'{TOP}/VERSION-linux.txt', '\n'.join(versions) + '\n')
     print('version: ' + '; '.join(versions))
     print(f'{OUT}: {count} files, {total / 2**20:.0f} MB before compression')
@@ -216,7 +262,8 @@ def main():
             total += os.path.getsize(src)
 
         def add_tree(src_root, arc_root, skip=()):
-            for dirpath, dirnames, filenames in os.walk(src_root, followlinks=True):
+            for dirpath, dirnames, filenames in os.walk(src_root, followlinks=True,
+                                                        onerror=walk_error):
                 dirnames.sort()
                 for f in sorted(filenames):
                     src = os.path.join(dirpath, f)
