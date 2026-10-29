@@ -268,7 +268,13 @@ void VulkanDevice::CollectCoverage(uint32_t slot) {
                                 uint32_t(draws.size()), samples.size() * sizeof(uint64_t),
                                 samples.data(), sizeof(uint64_t),
                                 VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+    // Bounded when nothing takes them (the stats log off): past the cap they count as dropped.
+    constexpr size_t kMaxDone = 1 << 18;
     for (size_t i = 0; i < draws.size(); ++i) {
+      if (coverage_done_.size() >= kMaxDone) {
+        coverage_dropped_ += draws.size() - i;
+        break;
+      }
       draws[i].samples = samples[i];
       coverage_done_.push_back(draws[i]);
     }
