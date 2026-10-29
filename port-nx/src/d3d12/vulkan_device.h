@@ -51,6 +51,7 @@ namespace fear::d3d12 {
   X(vkBeginCommandBuffer)           \
   X(vkEndCommandBuffer)             \
   X(vkCmdPipelineBarrier)           \
+  X(vkCmdFillBuffer)                \
   X(vkCmdClearColorImage)           \
   X(vkCreateFence)                  \
   X(vkDestroyFence)                 \

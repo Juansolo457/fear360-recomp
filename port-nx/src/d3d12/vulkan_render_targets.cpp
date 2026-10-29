@@ -146,6 +146,7 @@ bool VulkanRenderTargets::Create(VulkanRenderTarget* rt, uint32_t width, uint32_
   rt->image = image;
   rt->view = view;
   rt->initialized = false;
+  ++rt->content_seq;
   rt->width = ii.extent.width;
   rt->height = height;
   return true;
@@ -324,6 +325,7 @@ bool VulkanRenderTargets::Bind(VkCommandBuffer cmd, const SurfaceRegs& regs, uin
 
 void VulkanRenderTargets::Initialize(VkCommandBuffer cmd, VulkanRenderTarget* rt) {
   if (rt->initialized) return;
+  ++rt->content_seq;
   EndRendering(cmd);
   const VulkanDevice::Functions& fn = device_.fn();
   const VkImageSubresourceRange range{
@@ -373,6 +375,7 @@ void VulkanRenderTargets::Initialize(VkCommandBuffer cmd, VulkanRenderTarget* rt
 void VulkanRenderTargets::ClearRects(VkCommandBuffer cmd, VulkanRenderTarget* rt,
                                      const VkClearAttachment& att, const Rect* rects,
                                      size_t count) {
+  ++rt->content_seq;
   VulkanRenderTarget* none[1] = {nullptr};
   if (rt->depth)
     BeginRendering(cmd, none, 0, rt);
