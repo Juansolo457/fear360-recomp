@@ -239,9 +239,11 @@ class VulkanDevice {
   struct CoverageDraw {
     uint64_t tag = 0, samples = 0;
     uint32_t target_samples = 0, triangles = 0;
+    uint32_t format = 0;  // the color target's VkFormat
   };
   bool EnableCoverage();
-  int32_t BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles);
+  int32_t BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles,
+                        uint32_t format);
   void EndCoverage(int32_t query);
   // The draws collected since the last call, and the frames they came from.
   std::vector<CoverageDraw> TakeCoverage() { return std::exchange(coverage_done_, {}); }

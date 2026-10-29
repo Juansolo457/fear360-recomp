@@ -841,7 +841,7 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
       coverage_ps_.count(ps->ucode_data_hash())) {
     const VulkanRenderTarget* rt = bound.color[0];
     coverage = device_->BeginCoverage(ps->ucode_data_hash(), rt->width * rt->height * rt->samples,
-                                      state.count / 3);
+                                      state.count / 3, uint32_t(rt->format));
   }
   if (state.indexed) {
     fn.vkCmdBindIndexBuffer(cmd, gpu_->shared.buffer, state.index_address,
@@ -1844,6 +1844,7 @@ void VulkanBackend::LogGpuTiming() {
     struct Sum {
       uint64_t draws = 0, samples = 0, max_samples = 0, target = 0, triangles = 0;
       double covers = 0.0, max_covers = 0.0;
+      std::unordered_map<uint32_t, uint64_t> format_samples;  // VkFormat: samples drawn into it
     };
     std::unordered_map<uint64_t, Sum> sums;
     for (const VulkanDevice::CoverageDraw& d : device_->TakeCoverage()) {
@@ -1856,15 +1857,21 @@ void VulkanBackend::LogGpuTiming() {
       s.triangles += d.triangles;
       s.covers += covers;
       s.max_covers = std::max(s.max_covers, covers);
+      s.format_samples[d.format] += d.samples;
     }
     const double frames = double(std::max<uint64_t>(device_->TakeCoverageFrames(), 1));
     for (const auto& [tag, s] : sums) {
       const double n = double(s.draws);
+      std::string formats;  // the targets' VkFormats, with their share of the samples
+      for (const auto& [format, samples] : s.format_samples) {
+        formats += fmt::format(" {}:{:.0f}%", format,
+                               s.samples ? 100.0 * double(samples) / double(s.samples) : 0.0);
+      }
       REXLOG_INFO("D3D12 Vulkan coverage ps {:016X}: {:.1f} draws per frame, {:.0f} samples per "
                   "draw ({:.2f} covers of the {}-sample target, max {:.2f} = {} samples), "
-                  "{:.0f} triangles per draw",
+                  "{:.0f} triangles per draw, target formats{}",
                   tag, n / frames, double(s.samples) / n, s.covers / n, s.target, s.max_covers,
-                  s.max_samples, double(s.triangles) / n);
+                  s.max_samples, double(s.triangles) / n, formats);
     }
   }
   if (gpu_timer_) gpu_timer_->Log();  // the costliest passes

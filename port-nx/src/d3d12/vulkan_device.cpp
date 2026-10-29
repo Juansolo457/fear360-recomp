@@ -235,11 +235,12 @@ bool VulkanDevice::EnableCoverage() {
   return true;
 }
 
-int32_t VulkanDevice::BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles) {
+int32_t VulkanDevice::BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles,
+                                    uint32_t format) {
   std::vector<CoverageDraw>& draws = coverage_pending_[slot_];
   if (!coverage_ || draws.size() >= kCoverageQueries) return -1;
   const uint32_t query = slot_ * kCoverageQueries + uint32_t(draws.size());
-  draws.push_back({tag, 0, target_samples, triangles});
+  draws.push_back({tag, 0, target_samples, triangles, format});
   fn_.vkCmdBeginQuery(frames_[slot_].cmd, coverage_, query, VK_QUERY_CONTROL_PRECISE_BIT);
   return int32_t(query);
 }

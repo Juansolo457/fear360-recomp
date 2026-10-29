@@ -23,6 +23,7 @@ bool IsValidStoredPipelineKey(const VulkanPipelineKey& k) {
       case VK_FORMAT_R8G8B8A8_UNORM:
       case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
       case VK_FORMAT_R16G16B16A16_SFLOAT:
+      case VK_FORMAT_B10G11R11_UFLOAT_PACK32:  // 7e3 with --fear_d3d12_vulkan_7e3_32bpp
       case VK_FORMAT_R16G16_SNORM:
       case VK_FORMAT_R16G16B16A16_SNORM:
       case VK_FORMAT_R16G16_SFLOAT:
