@@ -143,8 +143,9 @@ comes from running the game's code, so it isn't in the repository; each player m
    port-files`), then `python3 -I tools/steamdeck/make_package.py --linux --pgogen`.
 2. Play it for 5-10 minutes per game, in the heavy fights (it runs slower while it counts). Each
    game writes `pgo-raw/*.profraw` beside its program.
-3. `tools/pgo-merge.sh --project port-nx <F.E.A.R.'s pgo-raw folder>`, and the same with
-   `--project port-files` for F.E.A.R. Files.
+3. `tools/pgo-merge.sh --for deck --project port-nx <F.E.A.R.'s pgo-raw folder>`, and the same
+   with `--project port-files` for F.E.A.R. Files (`--for host` for builds made with
+   `tools/build-linux.sh` on your own Linux PC).
 4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there.
 
 ## When something goes wrong
