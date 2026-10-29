@@ -99,6 +99,7 @@ namespace fear::d3d12 {
   X(vkCmdCopyImage)                 \
   X(vkCreateComputePipelines)       \
   X(vkCmdDispatch)                  \
+  X(vkCmdDispatchIndirect)          \
   X(vkCmdPushConstants)             \
   X(vkCreatePipelineCache)          \
   X(vkDestroyPipelineCache)         \

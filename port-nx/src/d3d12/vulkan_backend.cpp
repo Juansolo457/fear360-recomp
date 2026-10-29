@@ -236,15 +236,16 @@ bool VulkanBackend::Initialize(const Options& o) {
                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                                  false, &gpu_->shared, "shared memory buffer (512 MB)"))
     return false;
-  if (!gpu_->memory.CreateBuffer(uint64_t(kDrawBoundsSlots) * kDrawBoundsSlotBytes,
+  if (!gpu_->memory.CreateBuffer(kDrawBoundsBufferBytes,
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
                                  false, &gpu_->draw_bounds, "draw bounds buffer"))
     return false;
   if (!gpu_->bindings.Initialize(gpu_->memory, gpu_->shared.buffer, gpu_->draw_bounds.buffer))
     return false;
   if (!gpu_->targets.Initialize(gpu_->memory)) return false;
-  if (!gpu_->resolve_shaders.Initialize()) return false;
+  if (!gpu_->resolve_shaders.Initialize(gpu_->draw_bounds.buffer)) return false;
   if (!gpu_->presenter.Initialize()) return false;
   gpu_->textures = std::make_unique<VulkanTextureCache>(*device_, gpu_->memory, memory);
   gpu_->textures->SetResolvedLookup([gpu = gpu_.get()](uint32_t address) {
@@ -1096,16 +1097,23 @@ void VulkanBackend::ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot) {
   b.buffer = gpu_->draw_bounds.buffer;
   b.offset = 0;
   b.size = VK_WHOLE_SIZE;
-  // The vertex shaders' atomics and the resolve shader's reads, then the fill, then the next
-  // draws' atomics and resolves' reads.
-  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  // The vertex shaders' atomics, the resolve shaders' reads and writes and the indirect
+  // dispatch's read, then the fill, then the next draws' atomics and resolves.
+  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                    VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
   b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+  fn.vkCmdPipelineBarrier(cmd,
+                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                              VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &b, 0, nullptr);
   const bool all = !bounds_buffer_ready_;
   bounds_buffer_ready_ = true;
+  // The slot's bounds only (every slot's the first time); the dispatch words are rewritten
+  // before each read.
   fn.vkCmdFillBuffer(cmd, gpu_->draw_bounds.buffer, all ? 0 : uint64_t(slot) * kDrawBoundsSlotBytes,
-                     all ? VK_WHOLE_SIZE : kDrawBoundsSlotBytes, 0xFFFFFFFFu);
+                     all ? uint64_t(kDrawBoundsSlots) * kDrawBoundsSlotBytes : kDrawBoundsSlotBytes,
+                     0xFFFFFFFFu);
   b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,

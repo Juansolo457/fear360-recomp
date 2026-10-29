@@ -161,6 +161,12 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   // passed. --no-fear_d3d12_vulkan_resolve_bounds turns it off.
   static constexpr uint32_t kDrawBoundsSlots = 16;
   static constexpr uint32_t kDrawBoundsSlotBytes = 16;
+  // After the slots, each slot's indirect dispatch (bounds_dispatch.comp): 8 words.
+  static constexpr uint32_t kDrawBoundsArgsBytes = 32;
+  static constexpr uint64_t kDrawBoundsBufferBytes =
+      uint64_t(kDrawBoundsSlots) * (kDrawBoundsSlotBytes + kDrawBoundsArgsBytes);
+  // The shaders find the dispatch words at kArgsBase = 64 (bounds_dispatch.comp).
+  static_assert(kDrawBoundsSlots * kDrawBoundsSlotBytes == 64 * 4);
   static constexpr uint32_t kDrawBoundsMaxDraws = 64;  // tracked draws between two resolves
   // A color resolve's copy, with what its source and destination held: the same again means
   // the destination holds the previous copy, except where the draws since changed the source.

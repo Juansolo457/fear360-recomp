@@ -1,0 +1,58 @@
+// D3D12 renderer: the Vulkan backend's resolve bounds (vulkan_backend.h), the step before a
+// bounded color resolve: turns a slot of the draw bounds buffer into the indirect dispatch of
+// the color resolve shader (color_resolve.comp) over just the 8x8 tiles the box touches, so the
+// rest of the rectangle isn't launched at all. One invocation. Built by tools/vulkan_shaders.py.
+#version 450
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Params {
+  ivec2 src_origin;  // the resolve's source rectangle origin in the render target
+  uvec2 size;        // its size
+  uint bounds;       // bits 0-7 the draw bounds slot, bit 31 expand (ColorParams::bounds)
+} p;
+
+// The draw bounds buffer: per slot (4 words from 0), the minimum x and y of the draws' vertices
+// in render target pixels as x + kBoundsBias, then the maximum x and y as kBoundsBias - x; per
+// slot (8 words from kArgsBase), this shader's output: the dispatch's group counts (x, y, 1)
+// and its first tile (x, y) in the rectangle.
+layout(std430, set = 0, binding = 0) buffer DrawBounds { uint draw_bounds[]; };
+const int kBoundsBias = 1 << 30;
+// Past the vertex shaders' clamp (2^29): a vertex behind the camera opened the slot, or no
+// vertex reached it.
+const int kBoundsLimit = 1 << 29;
+// Pixels around the box: rasterization reaches no further than the vertices, but the box is
+// whole pixels and a line or a point sprite's edge can be a pixel out.
+const int kBoundsMargin = 8;
+const uint kArgsBase = 64u;  // VulkanBackend::kDrawBoundsSlots * 4
+
+void main() {
+  uint slot = p.bounds & 0xFFu;
+  uint b = slot * 4u;
+  uint a = kArgsBase + slot * 8u;
+  ivec2 groups = ivec2((p.size + 7u) / 8u);
+  ivec2 t0 = ivec2(0), t1 = groups;  // tiles, end exclusive
+  ivec2 lo = ivec2(int(draw_bounds[b]) - kBoundsBias, int(draw_bounds[b + 1u]) - kBoundsBias);
+  ivec2 hi = ivec2(kBoundsBias - int(draw_bounds[b + 2u]), kBoundsBias - int(draw_bounds[b + 3u]));
+  if (all(greaterThanEqual(lo, ivec2(-kBoundsLimit))) && all(lessThanEqual(hi, ivec2(kBoundsLimit)))) {
+    if ((p.bounds & 0x80000000u) != 0u) {
+      // A rectangle list's fourth vertex, made from the other three, can lie as far outside
+      // their box as the box is wide.
+      ivec2 extent = hi - lo;
+      lo -= extent;
+      hi += extent;
+    }
+    lo -= kBoundsMargin;
+    hi += kBoundsMargin;
+    // >> on ints rounds down, negatives too.
+    ivec2 first = clamp((lo - p.src_origin) >> 3, ivec2(0), groups);
+    ivec2 end = clamp(((hi - p.src_origin) >> 3) + 1, ivec2(0), groups);
+    t0 = first;
+    t1 = max(end, first);
+  }
+  draw_bounds[a] = uint(t1.x - t0.x);
+  draw_bounds[a + 1u] = uint(t1.y - t0.y);
+  draw_bounds[a + 2u] = 1u;
+  draw_bounds[a + 3u] = uint(t0.x);
+  draw_bounds[a + 4u] = uint(t0.y);
+}
