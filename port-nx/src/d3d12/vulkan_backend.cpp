@@ -2,6 +2,7 @@
 #include "vulkan_backend.h"
 
 #include "vulkan_device.h"  // first: the Vulkan platform defines
+#include "gpu_timer.h"
 #include "guest_memory.h"  // GpuAddress
 #include "log.h"
 #include "pipeline_store.h"
@@ -37,6 +38,11 @@
 #include <thread>
 #include <utility>
 
+REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_resolve_bounds, true, "F.E.A.R. D3D12",
+                    "Cut a color resolve that repeats the previous one (the same rectangle "
+                    "into the same destination) to the screen bounds of the draws since it "
+                    "(#100): the vertex shaders record them, the resolve copies the tiles they "
+                    "touch, and the destination keeps the rest from the previous copy");
 REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_show_target, false, "F.E.A.R. D3D12",
                     "With --fear_d3d12_api=vulkan: show the color render target most of the "
                     "frame's draws went to (the 3D scene) instead of the front buffer, to check "
@@ -105,6 +111,7 @@ struct VulkanBackend::ResolvedImage {
   VkImageView depth_storage_view = VK_NULL_HANDLE;
   uint32_t width = 0, height = 0;
   bool written = false;
+  uint64_t resolve_seq = 0;  // copies into it so far (the resolve bounds)
   // Of the color resolves into it: the texels written from (0, 0) (the image the present pass
   // shows, as D3D12's ResolvedImage), the destination format (xenos::TextureFormat) and the
   // exponent bias of the last one (the front buffer's log).
@@ -119,6 +126,8 @@ struct VulkanBackend::Gpu {
   // Guest physical memory: what the translated shaders read vertices (and the index buffer is
   // bound) from, kept current by GuestMemoryMirror's copies.
   VulkanMemory::Buffer shared;
+  // The draw bounds buffer (the resolve bounds): kDrawBoundsSlots slots of four words.
+  VulkanMemory::Buffer draw_bounds;
   // Vertex and index ranges copied into shared memory (the guest thread's with the render
   // thread: tagged by Prepare, recycled at EndFramePrepare).
   VulkanUploadPool vertex_upload{16u << 20, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
@@ -169,6 +178,7 @@ struct VulkanBackend::Gpu {
     for (DumpEntry& e : dump) memory.Destroy(e.readback);
     Destroy(msaa_temp);
     memory.Destroy(shared);
+    memory.Destroy(draw_bounds);
   }
   void Destroy(Resolved& r) {
     for (VkImageView* v : {&r.storage_view, &r.depth_storage_view}) {
@@ -201,6 +211,15 @@ bool VulkanBackend::Initialize(const Options& o) {
   }
   device_ = std::make_unique<VulkanDevice>();
   if (!device_->Initialize(*provider)) return false;
+  // Per pass, as the D3D12 backend (#100): the frame's GPU time alone comes from the device.
+  if (o.gpu_timing) {
+    if (device_->EnableGpuTimer()) {
+      gpu_timer_ = device_->gpu_timer();
+      gpu_timer_->set_per_shader(o.gpu_timing_shaders);
+    } else {
+      REXLOG_WARN("D3D12 Vulkan: GPU timing per pass unavailable (no timestamps on the queue)");
+    }
+  }
   // --fear_d3d12_anisotropy, as the D3D12 draws (kMax_N_1 is log2(N) + 1).
   if (const int32_t samples = std::clamp(REXCVAR_GET(fear_d3d12_anisotropy), 1, 16); samples > 1)
     min_aniso_ = rex::graphics::xenos::AnisoFilter(std::bit_width(uint32_t(samples)));
@@ -217,7 +236,13 @@ bool VulkanBackend::Initialize(const Options& o) {
                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                                  false, &gpu_->shared, "shared memory buffer (512 MB)"))
     return false;
-  if (!gpu_->bindings.Initialize(gpu_->memory, gpu_->shared.buffer)) return false;
+  if (!gpu_->memory.CreateBuffer(uint64_t(kDrawBoundsSlots) * kDrawBoundsSlotBytes,
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                 false, &gpu_->draw_bounds, "draw bounds buffer"))
+    return false;
+  if (!gpu_->bindings.Initialize(gpu_->memory, gpu_->shared.buffer, gpu_->draw_bounds.buffer))
+    return false;
   if (!gpu_->targets.Initialize(gpu_->memory)) return false;
   if (!gpu_->resolve_shaders.Initialize()) return false;
   if (!gpu_->presenter.Initialize()) return false;
@@ -389,6 +414,13 @@ static uint32_t FormatBytes(VkFormat f) {
 
 void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   using rex::graphics::xenos::ShaderType;
+  if (gpu_timer_) {
+    gpu_timer_->Pass(device_->command_buffer(),
+                     gpu_timer_->per_shader() && prep && prep->vs
+                         ? gpu_timer_->KeyDrawShaders(state.regs, prep->vs->ucode_data_hash(),
+                                                      prep->ps ? prep->ps->ucode_data_hash() : 0)
+                         : GpuTimer::KeyDraw(state.regs));
+  }
   const uint32_t draw_index = frame_draw_++;
   if (prep) {
     // The guest thread copied the ranges (and marked their pages valid): they go into shared
@@ -586,6 +618,26 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
     TargetUse& use = target_use_[bound.color[0]];
     ++use.draws;
     use.rows = std::max(use.rows, std::min(height, bound.color[0]->height));
+  }
+  // The resolve bounds: a draw to a tracked target records its bounds in the target's slot
+  // (its first color target; a draw to several leaves the others' slots incomplete).
+  for (uint32_t i = 0; i < 4; ++i) {
+    if (!bound.color[i]) continue;
+    BoundsTrack& track = BoundsTrackOf(bound.color[i]);
+    ++track.draws;
+    if (i == 0 && track.tracking && track.draws <= kDrawBoundsMaxDraws) {
+      sys.flags |= SpirvShaderTranslator::kSysFlag_DrawBounds;
+      sys.draw_bounds_slot = track.slot;
+      // NDC to the target's pixels as the viewport below maps them (origin top-left, no flip).
+      sys.draw_bounds_scale[0] = 0.5f * float(vp.xy_extent[0]);
+      sys.draw_bounds_scale[1] = 0.5f * float(vp.xy_extent[1]);
+      sys.draw_bounds_offset[0] = float(vp.xy_offset[0]) + sys.draw_bounds_scale[0];
+      sys.draw_bounds_offset[1] = float(vp.xy_offset[1]) + sys.draw_bounds_scale[1];
+      if (geometry == PipelineGeometryShader::kRectangleList) track.expand = true;
+    } else {
+      track.bounds_valid = false;
+      if (track.draws > kDrawBoundsMaxDraws) track.tracking = false;  // the pattern is over
+    }
   }
   const VulkanBindings::Layout* layout = bindings.GetLayout(*vs, ps);
   if (!layout || !bindings.Bind(cmd, *layout, state.regs, *vs, ps, sys, device_->frame_fence(),
@@ -873,6 +925,7 @@ void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
 }
 
 void VulkanBackend::Clear(const ClearCall& clear) {
+  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyClear(clear));
   gpu_->targets.Clear(device_->command_buffer(), clear);
 }
 
@@ -892,6 +945,7 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
     ++resolves_skipped_;
     return;
   }
+  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyResolve(p));
   VulkanRenderTargets& targets = gpu_->targets;
   VkCommandBuffer cmd = device_->command_buffer();
   targets.EndRendering(cmd);
@@ -918,10 +972,17 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
       copied = CopyDepth(rt, x0, y0, w, h, dx, dy, p);
       depth_resolves_ += copied;
     } else if (p.copy_command == 1) {
-      copied = CopyColor(rt, x0, y0, w, h, dx, dy, p);
+      BoundsTrack* track =
+          REXCVAR_GET(fear_d3d12_vulkan_resolve_bounds) ? &BoundsTrackOf(rt) : nullptr;
+      const ResolveCopy copy{rt,          rt->content_seq, x0,         y0,
+                             w,           h,               dx,         dy,
+                             p.dest_base, p.dest_format,   p.sample_select,
+                             uint32_t(p.dest_swap), p.dest_number, p.exp_bias};
+      copied = CopyColor(rt, x0, y0, w, h, dx, dy, p, track, copy);
       if (copied) {
         ++shader_resolves_;
       } else {
+        if (track) track->Break();  // a blit the bounds don't reach
         VkFormat unorm, snorm;
         ResolveFormats(p.dest_format, &unorm, &snorm);
         copied = CopyTarget(rt, x0, y0, w, h, dx, dy, p.dest_width, p.dest_height, p.dest_base,
@@ -1012,8 +1073,49 @@ bool VulkanBackend::CopyDepth(VulkanRenderTarget* rt, int32_t x0, int32_t y0, in
   });
 }
 
+VulkanBackend::BoundsTrack& VulkanBackend::BoundsTrackOf(const VulkanRenderTarget* rt) {
+  auto it = bounds_tracks_.find(rt);
+  if (it != bounds_tracks_.end()) return it->second;
+  BoundsTrack& track = bounds_tracks_[rt];
+  track.slot = bounds_next_slot_++ % kDrawBoundsSlots;
+  // A slot taken over: its previous owner forgets it (its next use gets a slot of its own
+  // with nothing tracked), or its resolves would reset the slot under the new owner's draws.
+  // Erasing another key leaves the reference to this entry valid.
+  if (const VulkanRenderTarget* previous = bounds_slot_owner_[track.slot]) {
+    bounds_tracks_.erase(previous);
+  }
+  bounds_slot_owner_[track.slot] = rt;
+  return track;
+}
+
+void VulkanBackend::ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot) {
+  const VulkanDevice::Functions& fn = device_->fn();
+  gpu_->targets.EndRendering(cmd);
+  VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+  b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b.buffer = gpu_->draw_bounds.buffer;
+  b.offset = 0;
+  b.size = VK_WHOLE_SIZE;
+  // The vertex shaders' atomics and the resolve shader's reads, then the fill, then the next
+  // draws' atomics and resolves' reads.
+  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &b, 0, nullptr);
+  const bool all = !bounds_buffer_ready_;
+  bounds_buffer_ready_ = true;
+  fn.vkCmdFillBuffer(cmd, gpu_->draw_bounds.buffer, all ? 0 : uint64_t(slot) * kDrawBoundsSlotBytes,
+                     all ? VK_WHOLE_SIZE : kDrawBoundsSlotBytes, 0xFFFFFFFFu);
+  b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                          0, 0, nullptr, 1, &b, 0, nullptr);
+}
+
 bool VulkanBackend::CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, int32_t w,
-                              int32_t h, int32_t dx, int32_t dy, const ResolveParams& p) {
+                              int32_t h, int32_t dx, int32_t dy, const ResolveParams& p,
+                              BoundsTrack* track, const ResolveCopy& copy) {
   const VkFormat storage = gpu_->resolve_shaders.ColorStorageFormat(p.dest_format);
   if (storage == VK_FORMAT_UNDEFINED) return false;
   VkFormat unorm, snorm;
@@ -1038,9 +1140,55 @@ bool VulkanBackend::CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, in
   params.flags = (p.dest_swap ? 2u : 0u) | (p.sample_select << 4) | (rt->samples << 8) |
                  (p.dest_number << 12);
   params.exp_bias = p.exp_bias;
-  return RunResolveShader(rt, rt->view, VK_NULL_HANDLE, r, [&](VkDescriptorSet set) {
+  // The resolve bounds: the same copy as the target's last, with nothing but tracked draws
+  // between, is cut to their box; with no draw at all, the destination already holds it.
+  bool same = false;
+  if (track) {
+    same = track->has_last && copy == track->last && r->written &&
+           r->image.image == track->last_dest && r->resolve_seq == track->last_dest_seq;
+    if (same && track->bounds_valid) {
+      if (!track->draws) {
+        ++resolves_repeated_;
+        return true;
+      }
+      params.bounds = track->slot | (track->expand ? VulkanResolveShaders::kBoundsExpand : 0u);
+      ++resolves_partial_;
+      // The vertex shaders' atomics before the resolve shader reads the slot.
+      VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+      b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      b.buffer = gpu_->draw_bounds.buffer;
+      b.offset = 0;
+      b.size = VK_WHOLE_SIZE;
+      b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      gpu_->targets.EndRendering(device_->command_buffer());
+      device_->fn().vkCmdPipelineBarrier(device_->command_buffer(),
+                                         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1,
+                                         &b, 0, nullptr);
+    }
+  }
+  const bool ok = RunResolveShader(rt, rt->view, VK_NULL_HANDLE, r, [&](VkDescriptorSet set) {
     gpu_->resolve_shaders.RecordColor(device_->command_buffer(), rt->samples > 1, set, params);
   });
+  if (track) {
+    if (!ok) {
+      track->Break();
+      return false;
+    }
+    // The slot is clean for the draws up to the next resolve, which it sees while tracking:
+    // on from the second copy of a run of the same one.
+    ResetDrawBounds(device_->command_buffer(), track->slot);
+    track->tracking = same;
+    track->bounds_valid = same;
+    track->expand = false;
+    track->draws = 0;
+    track->has_last = true;
+    track->last = copy;
+    track->last_dest = r->image.image;
+    track->last_dest_seq = r->resolve_seq;
+  }
+  return ok;
 }
 
 void VulkanBackend::DumpRecord(const ResolveParams& p, uint32_t width, uint32_t height) {
@@ -1178,9 +1326,9 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
       {VK_NULL_HANDLE, depth ? r->depth_storage_view : r->storage_view, VK_IMAGE_LAYOUT_GENERAL},
       {VK_NULL_HANDLE, r->storage_view, VK_IMAGE_LAYOUT_GENERAL},
       {rs.sampler(), stencil_view, src_layout}};
-  const uint32_t bindings = depth ? 4 : 2;
+  const uint32_t image_bindings = depth ? 4 : 2;
   VkWriteDescriptorSet wr[4] = {};
-  for (uint32_t i = 0; i < bindings; ++i) {
+  for (uint32_t i = 0; i < image_bindings; ++i) {
     wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     wr[i].dstSet = set;
     wr[i].dstBinding = i;
@@ -1188,6 +1336,18 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
     wr[i].descriptorType = i == 0 || i == 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                                             : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     wr[i].pImageInfo = &images[i];
+  }
+  // Color: the draw bounds buffer (read with ColorParams::bounds set).
+  const VkDescriptorBufferInfo bounds_info{gpu_->draw_bounds.buffer, 0, VK_WHOLE_SIZE};
+  uint32_t bindings = image_bindings;
+  if (!depth) {
+    wr[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    wr[2].dstSet = set;
+    wr[2].dstBinding = 2;
+    wr[2].descriptorCount = 1;
+    wr[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    wr[2].pBufferInfo = &bounds_info;
+    bindings = 3;
   }
   fn.vkUpdateDescriptorSets(device_->device(), bindings, wr, 0, nullptr);
 
@@ -1249,6 +1409,7 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, rt_stages | kReaders, 0, 0,
                           nullptr, 0, nullptr, barriers, b);
   r->written = true;
+  ++r->resolve_seq;
   return true;
 }
 
@@ -1360,6 +1521,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kReaders, 0, 0,
                           nullptr, 0, nullptr, 2, b);
   r->written = true;
+  ++r->resolve_seq;
   return true;
 }
 
@@ -1622,6 +1784,7 @@ PrepareCounters VulkanBackend::EndFramePrepare(uint64_t done) {
 }
 
 void VulkanBackend::LogGpuTiming() {
+  if (gpu_timer_) gpu_timer_->Log();  // the costliest passes
   const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
   if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;
   const double n = double(w.frames);
@@ -1750,6 +1913,7 @@ bool VulkanBackend::SetPresentImage(const SwapCall& swap) {
 
 Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
   SwapResult r;
+  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyPresent());
   if (frame_index_ >= frames_logged_ + 150) {
     frames_logged_ = frame_index_;
     const VulkanShaderStats& s = shaders_->stats();
@@ -1771,6 +1935,9 @@ Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
                 resolves_, depth_resolves_, shader_resolves_, resolves_skipped_, resolve_clears_,
                 gpu_->resolved.size(),
                 front_buffer_found_ ? "shown" : "not found");
+    REXLOG_INFO("D3D12 Vulkan resolve bounds: {} color resolves cut to the draws' bounds, {} "
+                "skipped (nothing drawn since the same copy); {} targets tracked",
+                resolves_partial_, resolves_repeated_, bounds_tracks_.size());
     const VulkanTextureStats& t = gpu_->textures->stats();
     REXLOG_INFO("D3D12 Vulkan textures: {} textures, {} created ({} with mips), {} "
                 "uploads ({} KB), {} resolved binds ({} mismatched), {} unsupported, {} failed; "

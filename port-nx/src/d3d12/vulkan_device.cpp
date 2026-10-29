@@ -2,6 +2,7 @@
 #include "vulkan_device.h"
 
 #include "clock.h"
+#include "gpu_timer.h"
 
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
@@ -25,6 +26,7 @@ bool VulkanDevice::Check(VkResult r, const char* what) {
 VulkanDevice::~VulkanDevice() {
   if (!device_) return;
   fn_.vkDeviceWaitIdle(device_);
+  gpu_timer_.reset();  // its query pool
   for (Frame& f : frames_) {
     if (f.fence) fn_.vkDestroyFence(device_, f.fence, nullptr);
     if (f.pool) fn_.vkDestroyCommandPool(device_, f.pool, nullptr);
@@ -165,6 +167,8 @@ bool VulkanDevice::BeginSlot() {
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   if (!Check(fn_.vkBeginCommandBuffer(f.cmd, &bi), "vkBeginCommandBuffer")) return false;
   f.timed = false;
+  // Outside any rendering instance: the timer resets the slot's queries here.
+  if (gpu_timer_) gpu_timer_->BeginFrame(f.cmd, slot_);
   if (timestamps_) {
     fn_.vkCmdResetQueryPool(f.cmd, timestamps_, 2 * slot_, 2);
     fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps_, 2 * slot_);
@@ -211,6 +215,7 @@ void VulkanDevice::CollectGpuTime(uint32_t slot) {
 }
 
 bool VulkanDevice::Submit(Frame& f) {
+  if (gpu_timer_) gpu_timer_->EndFrame(f.cmd);
   if (timestamps_) {
     const uint32_t slot = uint32_t(&f - frames_.data());
     fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps_,
@@ -295,6 +300,66 @@ bool VulkanDevice::EndFrame(bool present, PresentPass& pass) {
   times_.submit_ns = NowNs() - t0;
   slot_ = (slot_ + 1) % kFramesInFlight;
   return BeginSlot();
+}
+
+namespace {
+
+// GpuTimer's queries on Vulkan: a timestamp query pool, its results read back once the frame's
+// fence was waited for (no WAIT_BIT: a result that isn't there is skipped, never waited for).
+// The ticks are masked to the queue's valid bits.
+class VulkanTimestamps final : public GpuTimestamps {
+ public:
+  VulkanTimestamps(const VulkanDevice::Functions& fn, VkDevice device, uint64_t mask)
+      : fn_(fn), device_(device), mask_(mask) {}
+  ~VulkanTimestamps() override {
+    if (pool_) fn_.vkDestroyQueryPool(device_, pool_, nullptr);
+  }
+  bool Initialize(uint32_t count) {
+    VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    qp.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qp.queryCount = count;
+    return fn_.vkCreateQueryPool(device_, &qp, nullptr, &pool_) == VK_SUCCESS;
+  }
+  void Write(void* list, uint32_t query) override {
+    fn_.vkCmdWriteTimestamp(static_cast<VkCommandBuffer>(list),
+                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pool_, query);
+  }
+  void Reset(void* list, uint32_t first, uint32_t count) override {
+    fn_.vkCmdResetQueryPool(static_cast<VkCommandBuffer>(list), pool_, first, count);
+  }
+  const uint64_t* Map(uint32_t first, uint32_t count) override {
+    ticks_.resize(count);
+    if (fn_.vkGetQueryPoolResults(device_, pool_, first, count, count * sizeof(uint64_t),
+                                  ticks_.data(), sizeof(uint64_t),
+                                  VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+      return nullptr;
+    for (uint64_t& t : ticks_) t &= mask_;
+    return ticks_.data();
+  }
+
+ private:
+  const VulkanDevice::Functions& fn_;
+  VkDevice device_;
+  uint64_t mask_;
+  VkQueryPool pool_ = VK_NULL_HANDLE;
+  std::vector<uint64_t> ticks_;
+};
+
+}  // namespace
+
+bool VulkanDevice::EnableGpuTimer() {
+  // The frame timestamps' setup found the queue's: without them, no timing.
+  if (!timestamps_ || tick_ns_ <= 0.0) return false;
+  auto stamps = std::make_unique<VulkanTimestamps>(fn_, device_, tick_mask_);
+  if (!stamps->Initialize(kFramesInFlight * GpuTimer::kMaxQueries)) return false;
+  auto timer = std::make_unique<GpuTimer>();
+  const uint64_t frequency = uint64_t(1e9 / tick_ns_ + 0.5);
+  if (!timer->Initialize(std::move(stamps), frequency, kFramesInFlight)) return false;
+  // The open command buffer's frame: its queries are reset at the start of BeginFrame, which
+  // records nothing else before them.
+  timer->BeginFrame(frames_[slot_].cmd, slot_);
+  gpu_timer_ = std::move(timer);
+  return true;
 }
 
 }  // namespace fear::d3d12

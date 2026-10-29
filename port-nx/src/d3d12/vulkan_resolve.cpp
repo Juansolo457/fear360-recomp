@@ -67,7 +67,8 @@ bool VulkanResolveShaders::Initialize() {
   };
   constexpr VkDescriptorType kSource = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   constexpr VkDescriptorType kStorage = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  if (!make_layouts({kSource, kStorage}, &set_layout_, &layout_) ||
+  constexpr VkDescriptorType kBuffer = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  if (!make_layouts({kSource, kStorage, kBuffer}, &set_layout_, &layout_) ||
       !make_layouts({kSource, kStorage, kStorage, kSource}, &depth_set_layout_, &depth_layout_)) {
     REXLOG_ERROR("D3D12 Vulkan: resolve set or pipeline layouts failed");
     return false;

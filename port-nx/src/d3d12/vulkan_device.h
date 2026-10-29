@@ -23,7 +23,12 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <utility>
+
+namespace fear::d3d12 {
+class GpuTimer;
+}
 
 namespace rex::ui::vulkan {
 class VulkanProvider;
@@ -46,6 +51,7 @@ namespace fear::d3d12 {
   X(vkBeginCommandBuffer)           \
   X(vkEndCommandBuffer)             \
   X(vkCmdPipelineBarrier)           \
+  X(vkCmdFillBuffer)                \
   X(vkCmdClearColorImage)           \
   X(vkCreateFence)                  \
   X(vkDestroyFence)                 \
@@ -215,6 +221,12 @@ class VulkanDevice {
   };
   GpuWindow TakeGpuWindow() { return std::exchange(gpu_window_, {}); }
 
+  // Timestamps per pass in every frame from now on (gpu_timer.h, --fear_d3d12_gpu_timing),
+  // starting with the open command buffer: its own query pool, kMaxQueries per slot. False
+  // without timestamps on the queue.
+  bool EnableGpuTimer();
+  GpuTimer* gpu_timer() const { return gpu_timer_.get(); }
+
   const Functions& fn() const { return fn_; }
   VkDevice device() const { return device_; }
   VkInstance instance() const { return instance_; }
@@ -258,6 +270,7 @@ class VulkanDevice {
   uint64_t gpu_last_end_ = 0;  // end tick of the frame collected last (0: none yet)
   uint64_t gpu_last_recorded_ns_ = 0;  // that frame's Frame::recorded_ns
   GpuWindow gpu_window_;
+  std::unique_ptr<GpuTimer> gpu_timer_;
 };
 
 }  // namespace fear::d3d12

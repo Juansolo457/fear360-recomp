@@ -15,6 +15,7 @@ layout(push_constant) uniform Params {
   uint src_format;    // xenos::ColorRenderTargetFormat
   uint flags;         // 2: red/blue swap, 4-6: sample select, 8-10: samples, 12-14: number
   int exp_bias;
+  uint bounds;        // 0xFFFFFFFF: all of it; else bits 0-7 the draw bounds slot, bit 31 expand
 } p;
 
 #if MSAA
@@ -25,6 +26,40 @@ layout(set = 0, binding = 0) uniform sampler2D src;
 // R8 / R16 / R32 / R32G32 / R32G32B32A32_UINT by the destination's texel size (written without
 // a format qualifier: shaderStorageImageWriteWithoutFormat).
 layout(set = 0, binding = 1) uniform writeonly uimage2D dst;
+// The draw bounds buffer (vulkan_backend.h): per slot, the minimum x and y of the draws'
+// vertices in render target pixels as x + kBoundsBias, then the maximum x and y as
+// kBoundsBias - x (the vertex shaders keep each with an unsigned atomic minimum).
+layout(std430, set = 0, binding = 2) readonly buffer DrawBounds { uint draw_bounds[]; };
+const int kBoundsBias = 1 << 30;
+// Pixels around the box: rasterization reaches no further than the vertices, but the box is
+// whole pixels and a line or a point sprite's edge can be a pixel out.
+const int kBoundsMargin = 8;
+
+// With p.bounds: whether this workgroup's 8x8 tile of the source has anything the draws since
+// the previous copy of the same rectangle reached (the rest of the destination holds that copy).
+bool TileInBounds() {
+  if (p.bounds == 0xFFFFFFFFu) return true;
+  uint b = (p.bounds & 0xFFu) * 4u;
+  ivec2 lo = ivec2(int(draw_bounds[b]) - kBoundsBias, int(draw_bounds[b + 1u]) - kBoundsBias);
+  ivec2 hi = ivec2(kBoundsBias - int(draw_bounds[b + 2u]), kBoundsBias - int(draw_bounds[b + 3u]));
+  // Past the vertex shaders' clamp (2^29): the slot was opened by a vertex behind the camera,
+  // or no vertex reached it; everything is copied (and the expansion below can't overflow).
+  const int kBoundsLimit = 1 << 29;
+  if (any(lessThan(lo, ivec2(-kBoundsLimit))) || any(greaterThan(hi, ivec2(kBoundsLimit))))
+    return true;
+  if ((p.bounds & 0x80000000u) != 0u) {
+    // A rectangle list's fourth vertex, made from the other three, can lie as far outside
+    // their box as the box is wide.
+    ivec2 size = hi - lo;
+    lo -= size;
+    hi += size;
+  }
+  lo -= kBoundsMargin;
+  hi += kBoundsMargin;
+  ivec2 t0 = p.src_origin + ivec2(gl_WorkGroupID.xy * 8u);
+  ivec2 t1 = t0 + 7;
+  return !(any(lessThan(t1, lo)) || any(greaterThan(t0, hi)));
+}
 
 uint SampleSelect() { return (p.flags >> 4) & 7u; }
 uint SampleCount() { return (p.flags >> 8) & 7u; }
@@ -117,6 +152,7 @@ uvec4 PackDest(vec4 c) {
 }
 
 void main() {
+  if (!TileInBounds()) return;
   uvec2 id = gl_GlobalInvocationID.xy;
   if (any(greaterThanEqual(id, p.size))) return;
   vec4 c = Convert(LoadColor(p.src_origin + ivec2(id)));

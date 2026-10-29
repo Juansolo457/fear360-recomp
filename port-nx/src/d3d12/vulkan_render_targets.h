@@ -43,6 +43,9 @@ struct VulkanRenderTarget {
   bool initialized = false;  // in its attachment layout (false: just created, UNDEFINED)
   uint64_t last_frame = 0;
   uint64_t fill_seq = 0;  // EDRAM fills up to this sequence are applied (SyncEdram)
+  // Bumped by every write outside the draws: a new image, its zeroing, clears and EDRAM fills
+  // (the resolve bounds, vulkan_backend.h).
+  uint64_t content_seq = 0;
 };
 
 struct VulkanBoundTargets {

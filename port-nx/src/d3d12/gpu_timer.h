@@ -21,9 +21,8 @@
 // Threading: the thread that records the frames (the render thread by default).
 #pragma once
 
-#include "d3d12_device.h"
-
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,24 +34,46 @@ namespace fear::d3d12 {
 struct ClearCall;
 struct ResolveParams;
 
+// The API's timestamp queries, which the timer is otherwise free of: the D3D12 device's (a
+// query heap and a readback buffer, d3d12_device.cpp) and the Vulkan device's (a query pool,
+// vulkan_device.cpp). `list` is the API's command list or buffer the frame records into.
+// Queries are numbered per slot: slot * GpuTimer::kMaxQueries + the frame's count.
+class GpuTimestamps {
+ public:
+  virtual ~GpuTimestamps() = default;
+  // A timestamp when the work recorded before it has finished.
+  virtual void Write(void* list, uint32_t query) = 0;
+  // At the frame's start, before any Write: queries that must be reset first (Vulkan).
+  virtual void Reset(void* list, uint32_t first, uint32_t count) {}
+  // At the frame's end: queries that must be copied somewhere readable (D3D12).
+  virtual void Resolve(void* list, uint32_t first, uint32_t count) {}
+  // The ticks of a finished frame's queries (its fence was waited for); nullptr if unavailable.
+  // Valid until Unmap.
+  virtual const uint64_t* Map(uint32_t first, uint32_t count) = 0;
+  virtual void Unmap() {}
+};
+
 class GpuTimer {
  public:
   // Spans per frame; passes past it are charged to the last span.
   static constexpr uint32_t kMaxSpans = 2047;
+  // Queries per slot: one more than spans.
+  static constexpr uint32_t kMaxQueries = kMaxSpans + 1;
 
-  // `slots`: command allocators the frames rotate through (D3D12Device::kFramesInFlight).
-  bool Initialize(ID3D12Device* device, ID3D12CommandQueue* queue, uint32_t slots);
+  // `slots`: the frames-in-flight the device rotates through (each a command allocator or
+  // command buffer); `frequency`: timestamp ticks per second.
+  bool Initialize(std::unique_ptr<GpuTimestamps> stamps, uint64_t frequency, uint32_t slots);
 
-  // The frame's command list was opened on allocator `slot`: collects the frame that slot
-  // held last (complete, its fence was waited for) and writes the new frame's first timestamp.
-  void BeginFrame(ID3D12GraphicsCommandList* list, uint32_t slot);
+  // The frame's command list was opened on `slot`: collects the frame that slot held last
+  // (complete, its fence was waited for) and writes the new frame's first timestamp.
+  void BeginFrame(void* list, uint32_t slot);
   // The commands recorded next belong to pass `key`.
-  void Pass(ID3D12GraphicsCommandList* list, uint64_t key) {
+  void Pass(void* list, uint64_t key) {
     if (key != current_) Switch(list, key);
     ++frames_[slot_].spans.back().commands;
   }
   // Before the list is closed: the last timestamp, and the copy into the readback slot.
-  void EndFrame(ID3D12GraphicsCommandList* list);
+  void EndFrame(void* list);
 
   // Pass keys. Draws: render target registers and which targets the draw writes.
   static uint64_t KeyDraw(const uint32_t* regs);
@@ -103,15 +124,14 @@ class GpuTimer {
     uint64_t ticks = 0, spans = 0, commands = 0, position = 0;
   };
 
-  void Switch(ID3D12GraphicsCommandList* list, uint64_t key);
-  void Stamp(ID3D12GraphicsCommandList* list);
+  void Switch(void* list, uint64_t key);
+  void Stamp(void* list);
   void Collect(uint32_t slot);
   bool IsSpike(uint64_t ticks);
   void LogSpike(const Frame& f, uint64_t ticks);
   std::string Describe(uint64_t key) const;
 
-  ComPtr<ID3D12QueryHeap> heap_;
-  ComPtr<ID3D12Resource> readback_;
+  std::unique_ptr<GpuTimestamps> stamps_;
   uint64_t frequency_ = 1;
   std::vector<Frame> frames_;
   uint32_t slot_ = 0;

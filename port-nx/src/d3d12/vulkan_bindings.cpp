@@ -56,7 +56,7 @@ bool VulkanBindings::Check(VkResult r, const char* what) {
   return false;
 }
 
-bool VulkanBindings::Initialize(VulkanMemory& memory, VkBuffer shared) {
+bool VulkanBindings::Initialize(VulkanMemory& memory, VkBuffer shared, VkBuffer draw_bounds) {
   memory_ = &memory;
   uniforms_.SetMemory(&memory);
   const VulkanDevice::Functions& fn = device_.fn();
@@ -74,13 +74,20 @@ bool VulkanBindings::Initialize(VulkanMemory& memory, VkBuffer shared) {
   const uint32_t shared_log2 =
       SpirvShaderTranslator::GetSharedMemoryStorageBufferCountLog2(caps.max_storage_buffer_range);
   const uint32_t shared_count = 1u << shared_log2;
-  VkDescriptorSetLayoutBinding shared_binding{};
+  VkDescriptorSetLayoutBinding set0[2] = {};
+  VkDescriptorSetLayoutBinding& shared_binding = set0[0];
   shared_binding.binding = 0;
   shared_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   shared_binding.descriptorCount = shared_count;
   shared_binding.stageFlags = guest_stages;
-  li.bindingCount = 1;
-  li.pBindings = &shared_binding;
+  // The draw bounds buffer, written by the vertex shaders' atomics.
+  VkDescriptorSetLayoutBinding& bounds_binding = set0[1];
+  bounds_binding.binding = SpirvShaderTranslator::kDrawBoundsBinding;
+  bounds_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bounds_binding.descriptorCount = 1;
+  bounds_binding.stageFlags = vertex_stages_;
+  li.bindingCount = 2;
+  li.pBindings = set0;
   if (!Check(fn.vkCreateDescriptorSetLayout(d, &li, nullptr, &shared_layout_),
              "the shared memory descriptor set layout"))
     return false;
@@ -105,7 +112,7 @@ bool VulkanBindings::Initialize(VulkanMemory& memory, VkBuffer shared) {
     return false;
 
   // The shared memory set, written once.
-  VkDescriptorPoolSize shared_size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, shared_count};
+  VkDescriptorPoolSize shared_size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, shared_count + 1};
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pi.maxSets = 1;
   pi.poolSizeCount = 1;
@@ -122,13 +129,18 @@ bool VulkanBindings::Initialize(VulkanMemory& memory, VkBuffer shared) {
   std::vector<VkDescriptorBufferInfo> shared_infos(shared_count);
   const uint64_t shared_range = GuestMemoryMirror::kSharedMemorySize >> shared_log2;
   for (uint32_t i = 0; i < shared_count; ++i) shared_infos[i] = {shared, i * shared_range, shared_range};
-  VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-  w.dstSet = shared_set_;
-  w.dstBinding = 0;
-  w.descriptorCount = shared_count;
-  w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  w.pBufferInfo = shared_infos.data();
-  fn.vkUpdateDescriptorSets(d, 1, &w, 0, nullptr);
+  const VkDescriptorBufferInfo bounds_info{draw_bounds, 0, VK_WHOLE_SIZE};
+  VkWriteDescriptorSet w[2] = {};
+  w[0].sType = w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  w[0].dstSet = w[1].dstSet = shared_set_;
+  w[0].descriptorType = w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  w[0].dstBinding = 0;
+  w[0].descriptorCount = shared_count;
+  w[0].pBufferInfo = shared_infos.data();
+  w[1].dstBinding = SpirvShaderTranslator::kDrawBoundsBinding;
+  w[1].descriptorCount = 1;
+  w[1].pBufferInfo = &bounds_info;
+  fn.vkUpdateDescriptorSets(d, 2, w, 0, nullptr);
 
   // Placeholder textures: transparent black, what D3D12's null views read (bindings without a
   // texture, or of another dimension or signedness), cleared by InitializePlaceholders.
@@ -278,6 +290,7 @@ VkDescriptorPool VulkanBindings::NewPool() {
       {VK_DESCRIPTOR_TYPE_SAMPLER, kPoolSets * 8},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kPoolSets / 16},
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kPoolSets / 16},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kPoolSets / 16},  // the color resolves' draw bounds
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pi.maxSets = kPoolSets;

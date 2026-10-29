@@ -4,7 +4,9 @@
 // The binding model is the SDK's SPIR-V translator's (VulkanCommandProcessor's, host render
 // target path): four descriptor sets and no push constants.
 //   set 0  shared memory: storage buffer binding 0, an array of
-//          1 << GetSharedMemoryStorageBufferCountLog2 elements covering the 512 MB together
+//          1 << GetSharedMemoryStorageBufferCountLog2 elements covering the 512 MB together,
+//          and the draw bounds buffer at binding kDrawBoundsBinding (vertex stage; the
+//          resolve bounds, vulkan_backend.h)
 //   set 1  the five constant buffers, uniform buffer bindings 0-4 in kConstantBuffer order
 //          (system, float VS, float PS, bool/loop, fetch)
 //   set 2  vertex shader textures: the shader's sampled images (0..N-1), then its samplers
@@ -58,8 +60,9 @@ class VulkanBindings {
   explicit VulkanBindings(VulkanDevice& device) : device_(device) {}
   ~VulkanBindings();
 
-  // `shared`: the shared memory buffer, kSharedMemorySize bytes.
-  bool Initialize(VulkanMemory& memory, VkBuffer shared);
+  // `shared`: the shared memory buffer, kSharedMemorySize bytes; `draw_bounds`: the draw bounds
+  // buffer (SpirvShaderTranslator::kDrawBoundsBinding).
+  bool Initialize(VulkanMemory& memory, VkBuffer shared, VkBuffer draw_bounds);
 
   // The pipeline layout for the shaders' texture and sampler counts (after translation); null
   // if it can't be created (logged).

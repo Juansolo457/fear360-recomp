@@ -43,6 +43,7 @@ class SpirvShader;
 
 namespace fear::d3d12 {
 
+class GpuTimer;
 class VulkanDevice;
 class PipelineStore;
 struct VulkanPipelineKey;
@@ -102,6 +103,7 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
                                          rex::graphics::xenos::ShaderType type);
 
   std::unique_ptr<VulkanDevice> device_;
+  GpuTimer* gpu_timer_ = nullptr;  // device_'s, with --fear_d3d12_gpu_timing
   std::unique_ptr<VulkanShaderCache> shaders_;
   struct Gpu;  // memory, the shared buffer, upload pools (vulkan_backend.cpp)
   struct ResolvedImage;  // a resolve destination (vulkan_backend.cpp)
@@ -147,6 +149,54 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   rex::graphics::xenos::AnisoFilter min_aniso_ = rex::graphics::xenos::AnisoFilter::kDisabled;
   uint64_t resolves_ = 0, resolves_skipped_ = 0, resolve_clears_ = 0, depth_resolves_ = 0;
   uint64_t shader_resolves_ = 0;  // color resolves through the shader (the rest: copies, blits)
+  // Resolve bounds (#100): where the game resolves the same rectangle of a color target into
+  // the same destination over and over (an effect drawn, the frame copied, the next effect
+  // drawn from the copy...), each copy is cut to what the draws since the previous one reached.
+  // A tracked target's draws run their vertex shaders with SpirvShaderTranslator's
+  // kSysFlag_DrawBounds, which records each vertex's pixel position in the target's slot of
+  // the draw bounds buffer (gpu_->draw_bounds, kDrawBoundsSlots x 16 bytes); the resolve
+  // shader then copies only the tiles the slot's box (plus a margin) touches, the destination
+  // keeping the rest from the previous copy, and the slot is reset. Tracking starts once a
+  // resolve repeats the one before it and stops when the pattern breaks or a draw count is
+  // passed. --no-fear_d3d12_vulkan_resolve_bounds turns it off.
+  static constexpr uint32_t kDrawBoundsSlots = 16;
+  static constexpr uint32_t kDrawBoundsSlotBytes = 16;
+  static constexpr uint32_t kDrawBoundsMaxDraws = 64;  // tracked draws between two resolves
+  // A color resolve's copy, with what its source and destination held: the same again means
+  // the destination holds the previous copy, except where the draws since changed the source.
+  struct ResolveCopy {
+    const VulkanRenderTarget* rt = nullptr;
+    uint64_t content_seq = 0;  // rt->content_seq
+    int32_t x0 = 0, y0 = 0, w = 0, h = 0, dx = 0, dy = 0;
+    uint32_t dest_base = 0, dest_format = 0, sample_select = 0, dest_swap = 0, dest_number = 0;
+    int32_t exp_bias = 0;
+    bool operator==(const ResolveCopy&) const = default;
+  };
+  struct BoundsTrack {
+    uint32_t slot = 0;
+    bool tracking = false;      // the draws to the target record their bounds
+    bool bounds_valid = false;  // the slot saw every draw to the target since its last resolve
+    bool expand = false;        // a rectangle list drew since (VulkanResolveShaders::kBoundsExpand)
+    uint32_t draws = 0;         // draws to the target since its last resolve
+    bool has_last = false;
+    ResolveCopy last;           // the target's last color resolve
+    VkImage last_dest = VK_NULL_HANDLE;  // its destination image, and that image's copies
+    uint64_t last_dest_seq = 0;          // (ResolvedImage::resolve_seq) after it
+    // The pattern broke (a copy the shader couldn't make): nothing is known any more.
+    void Break() {
+      tracking = bounds_valid = expand = has_last = false;
+      draws = 0;
+    }
+  };
+  std::unordered_map<const VulkanRenderTarget*, BoundsTrack> bounds_tracks_;
+  const VulkanRenderTarget* bounds_slot_owner_[kDrawBoundsSlots] = {};
+  uint32_t bounds_next_slot_ = 0;
+  bool bounds_buffer_ready_ = false;  // filled once before its first use
+  uint64_t resolves_partial_ = 0, resolves_repeated_ = 0;
+  BoundsTrack& BoundsTrackOf(const VulkanRenderTarget* rt);
+  // Resets the slot (every slot the first time): a fill of 0xFFFFFFFF between the barriers the
+  // vertex shaders' atomics and the resolve shader's reads need. Outside rendering.
+  void ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot);
   // Copies rt's (x0, y0, w, h) to (dx, dy) of the dest_w x dest_h image kept under `key` (a
   // resolve's destination address), resolving MSAA; the image is then ready to be shown.
   // dest_format: the image's format (VK_FORMAT_UNDEFINED: rt's); another one is blitted.
@@ -160,8 +210,11 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   // bits. False: not done (a color format the shader can't write: CopyTarget instead).
   bool CopyDepth(VulkanRenderTarget* rt, int32_t x0, int32_t y0, int32_t w, int32_t h,
                  int32_t dx, int32_t dy, const ResolveParams& p);
+  // `track` (the resolve bounds, or null) with `copy`, the resolve as ResolveCopy describes it:
+  // the copy is cut to the bounds, or skipped, when the destination already holds the rest.
   bool CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, int32_t w, int32_t h,
-                 int32_t dx, int32_t dy, const ResolveParams& p);
+                 int32_t dx, int32_t dy, const ResolveParams& p, BoundsTrack* track,
+                 const ResolveCopy& copy);
   // --fear_d3d12_vulkan_resolve_dump: reads back the image of a resolve of the dumped frame,
   // texels (0, 0) to (width, height); AfterSwap writes them once the GPU finished the frame.
   void DumpRecord(const ResolveParams& p, uint32_t width, uint32_t height);

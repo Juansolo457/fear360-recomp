@@ -14,7 +14,7 @@ function(fear_add_renderer host)
         # The D3D12 backend's files (its device, draws, textures, resolves, present, frame pacer,
         # DXBC shaders); the rest is API-free or the Vulkan backend's.
         list(FILTER sources EXCLUDE REGEX
-             "/(d3d12_[a-z_]+|draw|frame_pacer|geometry_shader|gpu_timer|pipeline_library|present|present_debug|render_targets|resolve|resolve_debug|shader_cache|shader_specialize|shader_translate|textures)\\.cpp$")
+             "/(d3d12_[a-z_]+|draw|frame_pacer|geometry_shader|pipeline_library|present|present_debug|render_targets|resolve|resolve_debug|shader_cache|shader_specialize|shader_translate|textures)\\.cpp$")
     endif()
     add_library(fear_d3d12 OBJECT ${sources})
     if("FILES" IN_LIST ARGN)
