@@ -139,6 +139,8 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint32_t frame_draw_ = 0;
   uint64_t skip_vs_ = 0;  // --fear_d3d12_vulkan_skip_vs
   uint64_t dump_after_vs_ = 0;  // --fear_d3d12_vulkan_dump_after_vs
+  std::unordered_set<uint64_t> coverage_ps_;  // --fear_d3d12_vulkan_coverage_ps (empty: off)
+  bool coverage_parsed_ = false;
   int64_t dump_at_ = -1;         // the frame it picked (-1: none yet)
   uint32_t dump_after_count_ = 0;
   uint32_t skip_first_ = UINT32_MAX, skip_last_ = 0;

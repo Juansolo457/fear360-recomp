@@ -38,6 +38,12 @@
 #include <thread>
 #include <utility>
 
+REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_coverage_ps, "", "F.E.A.R. D3D12",
+                      "Debug: count the samples each draw with one of these pixel shaders writes "
+                      "past the depth and stencil tests (precise occlusion queries; ucode hashes, "
+                      "16 hex digits, comma-separated) and log per shader, with the GPU timing "
+                      "lines: draws per frame, samples per draw against the color target's size "
+                      "(how many times a draw covers its target), triangles per draw");
 REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_resolve_bounds, true, "F.E.A.R. D3D12",
                     "Cut a color resolve that repeats the previous one (the same rectangle "
                     "into the same destination) to the screen bounds of the draws since it "
@@ -829,6 +835,14 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   fn.vkCmdSetStencilWriteMask(cmd, VK_STENCIL_FACE_BACK_BIT, ref_bf.stencilwritemask);
   fn.vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_FRONT_BIT, ref.stencilref);
   fn.vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_BACK_BIT, ref_bf.stencilref);
+  // --fear_d3d12_vulkan_coverage_ps: the samples this draw writes (VulkanDevice::BeginCoverage).
+  int32_t coverage = -1;
+  if (!coverage_ps_.empty() && ps && bound.color[0] &&
+      coverage_ps_.count(ps->ucode_data_hash())) {
+    const VulkanRenderTarget* rt = bound.color[0];
+    coverage = device_->BeginCoverage(ps->ucode_data_hash(), rt->width * rt->height * rt->samples,
+                                      state.count / 3);
+  }
   if (state.indexed) {
     fn.vkCmdBindIndexBuffer(cmd, gpu_->shared.buffer, state.index_address,
                             state.index_32bit ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
@@ -836,6 +850,7 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   } else {
     fn.vkCmdDraw(cmd, state.count, 1, 0, 0);
   }
+  device_->EndCoverage(coverage);
   if (int64_t(frame_index_) ==
       (dump_at_ >= 0 ? dump_at_ : int64_t(REXCVAR_GET(fear_d3d12_vulkan_draw_log_frame)))) {
     const auto surface = [](const VulkanRenderTarget* rt) {
@@ -1788,6 +1803,22 @@ void VulkanBackend::BeginFrame(uint64_t frame_index) {
     dump_after_vs_ = std::strtoull(after.c_str(), &end, 16);
     dump_after_count_ = end && *end == ':' ? uint32_t(std::strtoul(end + 1, nullptr, 10)) : 0;
   }
+  if (!coverage_parsed_) {
+    // Once, at the first frame: the hashes, and the device's query pool.
+    coverage_parsed_ = true;
+    const std::string list = REXCVAR_GET(fear_d3d12_vulkan_coverage_ps);
+    for (size_t pos = 0; pos < list.size();) {
+      const size_t comma = std::min(list.find(',', pos), list.size());
+      const uint64_t hash = std::strtoull(list.substr(pos, comma - pos).c_str(), nullptr, 16);
+      if (hash) coverage_ps_.insert(hash);
+      pos = comma + 1;
+    }
+    if (!coverage_ps_.empty() && !device_->EnableCoverage()) coverage_ps_.clear();
+    if (!coverage_ps_.empty()) {
+      REXLOG_INFO("D3D12 Vulkan: counting the samples of {} pixel shaders' draws",
+                  coverage_ps_.size());
+    }
+  }
   gpu_->targets.BeginFrame(frame_index, device_->frame_fence(), device_->completed_fence());
 }
 
@@ -1807,6 +1838,35 @@ PrepareCounters VulkanBackend::EndFramePrepare(uint64_t done) {
 }
 
 void VulkanBackend::LogGpuTiming() {
+  if (!coverage_ps_.empty()) {
+    // Per pixel shader: draws per frame, samples per draw against the target's size (1.0 = one
+    // full cover of the target), the most in one draw, triangles per draw.
+    struct Sum {
+      uint64_t draws = 0, samples = 0, max_samples = 0, target = 0, triangles = 0;
+      double covers = 0.0, max_covers = 0.0;
+    };
+    std::unordered_map<uint64_t, Sum> sums;
+    for (const VulkanDevice::CoverageDraw& d : device_->TakeCoverage()) {
+      Sum& s = sums[d.tag];
+      const double covers = d.target_samples ? double(d.samples) / d.target_samples : 0.0;
+      ++s.draws;
+      s.samples += d.samples;
+      s.max_samples = std::max(s.max_samples, d.samples);
+      s.target = d.target_samples;
+      s.triangles += d.triangles;
+      s.covers += covers;
+      s.max_covers = std::max(s.max_covers, covers);
+    }
+    const double frames = double(std::max<uint64_t>(device_->TakeCoverageFrames(), 1));
+    for (const auto& [tag, s] : sums) {
+      const double n = double(s.draws);
+      REXLOG_INFO("D3D12 Vulkan coverage ps {:016X}: {:.1f} draws per frame, {:.0f} samples per "
+                  "draw ({:.2f} covers of the {}-sample target, max {:.2f} = {} samples), "
+                  "{:.0f} triangles per draw",
+                  tag, n / frames, double(s.samples) / n, s.covers / n, s.target, s.max_covers,
+                  s.max_samples, double(s.triangles) / n);
+    }
+  }
   if (gpu_timer_) gpu_timer_->Log();  // the costliest passes
   const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
   if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;

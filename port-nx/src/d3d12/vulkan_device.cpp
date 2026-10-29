@@ -32,6 +32,7 @@ VulkanDevice::~VulkanDevice() {
     if (f.pool) fn_.vkDestroyCommandPool(device_, f.pool, nullptr);
   }
   if (timestamps_) fn_.vkDestroyQueryPool(device_, timestamps_, nullptr);
+  if (coverage_) fn_.vkDestroyQueryPool(device_, coverage_, nullptr);
 }
 
 bool VulkanDevice::Initialize(rex::ui::vulkan::VulkanProvider& provider) {
@@ -161,6 +162,7 @@ bool VulkanDevice::BeginSlot() {
     completed_ = std::max(completed_, f.number);
     fn_.vkResetFences(device_, 1, &f.fence);
     if (f.timed) CollectGpuTime(slot_);
+    if (coverage_) CollectCoverage(slot_);
   }
   fn_.vkResetCommandPool(device_, f.pool, 0);
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -169,6 +171,9 @@ bool VulkanDevice::BeginSlot() {
   f.timed = false;
   // Outside any rendering instance: the timer resets the slot's queries here.
   if (gpu_timer_) gpu_timer_->BeginFrame(f.cmd, slot_);
+  if (coverage_) {
+    fn_.vkCmdResetQueryPool(f.cmd, coverage_, slot_ * kCoverageQueries, kCoverageQueries);
+  }
   if (timestamps_) {
     fn_.vkCmdResetQueryPool(f.cmd, timestamps_, 2 * slot_, 2);
     fn_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps_, 2 * slot_);
@@ -212,6 +217,53 @@ void VulkanDevice::CollectGpuTime(uint32_t slot) {
   }
   gpu_last_end_ = end;
   gpu_last_recorded_ns_ = frames_[slot].recorded_ns;
+}
+
+bool VulkanDevice::EnableCoverage() {
+  if (coverage_) return true;
+  VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+  qp.queryType = VK_QUERY_TYPE_OCCLUSION;
+  qp.queryCount = kFramesInFlight * kCoverageQueries;
+  if (!Check(fn_.vkCreateQueryPool(device_, &qp, nullptr, &coverage_), "vkCreateQueryPool")) {
+    coverage_ = VK_NULL_HANDLE;
+    return false;
+  }
+  // The open command buffer's frame wasn't reset at its start; nothing is recorded in it yet
+  // (the backend enables this as it starts), so this is outside any rendering instance.
+  fn_.vkCmdResetQueryPool(frames_[slot_].cmd, coverage_, slot_ * kCoverageQueries,
+                          kCoverageQueries);
+  return true;
+}
+
+int32_t VulkanDevice::BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles) {
+  std::vector<CoverageDraw>& draws = coverage_pending_[slot_];
+  if (!coverage_ || draws.size() >= kCoverageQueries) return -1;
+  const uint32_t query = slot_ * kCoverageQueries + uint32_t(draws.size());
+  draws.push_back({tag, 0, target_samples, triangles});
+  fn_.vkCmdBeginQuery(frames_[slot_].cmd, coverage_, query, VK_QUERY_CONTROL_PRECISE_BIT);
+  return int32_t(query);
+}
+
+void VulkanDevice::EndCoverage(int32_t query) {
+  if (query >= 0) fn_.vkCmdEndQuery(frames_[slot_].cmd, coverage_, uint32_t(query));
+}
+
+void VulkanDevice::CollectCoverage(uint32_t slot) {
+  std::vector<CoverageDraw>& draws = coverage_pending_[slot];
+  ++coverage_frames_;
+  if (draws.empty()) return;
+  std::vector<uint64_t> samples(draws.size());
+  // The frame's fence was waited for, so every result is there; none is waited for.
+  if (fn_.vkGetQueryPoolResults(device_, coverage_, slot * kCoverageQueries,
+                                uint32_t(draws.size()), samples.size() * sizeof(uint64_t),
+                                samples.data(), sizeof(uint64_t),
+                                VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+    for (size_t i = 0; i < draws.size(); ++i) {
+      draws[i].samples = samples[i];
+      coverage_done_.push_back(draws[i]);
+    }
+  }
+  draws.clear();
 }
 
 bool VulkanDevice::Submit(Frame& f) {

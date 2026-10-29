@@ -25,6 +25,7 @@
 #include <limits>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace fear::d3d12 {
 class GpuTimer;
@@ -108,6 +109,8 @@ namespace fear::d3d12 {
   X(vkDestroyQueryPool)             \
   X(vkCmdResetQueryPool)            \
   X(vkCmdWriteTimestamp)            \
+  X(vkCmdBeginQuery)                \
+  X(vkCmdEndQuery)                  \
   X(vkGetQueryPoolResults)
 
 class VulkanDevice {
@@ -228,6 +231,22 @@ class VulkanDevice {
   bool EnableGpuTimer();
   GpuTimer* gpu_timer() const { return gpu_timer_.get(); }
 
+  // Coverage (--fear_d3d12_vulkan_coverage_ps): a precise occlusion query around chosen draws,
+  // the samples each wrote past the depth and stencil tests, read back as the frame timestamps
+  // are (once BeginSlot has waited for the frame's fence). `tag` names the draw (its pixel
+  // shader's hash), `target_samples` is its color target's size in samples. BeginCoverage
+  // returns the query, or -1 when the frame's kCoverageQueries are used up; EndCoverage takes it.
+  struct CoverageDraw {
+    uint64_t tag = 0, samples = 0;
+    uint32_t target_samples = 0, triangles = 0;
+  };
+  bool EnableCoverage();
+  int32_t BeginCoverage(uint64_t tag, uint32_t target_samples, uint32_t triangles);
+  void EndCoverage(int32_t query);
+  // The draws collected since the last call, and the frames they came from.
+  std::vector<CoverageDraw> TakeCoverage() { return std::exchange(coverage_done_, {}); }
+  uint64_t TakeCoverageFrames() { return std::exchange(coverage_frames_, 0); }
+
   const Functions& fn() const { return fn_; }
   VkDevice device() const { return device_; }
   VkInstance instance() const { return instance_; }
@@ -246,6 +265,7 @@ class VulkanDevice {
   };
   // The finished frame's timestamps (queries 2 * slot and 2 * slot + 1) into gpu_last_ms_.
   void CollectGpuTime(uint32_t slot);
+  void CollectCoverage(uint32_t slot);  // the finished frame's coverage queries
   bool BeginSlot();  // waits for the slot's previous frame and opens its command buffer
   // Ends and submits the slot's command buffer on queue 0 (under the SDK's queue lock).
   bool Submit(Frame& f);
@@ -272,6 +292,12 @@ class VulkanDevice {
   uint64_t gpu_last_recorded_ns_ = 0;  // that frame's Frame::recorded_ns
   GpuWindow gpu_window_;
   std::unique_ptr<GpuTimer> gpu_timer_;
+
+  static constexpr uint32_t kCoverageQueries = 512;  // per frame-in-flight slot
+  VkQueryPool coverage_ = VK_NULL_HANDLE;
+  std::array<std::vector<CoverageDraw>, kFramesInFlight> coverage_pending_;  // per slot, in order
+  std::vector<CoverageDraw> coverage_done_;
+  uint64_t coverage_frames_ = 0;
 };
 
 }  // namespace fear::d3d12
