@@ -38,6 +38,10 @@
 #include <thread>
 #include <utility>
 
+REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_skip_repeat_resolves, false, "F.E.A.R. D3D12",
+                    "Experiment (#100): skip a color resolve that copies the same rectangle "
+                    "into the same destination as the resolve before it, with no draw or clear "
+                    "in between (its destination already holds that copy)");
 REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_show_target, false, "F.E.A.R. D3D12",
                     "With --fear_d3d12_api=vulkan: show the color render target most of the "
                     "frame's draws went to (the 3D scene) instead of the front buffer, to check "
@@ -407,6 +411,7 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
                          : GpuTimer::KeyDraw(state.regs));
   }
   const uint32_t draw_index = frame_draw_++;
+  ++target_writes_;
   if (prep) {
     // The guest thread copied the ranges (and marked their pages valid): they go into shared
     // memory whether or not the draw is issued.
@@ -890,6 +895,7 @@ void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
 }
 
 void VulkanBackend::Clear(const ClearCall& clear) {
+  ++target_writes_;
   if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyClear(clear));
   gpu_->targets.Clear(device_->command_buffer(), clear);
 }
@@ -930,6 +936,24 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
   const int32_t dx = p.dest_x + (x0 - p.x0), dy = p.dest_y + (y0 - p.y0);
   const int32_t w = std::min(x1 - x0, int32_t(p.dest_width) - dx);
   const int32_t h = std::min(y1 - y0, int32_t(p.dest_height) - dy);
+  if (!depth) {
+    const uint64_t gap =
+        last_resolve_writes_ == UINT64_MAX ? 5 : target_writes_ - last_resolve_writes_;
+    ++resolve_gaps_[gap == 0 ? 0 : gap == 1 ? 1 : gap <= 4 ? 2 : 3];
+    const ResolveCopy copy{rt, x0, y0, w, h, dx, dy, p.dest_base, p.dest_format,
+                           p.sample_select, p.dest_swap};
+    const bool repeat = gap == 0 && copy == last_resolve_ && p.copy_command == 1;
+    last_resolve_ = copy;
+    // A clear of the source changes what the next copy would read.
+    last_resolve_writes_ = p.clear_flags ? UINT64_MAX : target_writes_;
+    if (repeat) {
+      ++resolve_repeats_;
+      if (REXCVAR_GET(fear_d3d12_vulkan_skip_repeat_resolves)) {
+        ++resolves_skipped_;
+        return;
+      }
+    }
+  }
   bool copied = false;
   if (w > 0 && h > 0 && dx >= 0 && dy >= 0) {
     targets.PrepareRead(cmd, rt);
@@ -1792,6 +1816,10 @@ Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
                 resolves_, depth_resolves_, shader_resolves_, resolves_skipped_, resolve_clears_,
                 gpu_->resolved.size(),
                 front_buffer_found_ ? "shown" : "not found");
+    REXLOG_INFO("D3D12 Vulkan resolve repeats: {} (same copy, nothing drawn since); draws and "
+                "clears since the previous resolve: 0: {}, 1: {}, 2-4: {}, 5+: {}",
+                resolve_repeats_, resolve_gaps_[0], resolve_gaps_[1], resolve_gaps_[2],
+                resolve_gaps_[3]);
     const VulkanTextureStats& t = gpu_->textures->stats();
     REXLOG_INFO("D3D12 Vulkan textures: {} textures, {} created ({} with mips), {} "
                 "uploads ({} KB), {} resolved binds ({} mismatched), {} unsupported, {} failed; "

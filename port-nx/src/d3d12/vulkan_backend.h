@@ -149,6 +149,20 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   rex::graphics::xenos::AnisoFilter min_aniso_ = rex::graphics::xenos::AnisoFilter::kDisabled;
   uint64_t resolves_ = 0, resolves_skipped_ = 0, resolve_clears_ = 0, depth_resolves_ = 0;
   uint64_t shader_resolves_ = 0;  // color resolves through the shader (the rest: copies, blits)
+  // Repeated resolves (#100): the same color copy as the resolve before, with no draw or clear
+  // in between (target_writes_ unchanged), so its destination already holds it. Counted, and
+  // skipped with --fear_d3d12_vulkan_skip_repeat_resolves. resolve_gaps_: the draws and clears
+  // since the previous resolve, in buckets 0, 1, 2-4, 5 or more.
+  struct ResolveCopy {
+    const void* rt = nullptr;
+    int32_t x0 = 0, y0 = 0, w = 0, h = 0, dx = 0, dy = 0;
+    uint32_t dest_base = 0, dest_format = 0, sample_select = 0, dest_swap = 0;
+    bool operator==(const ResolveCopy&) const = default;
+  };
+  ResolveCopy last_resolve_;
+  uint64_t last_resolve_writes_ = UINT64_MAX;  // target_writes_ after it (MAX: none, or cleared)
+  uint64_t target_writes_ = 0;                 // draws and clears so far
+  uint64_t resolve_repeats_ = 0, resolve_gaps_[4] = {};
   // Copies rt's (x0, y0, w, h) to (dx, dy) of the dest_w x dest_h image kept under `key` (a
   // resolve's destination address), resolving MSAA; the image is then ready to be shown.
   // dest_format: the image's format (VK_FORMAT_UNDEFINED: rt's); another one is blitted.
