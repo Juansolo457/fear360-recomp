@@ -2,8 +2,8 @@
 #include "gpu_timer.h"
 
 #include "log.h"
-#include "render_targets.h"
-#include "resolve.h"
+#include "resolve_params.h"
+#include "surfaces.h"
 
 #include <rex/graphics/pipeline/texture/info.h>
 #include <rex/graphics/registers.h>
@@ -21,8 +21,6 @@ namespace {
 namespace xenos = rex::graphics::xenos;
 namespace reg = rex::graphics::reg;
 using enum rex::graphics::Register;  // XE_GPU_REG_*
-
-constexpr uint32_t kMaxQueries = GpuTimer::kMaxSpans + 1;
 
 // Key layout: kind in bits 0-2, the occurrence in the frame in bits 3-7 (set by Switch), then
 // the kind's fields from bit 8 in the order the Key* functions write them. Sample counts (1, 2,
@@ -144,33 +142,27 @@ std::string GpuTimer::Describe(uint64_t key) const {
   }
 }
 
-bool GpuTimer::Initialize(ID3D12Device* device, ID3D12CommandQueue* queue, uint32_t slots) {
-  if (Failed(queue->GetTimestampFrequency(&frequency_), "GetTimestampFrequency") || !frequency_)
-    return false;
-  D3D12_QUERY_HEAP_DESC qd = {};
-  qd.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-  qd.Count = slots * kMaxQueries;
-  if (Failed(device->CreateQueryHeap(&qd, IID_PPV_ARGS(heap_.GetAddressOf())),
-             "CreateQueryHeap(timestamp)"))
-    return false;
-  if (!CreateBuffer(device, D3D12_HEAP_TYPE_READBACK, uint64_t(qd.Count) * sizeof(uint64_t),
-                    D3D12_RESOURCE_STATE_COPY_DEST, "timestamp readback", &readback_))
-    return false;
+bool GpuTimer::Initialize(std::unique_ptr<GpuTimestamps> stamps, uint64_t frequency,
+                          uint32_t slots) {
+  if (!stamps || !frequency) return false;
+  stamps_ = std::move(stamps);
+  frequency_ = frequency;
   frames_.resize(slots);
   for (Frame& f : frames_) f.spans.reserve(kMaxSpans);
-  REXLOG_INFO("D3D12: GPU timing on ({} timestamp ticks/s, up to {} spans per frame)",
+  REXLOG_INFO("D3D12: GPU timing per pass on ({} timestamp ticks/s, up to {} spans per frame)",
               frequency_, kMaxSpans);
   return true;
 }
 
-void GpuTimer::Stamp(ID3D12GraphicsCommandList* list) {
+void GpuTimer::Stamp(void* list) {
   Frame& f = frames_[slot_];
-  list->EndQuery(heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, slot_ * kMaxQueries + f.queries++);
+  stamps_->Write(list, slot_ * kMaxQueries + f.queries++);
 }
 
-void GpuTimer::BeginFrame(ID3D12GraphicsCommandList* list, uint32_t slot) {
+void GpuTimer::BeginFrame(void* list, uint32_t slot) {
   Collect(slot);
   slot_ = slot;
+  stamps_->Reset(list, slot * kMaxQueries, kMaxQueries);
   Frame& f = frames_[slot];
   f.spans.clear();
   f.number = next_number_++;
@@ -181,7 +173,7 @@ void GpuTimer::BeginFrame(ID3D12GraphicsCommandList* list, uint32_t slot) {
   f.spans.push_back({kStart, 0});
 }
 
-void GpuTimer::Switch(ID3D12GraphicsCommandList* list, uint64_t key) {
+void GpuTimer::Switch(void* list, uint64_t key) {
   Frame& f = frames_[slot_];
   current_ = key;
   if (f.spans.size() >= kMaxSpans) {
@@ -201,11 +193,10 @@ void GpuTimer::Switch(ID3D12GraphicsCommandList* list, uint64_t key) {
   ++n;
 }
 
-void GpuTimer::EndFrame(ID3D12GraphicsCommandList* list) {
+void GpuTimer::EndFrame(void* list) {
   Frame& f = frames_[slot_];
   Stamp(list);
-  list->ResolveQueryData(heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, slot_ * kMaxQueries, f.queries,
-                         readback_.Get(), uint64_t(slot_) * kMaxQueries * sizeof(uint64_t));
+  stamps_->Resolve(list, slot_ * kMaxQueries, f.queries);
   f.pending = true;
 }
 
@@ -213,11 +204,8 @@ void GpuTimer::Collect(uint32_t slot) {
   Frame& f = frames_[slot];
   if (!f.pending) return;
   f.pending = false;
-  const size_t first = size_t(slot) * kMaxQueries;
-  const D3D12_RANGE range = {first * sizeof(uint64_t), (first + f.queries) * sizeof(uint64_t)};
-  void* data = nullptr;
-  if (FAILED(readback_->Map(0, &range, &data))) return;
-  const uint64_t* ts = static_cast<const uint64_t*>(data) + first;
+  const uint64_t* ts = stamps_->Map(slot * kMaxQueries, f.queries);
+  if (!ts) return;
   const uint64_t begin = ts[0], end = ts[f.queries - 1];
   last_frame_ticks_ = end > begin ? end - begin : 0;
   const bool spike = IsSpike(last_frame_ticks_);
@@ -233,8 +221,7 @@ void GpuTimer::Collect(uint32_t slot) {
     g.position += i;
     if (spike) spike_spans_.push_back({ticks, uint32_t(i)});
   }
-  const D3D12_RANGE none = {0, 0};
-  readback_->Unmap(0, &none);
+  stamps_->Unmap();
   if (spike) LogSpike(f, last_frame_ticks_);
   if (end <= begin) return;
   ++frames_collected_;

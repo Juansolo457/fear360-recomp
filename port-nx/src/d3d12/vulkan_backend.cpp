@@ -2,6 +2,7 @@
 #include "vulkan_backend.h"
 
 #include "vulkan_device.h"  // first: the Vulkan platform defines
+#include "gpu_timer.h"
 #include "guest_memory.h"  // GpuAddress
 #include "log.h"
 #include "pipeline_store.h"
@@ -201,6 +202,15 @@ bool VulkanBackend::Initialize(const Options& o) {
   }
   device_ = std::make_unique<VulkanDevice>();
   if (!device_->Initialize(*provider)) return false;
+  // Per pass, as the D3D12 backend (#100): the frame's GPU time alone comes from the device.
+  if (o.gpu_timing) {
+    if (device_->EnableGpuTimer()) {
+      gpu_timer_ = device_->gpu_timer();
+      gpu_timer_->set_per_shader(o.gpu_timing_shaders);
+    } else {
+      REXLOG_WARN("D3D12 Vulkan: GPU timing per pass unavailable (no timestamps on the queue)");
+    }
+  }
   // --fear_d3d12_anisotropy, as the D3D12 draws (kMax_N_1 is log2(N) + 1).
   if (const int32_t samples = std::clamp(REXCVAR_GET(fear_d3d12_anisotropy), 1, 16); samples > 1)
     min_aniso_ = rex::graphics::xenos::AnisoFilter(std::bit_width(uint32_t(samples)));
@@ -389,6 +399,13 @@ static uint32_t FormatBytes(VkFormat f) {
 
 void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   using rex::graphics::xenos::ShaderType;
+  if (gpu_timer_) {
+    gpu_timer_->Pass(device_->command_buffer(),
+                     gpu_timer_->per_shader() && prep && prep->vs
+                         ? gpu_timer_->KeyDrawShaders(state.regs, prep->vs->ucode_data_hash(),
+                                                      prep->ps ? prep->ps->ucode_data_hash() : 0)
+                         : GpuTimer::KeyDraw(state.regs));
+  }
   const uint32_t draw_index = frame_draw_++;
   if (prep) {
     // The guest thread copied the ranges (and marked their pages valid): they go into shared
@@ -873,6 +890,7 @@ void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
 }
 
 void VulkanBackend::Clear(const ClearCall& clear) {
+  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyClear(clear));
   gpu_->targets.Clear(device_->command_buffer(), clear);
 }
 
@@ -892,6 +910,7 @@ void VulkanBackend::Resolve(const ResolveParams& p) {
     ++resolves_skipped_;
     return;
   }
+  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyResolve(p));
   VulkanRenderTargets& targets = gpu_->targets;
   VkCommandBuffer cmd = device_->command_buffer();
   targets.EndRendering(cmd);
@@ -1622,6 +1641,7 @@ PrepareCounters VulkanBackend::EndFramePrepare(uint64_t done) {
 }
 
 void VulkanBackend::LogGpuTiming() {
+  if (gpu_timer_) gpu_timer_->Log();  // the costliest passes
   const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
   if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;
   const double n = double(w.frames);
@@ -1750,6 +1770,7 @@ bool VulkanBackend::SetPresentImage(const SwapCall& swap) {
 
 Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
   SwapResult r;
+  if (gpu_timer_) gpu_timer_->Pass(device_->command_buffer(), GpuTimer::KeyPresent());
   if (frame_index_ >= frames_logged_ + 150) {
     frames_logged_ = frame_index_;
     const VulkanShaderStats& s = shaders_->stats();

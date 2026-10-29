@@ -43,6 +43,7 @@ class SpirvShader;
 
 namespace fear::d3d12 {
 
+class GpuTimer;
 class VulkanDevice;
 class PipelineStore;
 struct VulkanPipelineKey;
@@ -102,6 +103,7 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
                                          rex::graphics::xenos::ShaderType type);
 
   std::unique_ptr<VulkanDevice> device_;
+  GpuTimer* gpu_timer_ = nullptr;  // device_'s, with --fear_d3d12_gpu_timing
   std::unique_ptr<VulkanShaderCache> shaders_;
   struct Gpu;  // memory, the shared buffer, upload pools (vulkan_backend.cpp)
   struct ResolvedImage;  // a resolve destination (vulkan_backend.cpp)
