@@ -22,6 +22,7 @@ SHADERS = [
     ('depth_resolve.comp', 'depth_resolve_msaa', 'kDepthResolveMsaa', ['MSAA=1']),
     ('color_resolve.comp', 'color_resolve_1x', 'kColorResolve1x', ['MSAA=0']),
     ('color_resolve.comp', 'color_resolve_msaa', 'kColorResolveMsaa', ['MSAA=1']),
+    ('bounds_dispatch.comp', 'bounds_dispatch', 'kBoundsDispatch', []),
     ('present.vert', 'present_vs', 'kPresentVs', []),
     ('present.frag', 'present_ps', 'kPresentPs', []),
 ]

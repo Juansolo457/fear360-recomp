@@ -32,8 +32,10 @@
 
 #include <rex/graphics/xenos.h>
 
+#include <atomic>
 #include <functional>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -58,7 +60,10 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
 
   bool Initialize(const Options& options) override;
 
-  void BeginCopySegment() override { mirror_.NewSegment(); }
+  void BeginCopySegment() override {
+    mirror_.NewSegment();
+    segments_batch_.fetch_add(1, std::memory_order_relaxed);
+  }
   void Prepare(const DrawState& state, uint64_t upload_tag, DrawPrep* prep,
                std::vector<VertexCopy>* copies, std::vector<AuditRange>* audit) override;
   void StartAudit(uint32_t frames) override {}
@@ -139,6 +144,18 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint32_t frame_draw_ = 0;
   uint64_t skip_vs_ = 0;  // --fear_d3d12_vulkan_skip_vs
   uint64_t dump_after_vs_ = 0;  // --fear_d3d12_vulkan_dump_after_vs
+  std::unordered_set<uint64_t> coverage_ps_;  // --fear_d3d12_vulkan_coverage_ps (empty: off)
+  bool coverage_parsed_ = false;
+  // Logs a counted draw's textures, samplers, blend and depth state the first time that
+  // combination is seen (coverage_described_: the combinations logged, capped).
+  void DescribeCoverageDraw(const rex::graphics::SpirvShader& ps, const DrawState& state,
+                            const VulkanPipelineKey& key, const VulkanRenderTarget& rt);
+  std::unordered_set<std::string> coverage_described_;
+  // Why copy segments start (logged with the GPU timing): a new batch, a draw's copy
+  // overwriting memory the segment reads, or kSegmentExactLimit exact intervals. Counted on
+  // the guest thread (Prepare, BeginCopySegment), read on the render thread.
+  std::atomic<uint64_t> segments_batch_{0}, segments_conflict_{0}, segments_limit_{0};
+  std::atomic<uint64_t> segments_conflict_exact_{0};  // of the conflicts, on an exact range
   int64_t dump_at_ = -1;         // the frame it picked (-1: none yet)
   uint32_t dump_after_count_ = 0;
   uint32_t skip_first_ = UINT32_MAX, skip_last_ = 0;
@@ -161,6 +178,12 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   // passed. --no-fear_d3d12_vulkan_resolve_bounds turns it off.
   static constexpr uint32_t kDrawBoundsSlots = 16;
   static constexpr uint32_t kDrawBoundsSlotBytes = 16;
+  // After the slots, each slot's indirect dispatch (bounds_dispatch.comp): 8 words.
+  static constexpr uint32_t kDrawBoundsArgsBytes = 32;
+  static constexpr uint64_t kDrawBoundsBufferBytes =
+      uint64_t(kDrawBoundsSlots) * (kDrawBoundsSlotBytes + kDrawBoundsArgsBytes);
+  // The shaders find the dispatch words at kArgsBase = 64 (bounds_dispatch.comp).
+  static_assert(kDrawBoundsSlots * kDrawBoundsSlotBytes == 64 * 4);
   static constexpr uint32_t kDrawBoundsMaxDraws = 64;  // tracked draws between two resolves
   // A color resolve's copy, with what its source and destination held: the same again means
   // the destination holds the previous copy, except where the draws since changed the source.
@@ -193,6 +216,8 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint32_t bounds_next_slot_ = 0;
   bool bounds_buffer_ready_ = false;  // filled once before its first use
   uint64_t resolves_partial_ = 0, resolves_repeated_ = 0;
+  uint64_t resolve_reads_[4] = {};  // CountResolveReads: read by 0, 1, 2-3, 4+ draws
+  void CountResolveReads(ResolvedImage* r);
   BoundsTrack& BoundsTrackOf(const VulkanRenderTarget* rt);
   // Resets the slot (every slot the first time): a fill of 0xFFFFFFFF between the barriers the
   // vertex shaders' atomics and the resolve shader's reads need. Outside rendering.

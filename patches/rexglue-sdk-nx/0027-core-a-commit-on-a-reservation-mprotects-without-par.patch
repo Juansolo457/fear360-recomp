@@ -1,0 +1,83 @@
+From 8843c8f3e53bec37c49b4462a9816db6e94ed67e Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 08:45:19 -0700
+Subject: [PATCH] core: a commit on a reservation mprotects without parsing
+ /proc/self/maps
+
+On Linux the guest heap commits pages inside the guest mapping made at start, so AllocFixed's
+mmap(MAP_FIXED_NOREPLACE) always fails with EEXIST and takes the commit-on-reservation path.
+That path parsed /proc/self/maps (IsRangeFullyMapped) before its mprotect, to know the range
+was mapped. With write watches fragmenting the guest mapping into thousands of VMAs, every
+guest commit read and parsed the whole file on the committing thread: on the Steam Deck,
+F.E.A.R.'s water fight committed memory in bursts (zlib buffers) and its game thread went from
+6.5 to 34 ms a frame, with 22 reads of /proc/self/maps a frame (87 KB) against 0.5 normally.
+mprotect already fails with ENOMEM when part of the range is not mapped, so it now runs
+directly; IsRangeFullyMapped has no other caller and goes.
+---
+ src/core/memory_posix.cpp | 43 ++++++---------------------------------
+ 1 file changed, 6 insertions(+), 37 deletions(-)
+
+diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
+index de959ea..2bb45b3 100644
+--- a/src/core/memory_posix.cpp
++++ b/src/core/memory_posix.cpp
+@@ -189,38 +189,6 @@ static bool FindEntryForAddress(void* address, LinuxMapEntry& out_entry) {
+   return false;
+ }
+ 
+-// Check if [base, base+length) is fully covered by existing mappings (no gaps)
+-static bool IsRangeFullyMapped(void* base_address, size_t length) {
+-  if (!base_address || length == 0)
+-    return false;
+-
+-  const uintptr_t begin = reinterpret_cast<uintptr_t>(base_address);
+-  const uintptr_t end = begin + length;
+-  if (end < begin) {  // overflow check
+-    return false;
+-  }
+-
+-  std::ifstream maps("/proc/self/maps");
+-  if (!maps.is_open())
+-    return false;
+-
+-  uintptr_t cursor = begin;
+-  std::string line;
+-  while (std::getline(maps, line)) {
+-    LinuxMapEntry e;
+-    if (!ParseProcMapsLine(line, e))
+-      continue;
+-    if (e.end <= cursor)
+-      continue;
+-    if (e.start > cursor)
+-      return false;  // gap found
+-    cursor = e.end;
+-    if (cursor >= end)
+-      return true;
+-  }
+-  return cursor >= end;
+-}
+-
+ // Convert /proc/self/maps permission chars to PageAccess
+ static PageAccess PermsToPageAccess(const char perms[5]) {
+   const bool r = perms[0] == 'r';
+@@ -304,11 +272,12 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
+   if (errno == EEXIST && base_address &&
+       (allocation_type == AllocationType::kCommit ||
+        allocation_type == AllocationType::kReserveCommit)) {
+-    // Verify the entire range is mapped before using mprotect
+-    if (IsRangeFullyMapped(base_address, length)) {
+-      if (mprotect(base_address, length, static_cast<int>(prot_requested)) == 0) {
+-        return base_address;
+-      }
++    // mprotect fails with ENOMEM if any page of the range isn't mapped, which is what this path
++    // needs to know. It used to parse /proc/self/maps first (IsRangeFullyMapped): with write
++    // watches fragmenting the guest mapping into thousands of VMAs, every guest commit read
++    // and parsed the whole file, tens of KB, on the committing thread.
++    if (mprotect(base_address, length, static_cast<int>(prot_requested)) == 0) {
++      return base_address;
+     }
+   }
+ #endif
+-- 
+2.53.0
+

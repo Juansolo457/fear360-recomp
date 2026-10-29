@@ -98,6 +98,9 @@ class GuestMemoryMirror {
   // --fear_vertex_index_range (read at Initialize): a vertex range is copied only as far as the
   // draw's vertices reach, from its index bounds (IndexBounds), not the whole fetch constant.
   bool index_ranges = false;
+  // --fear_d3d12_hot_exact_kb (read at Initialize), in bytes: a range up to this long that
+  // touches a hot page is copied and tracked as an exact range (RequestRange). 0: off.
+  uint32_t hot_exact_bytes = 0;
 
   // Copy segments (DrawRenderer::Prepare): what the current segment's draws read. Watched
   // ranges are copied in whole pages, so their reads are kept one bit per page, valid in the
@@ -118,6 +121,7 @@ class GuestMemoryMirror {
   // segment reads.
   std::vector<Read> draw_reads;
   bool preparing = false, segment_conflict = false;
+  bool segment_conflict_exact = false;  // the conflicting copy was an exact range (diagnostic)
   static uint64_t PageMask(uint32_t w, uint32_t first, uint32_t last) {
     uint64_t m = ~0ull;
     if (w == first >> 6) m &= ~0ull << (first & 63);
@@ -271,6 +275,9 @@ class GuestMemoryMirror {
   // PageHash of the page taken just before its last whole-page copy, 0: none or not copied.
   std::unique_ptr<std::atomic<uint64_t>[]> copy_hash;
   std::unique_ptr<uint16_t[]> hot_hashes;  // hashes since the content last changed
+  // --fear_d3d12_hot_exact_kb: the PageHash at the page's last exact request, for the aging
+  // (hot_hashes counts the requests since it changed). Guest thread only, like hot_hashes.
+  std::unique_ptr<uint64_t[]> exact_hash;
   uint64_t PageHash(uint32_t page) const {
     return XXH3_64bits(membase + (size_t(page) << kPageShift), 1u << kPageShift) | 1;
   }

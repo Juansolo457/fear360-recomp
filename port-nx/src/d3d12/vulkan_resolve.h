@@ -30,7 +30,8 @@ class VulkanResolveShaders {
   explicit VulkanResolveShaders(VulkanDevice& device) : device_(device) {}
   ~VulkanResolveShaders();
 
-  bool Initialize();
+  // `draw_bounds`: the draw bounds buffer (vulkan_backend.h), for bounded color copies.
+  bool Initialize(VkBuffer draw_bounds);
 
   VkDescriptorSetLayout set_layout() const { return set_layout_; }  // color
   VkDescriptorSetLayout depth_set_layout() const { return depth_set_layout_; }
@@ -59,7 +60,10 @@ class VulkanResolveShaders {
     // fourth vertex is made from the other three and can lie outside them).
     uint32_t bounds = kNoBounds;
   };
-  // Record a copy with `set` (set_layout()) bound.
+  // Record a copy with `set` (set_layout()) bound. A bounded color copy (ColorParams::bounds)
+  // first turns its slot into an indirect dispatch over the tiles the box touches
+  // (bounds_dispatch.comp), then dispatches that: the draws' bounds must be visible to compute
+  // shaders already.
   void RecordDepth(VkCommandBuffer cmd, bool msaa, VkDescriptorSet set, const DepthParams& p);
   void RecordColor(VkCommandBuffer cmd, bool msaa, VkDescriptorSet set, const ColorParams& p);
 
@@ -79,6 +83,13 @@ class VulkanResolveShaders {
   VkPipelineLayout layout_ = VK_NULL_HANDLE, depth_layout_ = VK_NULL_HANDLE;
   VkPipeline depth_1x_ = VK_NULL_HANDLE, depth_msaa_ = VK_NULL_HANDLE;
   VkPipeline color_1x_ = VK_NULL_HANDLE, color_msaa_ = VK_NULL_HANDLE;
+  // bounds_dispatch.comp: its own layout and one set, the draw bounds buffer, written once.
+  VkBuffer draw_bounds_ = VK_NULL_HANDLE;
+  VkDescriptorSetLayout bounds_set_layout_ = VK_NULL_HANDLE;
+  VkPipelineLayout bounds_layout_ = VK_NULL_HANDLE;
+  VkPipeline bounds_dispatch_ = VK_NULL_HANDLE;
+  VkDescriptorPool bounds_pool_ = VK_NULL_HANDLE;
+  VkDescriptorSet bounds_set_ = VK_NULL_HANDLE;
   std::unordered_map<VkFormat, bool> storage_support_;
 };
 

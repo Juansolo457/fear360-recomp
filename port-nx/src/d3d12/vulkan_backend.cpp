@@ -38,6 +38,12 @@
 #include <thread>
 #include <utility>
 
+REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_coverage_ps, "", "F.E.A.R. D3D12",
+                      "Debug: count the samples each draw with one of these pixel shaders writes "
+                      "past the depth and stencil tests (precise occlusion queries; ucode hashes, "
+                      "16 hex digits, comma-separated) and log per shader, with the GPU timing "
+                      "lines: draws per frame, samples per draw against the color target's size "
+                      "(how many times a draw covers its target), triangles per draw");
 REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_resolve_bounds, true, "F.E.A.R. D3D12",
                     "Cut a color resolve that repeats the previous one (the same rectangle "
                     "into the same destination) to the screen bounds of the draws since it "
@@ -112,6 +118,7 @@ struct VulkanBackend::ResolvedImage {
   uint32_t width = 0, height = 0;
   bool written = false;
   uint64_t resolve_seq = 0;  // copies into it so far (the resolve bounds)
+  uint32_t reads = 0;        // draws that bound it since the last copy (the resolve reads log)
   // Of the color resolves into it: the texels written from (0, 0) (the image the present pass
   // shows, as D3D12's ResolvedImage), the destination format (xenos::TextureFormat) and the
   // exponent bias of the last one (the front buffer's log).
@@ -236,21 +243,23 @@ bool VulkanBackend::Initialize(const Options& o) {
                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                                  false, &gpu_->shared, "shared memory buffer (512 MB)"))
     return false;
-  if (!gpu_->memory.CreateBuffer(uint64_t(kDrawBoundsSlots) * kDrawBoundsSlotBytes,
+  if (!gpu_->memory.CreateBuffer(kDrawBoundsBufferBytes,
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
                                  false, &gpu_->draw_bounds, "draw bounds buffer"))
     return false;
   if (!gpu_->bindings.Initialize(gpu_->memory, gpu_->shared.buffer, gpu_->draw_bounds.buffer))
     return false;
   if (!gpu_->targets.Initialize(gpu_->memory)) return false;
-  if (!gpu_->resolve_shaders.Initialize()) return false;
+  if (!gpu_->resolve_shaders.Initialize(gpu_->draw_bounds.buffer)) return false;
   if (!gpu_->presenter.Initialize()) return false;
   gpu_->textures = std::make_unique<VulkanTextureCache>(*device_, gpu_->memory, memory);
   gpu_->textures->SetResolvedLookup([gpu = gpu_.get()](uint32_t address) {
     VulkanResolvedImage out;
     auto it = gpu->resolved.find(address);
     if (it != gpu->resolved.end() && it->second.written) {
+      ++it->second.reads;
       out.image = it->second.image.image;
       out.format = it->second.format;
       out.format_signed = it->second.format_signed;
@@ -342,13 +351,17 @@ void VulkanBackend::Prepare(const DrawState& state, uint64_t upload_tag, DrawPre
   // Straight into the batch: copies made before a failed range still go out (their pages are
   // marked valid already).
   mirror_.preparing = true;
-  mirror_.segment_conflict = false;
+  mirror_.segment_conflict = mirror_.segment_conflict_exact = false;
   mirror_.draw_reads.clear();
   // Fans draw natively, their indices read from shared memory: copied like any other's.
   prep->upload_ok = indexed_ok && mirror_.RequestVertices(state, *prep->vs, *copies, false);
   mirror_.preparing = false;
   if (mirror_.segment_conflict ||
       mirror_.segment_exact.size() >= GuestMemoryMirror::kSegmentExactLimit) {
+    (mirror_.segment_conflict ? segments_conflict_ : segments_limit_)
+        .fetch_add(1, std::memory_order_relaxed);
+    if (mirror_.segment_conflict_exact)
+      segments_conflict_exact_.fetch_add(1, std::memory_order_relaxed);
     mirror_.NewSegment();
     prep->copy_segment = true;
   }
@@ -826,6 +839,15 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   fn.vkCmdSetStencilWriteMask(cmd, VK_STENCIL_FACE_BACK_BIT, ref_bf.stencilwritemask);
   fn.vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_FRONT_BIT, ref.stencilref);
   fn.vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_BACK_BIT, ref_bf.stencilref);
+  // --fear_d3d12_vulkan_coverage_ps: the samples this draw writes (VulkanDevice::BeginCoverage).
+  int32_t coverage = -1;
+  if (!coverage_ps_.empty() && ps && bound.color[0] &&
+      coverage_ps_.count(ps->ucode_data_hash())) {
+    const VulkanRenderTarget* rt = bound.color[0];
+    coverage = device_->BeginCoverage(ps->ucode_data_hash(), rt->width * rt->height * rt->samples,
+                                      state.count / 3, uint32_t(rt->format));
+    if (coverage >= 0) DescribeCoverageDraw(*ps, state, key, *rt);
+  }
   if (state.indexed) {
     fn.vkCmdBindIndexBuffer(cmd, gpu_->shared.buffer, state.index_address,
                             state.index_32bit ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
@@ -833,6 +855,7 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
   } else {
     fn.vkCmdDraw(cmd, state.count, 1, 0, 0);
   }
+  device_->EndCoverage(coverage);
   if (int64_t(frame_index_) ==
       (dump_at_ >= 0 ? dump_at_ : int64_t(REXCVAR_GET(fear_d3d12_vulkan_draw_log_frame)))) {
     const auto surface = [](const VulkanRenderTarget* rt) {
@@ -874,7 +897,7 @@ void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
   const VkImageAspectFlags aspect =
       rt->depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
   const VkImageLayout layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                         : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                         : VulkanRenderTargets::ColorLayout();
   const VkPipelineStageFlags stage = rt->depth ? (VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
                                                : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -1096,16 +1119,23 @@ void VulkanBackend::ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot) {
   b.buffer = gpu_->draw_bounds.buffer;
   b.offset = 0;
   b.size = VK_WHOLE_SIZE;
-  // The vertex shaders' atomics and the resolve shader's reads, then the fill, then the next
-  // draws' atomics and resolves' reads.
-  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  // The vertex shaders' atomics, the resolve shaders' reads and writes and the indirect
+  // dispatch's read, then the fill, then the next draws' atomics and resolves.
+  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                    VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
   b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+  fn.vkCmdPipelineBarrier(cmd,
+                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                              VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &b, 0, nullptr);
   const bool all = !bounds_buffer_ready_;
   bounds_buffer_ready_ = true;
+  // The slot's bounds only (every slot's the first time); the dispatch words are rewritten
+  // before each read.
   fn.vkCmdFillBuffer(cmd, gpu_->draw_bounds.buffer, all ? 0 : uint64_t(slot) * kDrawBoundsSlotBytes,
-                     all ? VK_WHOLE_SIZE : kDrawBoundsSlotBytes, 0xFFFFFFFFu);
+                     all ? uint64_t(kDrawBoundsSlots) * kDrawBoundsSlotBytes : kDrawBoundsSlotBytes,
+                     0xFFFFFFFFu);
   b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -1317,8 +1347,12 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
       depth ? rs.depth_set_layout() : rs.set_layout(), device_->frame_fence());
   if (!set) return false;
   const VulkanDevice::Functions& fn = device_->fn();
-  const VkImageLayout src_layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  // A GENERAL color target (VulkanRenderTargets::ColorLayout) is read as it is.
+  const VkImageLayout src_layout =
+      rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+      : VulkanRenderTargets::ColorLayout() == VK_IMAGE_LAYOUT_GENERAL
+          ? VK_IMAGE_LAYOUT_GENERAL
+          : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   // vulkan_resolve.h's bindings: color {source, destination}, depth {depth, R32_SFLOAT image,
   // bits, stencil}.
   const VkDescriptorImageInfo images[4] = {
@@ -1358,7 +1392,7 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
                       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
                 : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   const VkImageLayout rt_layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                            : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                            : VulkanRenderTargets::ColorLayout();
   const VkAccessFlags rt_access = rt->depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                                                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
                                             : VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
@@ -1408,9 +1442,17 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
   b[2].dstAccessMask = b[1].dstAccessMask;
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, rt_stages | kReaders, 0, 0,
                           nullptr, 0, nullptr, barriers, b);
+  CountResolveReads(r);
   r->written = true;
   ++r->resolve_seq;
   return true;
+}
+
+// The resolve reads log: how many draws read a destination's previous copy before this one
+// replaced it. Copies nothing read could share one copy with the next.
+void VulkanBackend::CountResolveReads(ResolvedImage* r) {
+  if (r->resolve_seq) ++resolve_reads_[r->reads == 0 ? 0 : r->reads == 1 ? 1 : r->reads < 4 ? 2 : 3];
+  r->reads = 0;
 }
 
 bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, int32_t w,
@@ -1451,7 +1493,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
     x.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   }
   b[0].image = rt->image.image;
-  b[0].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[0].oldLayout = VulkanRenderTargets::ColorLayout();
   b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   b[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   b[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -1509,7 +1551,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
   }
   b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  b[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[0].newLayout = VulkanRenderTargets::ColorLayout();
   b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   b[0].dstAccessMask =
       VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -1520,6 +1562,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
   fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kReaders, 0, 0,
                           nullptr, 0, nullptr, 2, b);
+  CountResolveReads(r);
   r->written = true;
   ++r->resolve_seq;
   return true;
@@ -1765,6 +1808,22 @@ void VulkanBackend::BeginFrame(uint64_t frame_index) {
     dump_after_vs_ = std::strtoull(after.c_str(), &end, 16);
     dump_after_count_ = end && *end == ':' ? uint32_t(std::strtoul(end + 1, nullptr, 10)) : 0;
   }
+  if (!coverage_parsed_) {
+    // Once, at the first frame: the hashes, and the device's query pool.
+    coverage_parsed_ = true;
+    const std::string list = REXCVAR_GET(fear_d3d12_vulkan_coverage_ps);
+    for (size_t pos = 0; pos < list.size();) {
+      const size_t comma = std::min(list.find(',', pos), list.size());
+      const uint64_t hash = std::strtoull(list.substr(pos, comma - pos).c_str(), nullptr, 16);
+      if (hash) coverage_ps_.insert(hash);
+      pos = comma + 1;
+    }
+    if (!coverage_ps_.empty() && !device_->EnableCoverage()) coverage_ps_.clear();
+    if (!coverage_ps_.empty()) {
+      REXLOG_INFO("D3D12 Vulkan: counting the samples of {} pixel shaders' draws",
+                  coverage_ps_.size());
+    }
+  }
   gpu_->targets.BeginFrame(frame_index, device_->frame_fence(), device_->completed_fence());
 }
 
@@ -1783,17 +1842,99 @@ PrepareCounters VulkanBackend::EndFramePrepare(uint64_t done) {
   return c;
 }
 
+void VulkanBackend::DescribeCoverageDraw(const SpirvShader& ps, const DrawState& state,
+                                         const VulkanPipelineKey& key,
+                                         const VulkanRenderTarget& rt) {
+  namespace xenos = rex::graphics::xenos;
+  if (coverage_described_.size() >= 256) return;
+  // Textures: fetch constant, guest format, size, mips, and R when a resolve's image.
+  std::string text;
+  for (const SpirvShader::TextureBinding& tb : ps.GetTextureBindingsAfterTranslation()) {
+    xenos::xe_gpu_texture_fetch_t f;
+    std::memcpy(&f, state.fetch(tb.fetch_constant), sizeof(f));
+    const uint32_t address = uint32_t(f.base_address) << 12;
+    text += fmt::format(" t{}:fmt{}/{}x{}/mips{}-{}{}", tb.fetch_constant, int(f.format),
+                        f.size_2d.width + 1, f.size_2d.height + 1, uint32_t(f.mip_min_level),
+                        uint32_t(f.mip_max_level), gpu_->resolved.count(address) ? "/R" : "");
+  }
+  // Samplers: anisotropy, then mag/min/mip linear (1) or point (0).
+  const RegisterFile& regs = *reinterpret_cast<const RegisterFile*>(state.regs);
+  for (const SpirvShader::SamplerBinding& sb : ps.GetSamplerBindingsAfterTranslation()) {
+    const SamplerKey s = GetSamplerKey(regs, sb, min_aniso_);
+    text += fmt::format(" s:aniso{}/{}{}{}", uint32_t(s.aniso), uint32_t(s.mag_linear),
+                        uint32_t(s.min_linear), uint32_t(s.mip_linear));
+  }
+  const VulkanPipelineKey::Rt& r0 = key.rt[0];
+  text += fmt::format(" | rt {}x{} fmt{} (guest {}) blend={}:{}/{}/{},{}/{}/{} mask={:X} z={}/{}/{} "
+                      "cull={}",
+                      rt.width, rt.height, int(rt.format), rt.guest_format, r0.blend, r0.src,
+                      r0.dst, r0.op, r0.src_a, r0.dst_a, r0.op_a, r0.mask, key.depth_test,
+                      key.depth_write, key.depth_compare, key.cull);
+  const std::string line = fmt::format("ps {:016X}{}", ps.ucode_data_hash(), text);
+  if (coverage_described_.insert(line).second)
+    REXLOG_INFO("D3D12 Vulkan coverage draw: {}", line);
+}
+
 void VulkanBackend::LogGpuTiming() {
+  if (!coverage_ps_.empty()) {
+    // Per pixel shader: draws per frame, samples per draw against the target's size (1.0 = one
+    // full cover of the target), the most in one draw, triangles per draw.
+    struct Sum {
+      uint64_t draws = 0, samples = 0, max_samples = 0, target = 0, triangles = 0;
+      double covers = 0.0, max_covers = 0.0;
+      std::unordered_map<uint32_t, uint64_t> format_samples;  // VkFormat: samples drawn into it
+    };
+    std::unordered_map<uint64_t, Sum> sums;
+    for (const VulkanDevice::CoverageDraw& d : device_->TakeCoverage()) {
+      Sum& s = sums[d.tag];
+      const double covers = d.target_samples ? double(d.samples) / d.target_samples : 0.0;
+      ++s.draws;
+      s.samples += d.samples;
+      s.max_samples = std::max(s.max_samples, d.samples);
+      s.target = d.target_samples;
+      s.triangles += d.triangles;
+      s.covers += covers;
+      s.max_covers = std::max(s.max_covers, covers);
+      s.format_samples[d.format] += d.samples;
+    }
+    const double frames = double(std::max<uint64_t>(device_->TakeCoverageFrames(), 1));
+    for (const auto& [tag, s] : sums) {
+      const double n = double(s.draws);
+      std::string formats;  // the targets' VkFormats, with their share of the samples
+      for (const auto& [format, samples] : s.format_samples) {
+        formats += fmt::format(" {}:{:.0f}%", format,
+                               s.samples ? 100.0 * double(samples) / double(s.samples) : 0.0);
+      }
+      REXLOG_INFO("D3D12 Vulkan coverage ps {:016X}: {:.1f} draws per frame, {:.0f} samples per "
+                  "draw ({:.2f} covers of the {}-sample target, max {:.2f} = {} samples), "
+                  "{:.0f} triangles per draw, target formats{}",
+                  tag, n / frames, double(s.samples) / n, s.covers / n, s.target, s.max_covers,
+                  s.max_samples, double(s.triangles) / n, formats);
+    }
+    // Past a frame's queries, or past the cap on results nothing took: the counts above leave
+    // these draws out (truncated).
+    if (const uint64_t dropped = device_->TakeCoverageDropped())
+      REXLOG_INFO("D3D12 Vulkan coverage: {} draws not counted (over {} queries in a frame, or "
+                  "over the cap on collected results): counts truncated",
+                  dropped, VulkanDevice::kCoverageQueries);
+  }
   if (gpu_timer_) gpu_timer_->Log();  // the costliest passes
   const VulkanDevice::GpuWindow w = device_->TakeGpuWindow();
+  const uint64_t seg_batch = segments_batch_.exchange(0, std::memory_order_relaxed);
+  const uint64_t seg_conflict = segments_conflict_.exchange(0, std::memory_order_relaxed);
+  const uint64_t seg_limit = segments_limit_.exchange(0, std::memory_order_relaxed);
+  const uint64_t seg_exact = segments_conflict_exact_.exchange(0, std::memory_order_relaxed);
   if (!REXCVAR_GET(fear_d3d12_gpu_timing) || !w.frames) return;
   const double n = double(w.frames);
   REXLOG_INFO("D3D12 Vulkan GPU: {} frames, per frame {:.2f} ms (max {:.2f}), idle between "
-              "frames {:.2f} ms{}",
+              "frames {:.2f} ms{}; copy segments per frame: {:.1f} batches, {:.1f} conflicts "
+              "({:.1f} on exact ranges), {:.1f} exact limit",
               w.frames, w.sum_ms / n, w.max_ms, w.idle_ms / n,
               w.ambiguous ? fmt::format(", {} left out (past the timestamp counter's range)",
                                         w.ambiguous)
-                          : std::string());
+                          : std::string(),
+              double(seg_batch) / n, double(seg_conflict) / n, double(seg_exact) / n,
+              double(seg_limit) / n);
 }
 
 void VulkanBackend::AddPrepareCounters(const PrepareCounters& c) {
@@ -1938,6 +2079,9 @@ Backend::SwapResult VulkanBackend::Swap(const SwapCall& swap) {
     REXLOG_INFO("D3D12 Vulkan resolve bounds: {} color resolves cut to the draws' bounds, {} "
                 "skipped (nothing drawn since the same copy); {} targets tracked",
                 resolves_partial_, resolves_repeated_, bounds_tracks_.size());
+    REXLOG_INFO("D3D12 Vulkan resolve reads: of the copies replaced by another, read by 0 draws "
+                "{}, 1 draw {}, 2-3 draws {}, 4 or more {}",
+                resolve_reads_[0], resolve_reads_[1], resolve_reads_[2], resolve_reads_[3]);
     const VulkanTextureStats& t = gpu_->textures->stats();
     REXLOG_INFO("D3D12 Vulkan textures: {} textures, {} created ({} with mips), {} "
                 "uploads ({} KB), {} resolved binds ({} mismatched), {} unsupported, {} failed; "
