@@ -120,6 +120,13 @@ cmake "${args[@]}"
 # FEAR_LTO or FEAR_PGO) wrote them, this one's ninja finds them newer than its own record and
 # links the other's: with ThinLTO and PGO, modules with different profiles that won't link. So
 # they go when the last writer was another build folder, and this one links its own again.
+# Two builds at once on one SDK would remove each other's libraries mid-link: a lock on the SDK's
+# out/ folder holds from here to the marker after the build (released when the script exits).
+mkdir -p "$sdk/out"
+if command -v flock >/dev/null; then
+  exec 9>"$sdk/out/.fear-build.lock"
+  flock 9 || { echo "couldn't lock $sdk/out" >&2; exit 1; }
+fi
 for sdk_out in "$sdk"/out/*/; do
   [[ -d "$sdk_out" && "$(cat "$sdk_out.fear-build" 2>/dev/null)" != "$build" ]] || continue
   rm -f "$sdk_out"*.a "$sdk_out"*.so "$sdk_out"*.so.*
