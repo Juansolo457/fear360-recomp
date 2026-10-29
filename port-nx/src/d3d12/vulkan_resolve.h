@@ -46,6 +46,9 @@ class VulkanResolveShaders {
   };
   static constexpr uint32_t kNoBounds = 0xFFFFFFFFu;    // ColorParams::bounds
   static constexpr uint32_t kBoundsExpand = 0x80000000u;
+  // bounds_dispatch.comp resets the slot once it has read it, in place of
+  // VulkanBackend::ResetDrawBounds's fill (--fear_d3d12_vulkan_resolve_lean).
+  static constexpr uint32_t kBoundsReset = 0x40000000u;
   struct ColorParams {
     int32_t src_x = 0, src_y = 0;
     uint32_t width = 0, height = 0;

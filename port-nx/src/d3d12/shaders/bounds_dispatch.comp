@@ -9,7 +9,8 @@ layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 layout(push_constant) uniform Params {
   ivec2 src_origin;  // the resolve's source rectangle origin in the render target
   uvec2 size;        // its size
-  uint bounds;       // bits 0-7 the draw bounds slot, bit 31 expand (ColorParams::bounds)
+  uint bounds;       // bits 0-7 the draw bounds slot, bit 31 expand (ColorParams::bounds),
+                     // bit 30 reset the slot once read (--fear_d3d12_vulkan_resolve_lean)
 } p;
 
 // The draw bounds buffer: per slot (4 words from 0), the minimum x and y of the draws' vertices
@@ -55,4 +56,12 @@ void main() {
   draw_bounds[a + 2u] = 1u;
   draw_bounds[a + 3u] = uint(t0.x);
   draw_bounds[a + 4u] = uint(t0.y);
+  if ((p.bounds & 0x40000000u) != 0u) {
+    // Empty for the draws up to the next copy, as VulkanBackend::ResetDrawBounds's fill leaves
+    // it: the resolve shader reads only the dispatch words above.
+    draw_bounds[b] = 0xFFFFFFFFu;
+    draw_bounds[b + 1u] = 0xFFFFFFFFu;
+    draw_bounds[b + 2u] = 0xFFFFFFFFu;
+    draw_bounds[b + 3u] = 0xFFFFFFFFu;
+  }
 }

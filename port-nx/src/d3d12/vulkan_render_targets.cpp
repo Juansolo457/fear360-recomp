@@ -19,13 +19,6 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_rt_general, false, "F.E.A.R. D3D12",
                     "resolves without a layout change each copy (the water's copy per piece). "
                     "Read at startup");
 
-REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_7e3_32bpp, false, "F.E.A.R. D3D12",
-                    "Draw the 360's 7e3 float color format (k_2_10_10_10_FLOAT, 32 bits) into "
-                    "B10G11R11_UFLOAT, also 32 bits, instead of R16G16B16A16_SFLOAT (64): half the "
-                    "memory traffic per blended sample (the water's splash sprites, 5-10 screens "
-                    "of them a frame). No alpha (read as 1) and one or two fewer mantissa bits "
-                    "than 7e3. Test: compare the look. Read at startup");
-
 namespace fear::d3d12 {
 
 VkImageLayout VulkanRenderTargets::ColorLayout() {
@@ -65,11 +58,7 @@ VkFormat VulkanRenderTargets::ColorFormat(uint32_t f) {
     case 2:   // k_2_10_10_10
     case 10:  // k_2_10_10_10_AS_10_10_10_10
       return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-    case 3: {  // k_2_10_10_10_FLOAT
-      static const bool small = REXCVAR_GET(fear_d3d12_vulkan_7e3_32bpp);
-      if (small) return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-    }
+    case 3:   // k_2_10_10_10_FLOAT
     case 12:  // k_2_10_10_10_FLOAT_AS_16_16_16_16
     case 7:   // k_16_16_16_16_FLOAT
       return VK_FORMAT_R16G16B16A16_SFLOAT;

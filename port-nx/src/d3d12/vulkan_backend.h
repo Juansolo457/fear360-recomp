@@ -236,9 +236,12 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint32_t dump_target_first_ = UINT32_MAX, dump_target_last_ = 0;
   // Records a resolve shader reading rt (through `src_view`, and for depth `stencil_view`) and
   // writing r's storage views (vulkan_resolve.h's bindings): `record` dispatches with the
-  // descriptor set.
+  // descriptor set. `bounds_lean` (--fear_d3d12_vulkan_resolve_lean, a bounded color copy):
+  // its barriers also order the draw bounds buffer, the draws' atomics before the bounds
+  // shader and its reset after, in place of separate barriers.
   bool RunResolveShader(VulkanRenderTarget* rt, VkImageView src_view, VkImageView stencil_view,
-                        ResolvedImage* r, const std::function<void(VkDescriptorSet)>& record);
+                        ResolvedImage* r, const std::function<void(VkDescriptorSet)>& record,
+                        bool bounds_lean = false);
   // r, (re)created for the formats and size (the old image retired), with a storage view of
   // `storage_format` (UNDEFINED: none needed; a MUTABLE image when it is another format) and
   // for a depth resolve the R32_SFLOAT image beside it; null: failed.

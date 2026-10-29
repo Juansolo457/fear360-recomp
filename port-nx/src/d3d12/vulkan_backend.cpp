@@ -44,6 +44,11 @@ REXCVAR_DEFINE_STRING(fear_d3d12_vulkan_coverage_ps, "", "F.E.A.R. D3D12",
                       "16 hex digits, comma-separated) and log per shader, with the GPU timing "
                       "lines: draws per frame, samples per draw against the color target's size "
                       "(how many times a draw covers its target), triangles per draw");
+REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_resolve_lean, false, "F.E.A.R. D3D12",
+                    "Fewer barriers per bounded color resolve (the water's copy per piece): the "
+                    "bounds shader resets its slot once read, in place of a buffer fill and its "
+                    "two barriers, and the draws' bounds join the copy's own barriers. Read at "
+                    "startup");
 REXCVAR_DEFINE_BOOL(fear_d3d12_vulkan_resolve_bounds, true, "F.E.A.R. D3D12",
                     "Cut a color resolve that repeats the previous one (the same rectangle "
                     "into the same destination) to the screen bounds of the draws since it "
@@ -1141,6 +1146,7 @@ void VulkanBackend::ResetDrawBounds(VkCommandBuffer cmd, uint32_t slot) {
 bool VulkanBackend::CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, int32_t w,
                               int32_t h, int32_t dx, int32_t dy, const ResolveParams& p,
                               BoundsTrack* track, const ResolveCopy& copy) {
+  static const bool resolve_lean = REXCVAR_GET(fear_d3d12_vulkan_resolve_lean);
   const VkFormat storage = gpu_->resolve_shaders.ColorStorageFormat(p.dest_format);
   if (storage == VK_FORMAT_UNDEFINED) return false;
   VkFormat unorm, snorm;
@@ -1176,9 +1182,13 @@ bool VulkanBackend::CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, in
         ++resolves_repeated_;
         return true;
       }
-      params.bounds = track->slot | (track->expand ? VulkanResolveShaders::kBoundsExpand : 0u);
+      params.bounds = track->slot | (track->expand ? VulkanResolveShaders::kBoundsExpand : 0u) |
+                      (resolve_lean ? VulkanResolveShaders::kBoundsReset : 0u);
       ++resolves_partial_;
-      // The vertex shaders' atomics before the resolve shader reads the slot.
+    }
+    if (same && track->bounds_valid && !resolve_lean) {
+      // The vertex shaders' atomics before the resolve shader reads the slot (lean: in
+      // RunResolveShader's barrier).
       VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
       b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       b.buffer = gpu_->draw_bounds.buffer;
@@ -1193,9 +1203,16 @@ bool VulkanBackend::CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, in
                                          &b, 0, nullptr);
     }
   }
-  const bool ok = RunResolveShader(rt, rt->view, VK_NULL_HANDLE, r, [&](VkDescriptorSet set) {
-    gpu_->resolve_shaders.RecordColor(device_->command_buffer(), rt->samples > 1, set, params);
-  });
+  // --fear_d3d12_vulkan_resolve_lean: a bounded copy's slot is reset by bounds_dispatch.comp,
+  // and its barriers ride on RunResolveShader's.
+  const bool lean = resolve_lean && params.bounds != VulkanResolveShaders::kNoBounds;
+  const bool ok = RunResolveShader(
+      rt, rt->view, VK_NULL_HANDLE, r,
+      [&](VkDescriptorSet set) {
+        gpu_->resolve_shaders.RecordColor(device_->command_buffer(), rt->samples > 1, set,
+                                          params);
+      },
+      lean);
   if (track) {
     if (!ok) {
       track->Break();
@@ -1203,7 +1220,7 @@ bool VulkanBackend::CopyColor(VulkanRenderTarget* rt, int32_t x0, int32_t y0, in
     }
     // The slot is clean for the draws up to the next resolve, which it sees while tracking:
     // on from the second copy of a run of the same one.
-    ResetDrawBounds(device_->command_buffer(), track->slot);
+    if (!lean) ResetDrawBounds(device_->command_buffer(), track->slot);
     track->tracking = same;
     track->bounds_valid = same;
     track->expand = false;
@@ -1333,7 +1350,8 @@ void VulkanBackend::DumpWrite(uint64_t completed) {
 
 bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_view,
                                      VkImageView stencil_view, ResolvedImage* r,
-                                     const std::function<void(VkDescriptorSet)>& record) {
+                                     const std::function<void(VkDescriptorSet)>& record,
+                                     bool bounds_lean) {
   VkCommandBuffer cmd = device_->command_buffer();
   gpu_->targets.EndRendering(cmd);
   VulkanResolveShaders& rs = gpu_->resolve_shaders;
@@ -1420,8 +1438,17 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
   b[2] = b[1];
   b[2].image = r->depth.image;
   const uint32_t barriers = depth ? 3 : 2;
+  // bounds_lean: the vertex shaders' atomics on the draw bounds buffer before the bounds shader
+  // reads and resets the slot (kReaders has the vertex stage).
+  VkBufferMemoryBarrier bounds{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+  bounds.srcQueueFamilyIndex = bounds.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  bounds.buffer = gpu_->draw_bounds.buffer;
+  bounds.offset = 0;
+  bounds.size = VK_WHOLE_SIZE;
+  bounds.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  bounds.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
   fn.vkCmdPipelineBarrier(cmd, rt_stages | kReaders, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-                          nullptr, 0, nullptr, barriers, b);
+                          nullptr, bounds_lean ? 1 : 0, &bounds, barriers, b);
   record(set);
   b[0].oldLayout = src_layout;
   b[0].newLayout = rt_layout;
@@ -1435,8 +1462,16 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
   b[2].newLayout = b[1].newLayout;
   b[2].srcAccessMask = b[1].srcAccessMask;
   b[2].dstAccessMask = b[1].dstAccessMask;
-  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, rt_stages | kReaders, 0, 0,
-                          nullptr, 0, nullptr, barriers, b);
+  // bounds_lean: the bounds shader's reset before the next draws' atomics, and the indirect
+  // dispatch's read of its words before the next copy's bounds shader rewrites them (an
+  // execution dependency, chained through the vertex stage to that copy's first barrier).
+  bounds.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  bounds.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  fn.vkCmdPipelineBarrier(
+      cmd,
+      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+          (bounds_lean ? VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT : VkPipelineStageFlags(0)),
+      rt_stages | kReaders, 0, 0, nullptr, bounds_lean ? 1 : 0, &bounds, barriers, b);
   CountResolveReads(r);
   r->written = true;
   ++r->resolve_seq;
