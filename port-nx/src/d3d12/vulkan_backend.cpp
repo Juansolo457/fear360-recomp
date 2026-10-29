@@ -877,7 +877,7 @@ void VulkanBackend::DumpTarget(VulkanRenderTarget* rt, uint32_t index) {
   const VkImageAspectFlags aspect =
       rt->depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
   const VkImageLayout layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                         : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                         : VulkanRenderTargets::ColorLayout();
   const VkPipelineStageFlags stage = rt->depth ? (VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
                                                : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -1327,8 +1327,12 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
       depth ? rs.depth_set_layout() : rs.set_layout(), device_->frame_fence());
   if (!set) return false;
   const VulkanDevice::Functions& fn = device_->fn();
-  const VkImageLayout src_layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  // A GENERAL color target (VulkanRenderTargets::ColorLayout) is read as it is.
+  const VkImageLayout src_layout =
+      rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+      : VulkanRenderTargets::ColorLayout() == VK_IMAGE_LAYOUT_GENERAL
+          ? VK_IMAGE_LAYOUT_GENERAL
+          : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   // vulkan_resolve.h's bindings: color {source, destination}, depth {depth, R32_SFLOAT image,
   // bits, stencil}.
   const VkDescriptorImageInfo images[4] = {
@@ -1368,7 +1372,7 @@ bool VulkanBackend::RunResolveShader(VulkanRenderTarget* rt, VkImageView src_vie
                       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
                 : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   const VkImageLayout rt_layout = rt->depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                            : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                            : VulkanRenderTargets::ColorLayout();
   const VkAccessFlags rt_access = rt->depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                                                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
                                             : VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
@@ -1469,7 +1473,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
     x.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   }
   b[0].image = rt->image.image;
-  b[0].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[0].oldLayout = VulkanRenderTargets::ColorLayout();
   b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   b[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   b[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -1527,7 +1531,7 @@ bool VulkanBackend::CopyTarget(VulkanRenderTarget* rt, int32_t x0, int32_t y0, i
                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
   }
   b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  b[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[0].newLayout = VulkanRenderTargets::ColorLayout();
   b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   b[0].dstAccessMask =
       VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
