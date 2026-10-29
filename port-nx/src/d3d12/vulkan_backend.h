@@ -34,6 +34,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -141,6 +142,11 @@ class VulkanBackend final : public Backend, public GuestMemoryMirror::Sink {
   uint64_t dump_after_vs_ = 0;  // --fear_d3d12_vulkan_dump_after_vs
   std::unordered_set<uint64_t> coverage_ps_;  // --fear_d3d12_vulkan_coverage_ps (empty: off)
   bool coverage_parsed_ = false;
+  // Logs a counted draw's textures, samplers, blend and depth state the first time that
+  // combination is seen (coverage_described_: the combinations logged, capped).
+  void DescribeCoverageDraw(const rex::graphics::SpirvShader& ps, const DrawState& state,
+                            const VulkanPipelineKey& key, const VulkanRenderTarget& rt);
+  std::unordered_set<std::string> coverage_described_;
   int64_t dump_at_ = -1;         // the frame it picked (-1: none yet)
   uint32_t dump_after_count_ = 0;
   uint32_t skip_first_ = UINT32_MAX, skip_last_ = 0;

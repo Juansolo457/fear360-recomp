@@ -847,6 +847,7 @@ void VulkanBackend::Draw(const DrawState& state, const DrawPrep* prep) {
     const VulkanRenderTarget* rt = bound.color[0];
     coverage = device_->BeginCoverage(ps->ucode_data_hash(), rt->width * rt->height * rt->samples,
                                       state.count / 3, uint32_t(rt->format));
+    if (coverage >= 0) DescribeCoverageDraw(*ps, state, key, *rt);
   }
   if (state.indexed) {
     fn.vkCmdBindIndexBuffer(cmd, gpu_->shared.buffer, state.index_address,
@@ -1870,6 +1871,39 @@ PrepareCounters VulkanBackend::EndFramePrepare(uint64_t done) {
   c.uploads = std::exchange(prep_uploads_, 0);
   c.diag = std::exchange(prep_diag_, {});
   return c;
+}
+
+void VulkanBackend::DescribeCoverageDraw(const SpirvShader& ps, const DrawState& state,
+                                         const VulkanPipelineKey& key,
+                                         const VulkanRenderTarget& rt) {
+  namespace xenos = rex::graphics::xenos;
+  if (coverage_described_.size() >= 256) return;
+  // Textures: fetch constant, guest format, size, mips, and R when a resolve's image.
+  std::string text;
+  for (const SpirvShader::TextureBinding& tb : ps.GetTextureBindingsAfterTranslation()) {
+    xenos::xe_gpu_texture_fetch_t f;
+    std::memcpy(&f, state.fetch(tb.fetch_constant), sizeof(f));
+    const uint32_t address = uint32_t(f.base_address) << 12;
+    text += fmt::format(" t{}:fmt{}/{}x{}/mips{}-{}{}", tb.fetch_constant, int(f.format),
+                        f.size_2d.width + 1, f.size_2d.height + 1, uint32_t(f.mip_min_level),
+                        uint32_t(f.mip_max_level), gpu_->resolved.count(address) ? "/R" : "");
+  }
+  // Samplers: anisotropy, then mag/min/mip linear (1) or point (0).
+  const RegisterFile& regs = *reinterpret_cast<const RegisterFile*>(state.regs);
+  for (const SpirvShader::SamplerBinding& sb : ps.GetSamplerBindingsAfterTranslation()) {
+    const SamplerKey s = GetSamplerKey(regs, sb, min_aniso_);
+    text += fmt::format(" s:aniso{}/{}{}{}", uint32_t(s.aniso), uint32_t(s.mag_linear),
+                        uint32_t(s.min_linear), uint32_t(s.mip_linear));
+  }
+  const VulkanPipelineKey::Rt& r0 = key.rt[0];
+  text += fmt::format(" | rt {}x{} fmt{} (guest {}) blend={}:{}/{}/{},{}/{}/{} mask={:X} z={}/{}/{} "
+                      "cull={}",
+                      rt.width, rt.height, int(rt.format), rt.guest_format, r0.blend, r0.src,
+                      r0.dst, r0.op, r0.src_a, r0.dst_a, r0.op_a, r0.mask, key.depth_test,
+                      key.depth_write, key.depth_compare, key.cull);
+  const std::string line = fmt::format("ps {:016X}{}", ps.ucode_data_hash(), text);
+  if (coverage_described_.insert(line).second)
+    REXLOG_INFO("D3D12 Vulkan coverage draw: {}", line);
 }
 
 void VulkanBackend::LogGpuTiming() {
