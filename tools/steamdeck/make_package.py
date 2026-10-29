@@ -59,6 +59,8 @@ PGO_GEN = '--pgogen' in sys.argv[1:] or os.environ.get('FEAR_PGO') == 'generate'
 OUT = ARGV[0] if ARGV else os.path.join(
     REPO, 'private', 'windows' if WINDOWS else 'steamdeck',
     'FEAR360-Windows.zip' if WINDOWS else
+    # A training build's zip has its own name, so the normal update zip is still there after.
+    'FEAR360-SteamDeck-linux-pgogen.zip' if LINUX and PGO_GEN else
     'FEAR360-SteamDeck-linux-update.zip' if LINUX and PROGRAMS_ONLY else
     'FEAR360-SteamDeck-linux.zip' if LINUX else
     'FEAR360-SteamDeck-update.zip' if PROGRAMS_ONLY else

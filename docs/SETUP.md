@@ -164,19 +164,28 @@ Steam as a non-Steam game, and leave Proton off. The zip contains your game data
 from your discs: keep it to yourself. Later updates: `--linux --programs` makes a small zip of
 just the programs to extract over it.
 
+**Play on your own Linux PC:** the same package runs on any x86-64 Linux with glibc 2.35 or newer
+and a Vulkan 1.3 GPU: extract it anywhere and run `./fear-linux.sh` in its `FEAR360-SteamDeck`
+folder (`./fear-linux.sh --no-fullscreen` for a window). `tools/build-linux.sh`'s builds are for
+development: each game's program is in `<project>/out/build/linux-amd64-relwithdebinfo/`, run
+from the game's folder with the flags `fear-linux.sh` passes (`--game_data_root`,
+`--user_data_root`, `--cache_root`).
+
 Optional, faster on the Deck: profile-guided optimization (PGO) from your own play. The profile
 comes from running the game's code, so it isn't in the repository; each player makes their own:
 
 1. Build the training version: `FEAR_PGO=generate tools/build-deck.sh` (and `--project
    port-files`), then `python3 -I tools/steamdeck/make_package.py --linux --pgogen --programs`
-   and extract that zip over your install on the Deck (extract the normal update zip over it again
-   afterwards).
+   (`private/steamdeck/FEAR360-SteamDeck-linux-pgogen.zip`), and extract that zip over your
+   install on the Deck.
 2. Play it for 5-10 minutes per game, in the heavy fights (it runs slower while it counts). Each
    game writes `pgo-raw/*.profraw` beside its program.
 3. `tools/pgo-merge.sh --for deck --project port-nx <F.E.A.R.'s pgo-raw folder>`, and the same
    with `--project port-files` for F.E.A.R. Files (`--for host` for builds made with
    `tools/build-linux.sh` on your own Linux PC).
-4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there.
+4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there. Then
+   `make_package.py --linux --programs` and extract that update zip over the install, in place of
+   the training build.
 
 ## When something goes wrong
 

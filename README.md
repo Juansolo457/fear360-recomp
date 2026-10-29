@@ -65,7 +65,13 @@ Full debrief and play-test notes: [docs/PROGRESS.md](docs/PROGRESS.md). Agent ha
 
 ## Build and run
 
-**Linux and the Steam Deck (0.9):** [docs/SETUP.md, Linux and Steam Deck](docs/SETUP.md#linux-and-steam-deck): build in the Deck container (`tools/build-deck.sh`), package with `make_package.py --linux`, add `fear-linux.sh` to Steam.
+**Linux and the Steam Deck (0.9):** [docs/SETUP.md, Linux and Steam Deck](docs/SETUP.md#linux-and-steam-deck): build in the Deck container, package, then add `fear-linux.sh` to Steam (or run it on any Linux PC):
+
+```bash
+tools/build-deck.sh                                   # F.E.A.R.
+tools/build-deck.sh --project port-files              # F.E.A.R. Files
+python3 -I tools/steamdeck/make_package.py --linux    # private/steamdeck/FEAR360-SteamDeck-linux.zip
+```
 
 **Windows** (builds, not tested for 0.9): releases are source only: you build the game from your own discs ([the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest)). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
 
