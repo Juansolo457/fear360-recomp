@@ -99,7 +99,8 @@ case "$pgo" in
     exe_link_flags="$exe_link_flags -fprofile-generate=pgo-raw" ;;
   use)
     [[ -f "$profile" ]] || { echo "FEAR_PGO=use: $profile is missing (tools/pgo-merge.sh)" >&2; exit 1; }
-    # Functions the training never reached are compiled as without a profile; a profile from an
+    # Functions the training never reached have no record (tools/pgo-merge.sh drops them; a zero
+    # count would mark them cold), so they're compiled as without a profile. A profile from an
     # older revision still applies where the code is unchanged.
     flags="$flags \"-fprofile-use=$profile\" -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date"
     flags="$flags -Wno-backend-plugin" ;;

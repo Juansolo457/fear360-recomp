@@ -4,8 +4,12 @@
 # pgo/<project>/default.profdata, which tools/build-linux.sh then uses by default.
 #   tools/pgo-merge.sh --project port-nx    <folder or .profraw files>...
 #   tools/pgo-merge.sh --project port-files <folder or .profraw files>...
-# llvm-profdata must be the compiler's version: in the Deck build's container (as
-# tools/build-deck.sh) when podman has its image, else the host's llvm-profdata-<clang major>.
+# llvm-profdata must be the version of the compiler that builds with the profile:
+#   FEAR_PGO_PROFDATA=<tool>  that one, whatever else is installed
+#   the Deck build's container's (as tools/build-deck.sh) when podman has its image: Deck builds
+#   otherwise the host's llvm-profdata-<clang major>: builds made on this host
+# The script says which it used.
+# Needs python3 (tools/pgo_prepare.py).
 # pgo/ stays out of git: the counts come from runs of the game's code.
 set -euo pipefail
 
@@ -36,16 +40,29 @@ done
 
 out_dir="$root/pgo/$project"
 mkdir -p "$out_dir"
-if command -v podman >/dev/null && podman image exists "$image"; then
-  # Each input mounted read-only at its own path, the output folder writable.
-  mounts=(-v "$out_dir:/out")
-  for f in "${files[@]}"; do mounts+=(-v "$f:$f:ro"); done
-  podman run --rm --userns=keep-id "${mounts[@]}" "$image" \
-    llvm-profdata-20 merge -o /out/default.profdata "${files[@]}"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+# Each session's total (the last snapshot of a file older training builds appended to), merged,
+# then without the functions the training never reached (tools/pgo_prepare.py has why).
+python3 -I "$root/tools/pgo_prepare.py" last-snapshot "$work/raw" "${files[@]}"
+if [[ -n "${FEAR_PGO_PROFDATA:-}" ]]; then
+  tool=$(command -v "$FEAR_PGO_PROFDATA") || { echo "$FEAR_PGO_PROFDATA not found" >&2; exit 1; }
+  echo "llvm-profdata: $tool (FEAR_PGO_PROFDATA)"
+  profdata() { "$tool" "$@"; }
+elif command -v podman >/dev/null && podman image exists "$image"; then
+  echo "llvm-profdata: the Deck build's container (llvm-profdata-20), for Deck builds"
+  profdata() {
+    podman run --rm --userns=keep-id -v "$work:$work" -v "$out_dir:$out_dir" "$image" \
+      llvm-profdata-20 "$@"
+  }
 else
   llvm=$("${CC:-clang}" -dumpversion | cut -d. -f1)
-  tool=$(command -v "llvm-profdata-$llvm" || command -v llvm-profdata) || {
-    echo "llvm-profdata is not installed" >&2; exit 1; }
-  "$tool" merge -o "$out_dir/default.profdata" "${files[@]}"
+  tool=$(command -v "llvm-profdata-$llvm") || {
+    echo "llvm-profdata-$llvm (clang $llvm's) is not installed: set FEAR_PGO_PROFDATA" >&2; exit 1; }
+  echo "llvm-profdata: $tool, for builds on this host (clang $llvm)"
+  profdata() { "$tool" "$@"; }
 fi
+profdata merge --text -o "$work/all.proftext" "$work"/raw/*.profraw
+python3 -I "$root/tools/pgo_prepare.py" drop-unreached "$work/all.proftext" "$work/reached.proftext"
+profdata merge -o "$out_dir/default.profdata" "$work/reached.proftext"
 echo "Merged ${#files[@]} run(s) into pgo/$project/default.profdata"
