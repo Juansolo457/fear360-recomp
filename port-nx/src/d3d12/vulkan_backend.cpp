@@ -1078,10 +1078,11 @@ VulkanBackend::BoundsTrack& VulkanBackend::BoundsTrackOf(const VulkanRenderTarge
   if (it != bounds_tracks_.end()) return it->second;
   BoundsTrack& track = bounds_tracks_[rt];
   track.slot = bounds_next_slot_++ % kDrawBoundsSlots;
-  // A slot taken over: its previous owner's draws would land in it.
+  // A slot taken over: its previous owner forgets it (its next use gets a slot of its own
+  // with nothing tracked), or its resolves would reset the slot under the new owner's draws.
+  // Erasing another key leaves the reference to this entry valid.
   if (const VulkanRenderTarget* previous = bounds_slot_owner_[track.slot]) {
-    auto old = bounds_tracks_.find(previous);
-    if (old != bounds_tracks_.end()) old->second.Break();
+    bounds_tracks_.erase(previous);
   }
   bounds_slot_owner_[track.slot] = rt;
   return track;

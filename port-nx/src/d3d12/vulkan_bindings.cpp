@@ -290,6 +290,7 @@ VkDescriptorPool VulkanBindings::NewPool() {
       {VK_DESCRIPTOR_TYPE_SAMPLER, kPoolSets * 8},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kPoolSets / 16},
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kPoolSets / 16},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kPoolSets / 16},  // the color resolves' draw bounds
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pi.maxSets = kPoolSets;

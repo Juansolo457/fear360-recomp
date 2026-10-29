@@ -42,6 +42,11 @@ bool TileInBounds() {
   uint b = (p.bounds & 0xFFu) * 4u;
   ivec2 lo = ivec2(int(draw_bounds[b]) - kBoundsBias, int(draw_bounds[b + 1u]) - kBoundsBias);
   ivec2 hi = ivec2(kBoundsBias - int(draw_bounds[b + 2u]), kBoundsBias - int(draw_bounds[b + 3u]));
+  // Past the vertex shaders' clamp (2^29): the slot was opened by a vertex behind the camera,
+  // or no vertex reached it; everything is copied (and the expansion below can't overflow).
+  const int kBoundsLimit = 1 << 29;
+  if (any(lessThan(lo, ivec2(-kBoundsLimit))) || any(greaterThan(hi, ivec2(kBoundsLimit))))
+    return true;
   if ((p.bounds & 0x80000000u) != 0u) {
     // A rectangle list's fourth vertex, made from the other three, can lie as far outside
     // their box as the box is wide.
