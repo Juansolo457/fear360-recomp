@@ -41,6 +41,9 @@ struct Title {
   fs::path exe;
   fs::path working_dir;
   std::vector<std::string> args;
+  // later = true: shown, dimmed, as coming in a later release; it can't be started (1.0 ships
+  // F.E.A.R. alone, with F.E.A.R. Files listed this way).
+  bool later = false;
 };
 
 fs::path Utf8Path(const std::string& text) {
@@ -62,6 +65,7 @@ std::vector<Title> LoadTitles(const std::string& file) {
       title.subtitle = (*entry)["subtitle"].value_or(std::string());
       title.exe = Utf8Path((*entry)["exe"].value_or(std::string()));
       title.working_dir = Utf8Path((*entry)["working_dir"].value_or(std::string()));
+      title.later = (*entry)["later"].value_or(false);
       if (const toml::array* args = (*entry)["args"].as_array()) {
         for (const toml::node& arg : *args) {
           if (auto value = arg.value<std::string>()) title.args.push_back(*value);
@@ -75,6 +79,13 @@ std::vector<Title> LoadTitles(const std::string& file) {
   return titles;
 }
 
+// Whether the collection has another game this program can switch to (not one coming later).
+bool Switchable(const std::vector<Title>& titles) {
+  return std::any_of(titles.begin(), titles.end(), [](const Title& title) {
+    return title.id != fear::title::kId && !title.later;
+  });
+}
+
 class CollectionMenu final : public Panel {
  public:
   CollectionMenu(const Host& host, std::string file, std::vector<Title> titles,
@@ -86,7 +97,8 @@ class CollectionMenu final : public Panel {
         start_(std::move(start)) {
     for (const Title& title : titles_) {
       std::error_code error;
-      installed_.push_back(title.id == fear::title::kId || fs::exists(title.exe, error));
+      installed_.push_back(title.id == fear::title::kId ||
+                           (!title.later && fs::exists(title.exe, error)));
     }
     // Start on this program's own game.
     for (size_t i = 0; i < titles_.size(); ++i) {
@@ -186,8 +198,14 @@ class CollectionMenu final : public Panel {
                                         IM_COL32(110, 190, 172, 0), IM_COL32(110, 190, 172, 46));
         }
         std::string name = title.name;
-        if (!installed_[i]) name += "  (not found)";
-        text(1.6f, ImVec2(left, y + em * 0.1f), on ? kSelected : kWhite, name.c_str());
+        if (!installed_[i] && !title.later) name += "  (not found)";
+        text(1.6f, ImVec2(left, y + em * 0.1f), title.later ? kGrey : on ? kSelected : kWhite,
+             name.c_str());
+        if (title.later) {
+          // A tag after the name, on its baseline.
+          const float after = font->CalcTextSizeA(em * 1.6f, FLT_MAX, 0.0f, name.c_str()).x;
+          text(0.75f, ImVec2(left + after + em * 0.8f, y + em * 0.75f), kTeal, "COMING LATER");
+        }
         if (!title.subtitle.empty()) {
           text(0.85f, ImVec2(left + em * 0.05f, y + em * 1.85f), on ? kTeal : kDimTeal,
                title.subtitle.c_str());
@@ -207,13 +225,17 @@ class CollectionMenu final : public Panel {
       std::string help;
       if (!message_.empty()) {
         help = message_;
+      } else if (selected_ < titles && titles_[selected_].later) {
+        const Title& title = titles_[selected_];
+        help = title.name + (title.subtitle.empty() ? "" : " (" + title.subtitle + ")") +
+               " comes in a later release.";
       } else if (selected_ < titles && !installed_[selected_]) {
         help = "Not found: " + titles_[selected_].exe.string();
       } else if (selected_ < titles) {
         // "Play F.E.A.R." ends its own sentence.
         const std::string& name = titles_[selected_].name;
-        help = "Play " + name + (name.ends_with('.') ? "" : ".") +
-               " Switch Game in its main menu comes back here.";
+        help = "Play " + name + (name.ends_with('.') ? "" : ".");
+        if (Switchable(titles_)) help += " Switch Game in its main menu comes back here.";
       } else {
         help = "Quit to the desktop.";
       }
@@ -284,7 +306,15 @@ class CollectionMenu final : public Panel {
 
 }  // namespace
 
-bool Enabled() { return !REXCVAR_GET(fear_collection).empty(); }
+bool Enabled() {
+  // Read once: the menu asks each time it builds. A collection whose other game is coming later
+  // (1.0's) has nothing to switch to.
+  static const bool enabled = [] {
+    const std::string file = REXCVAR_GET(fear_collection);
+    return !file.empty() && Switchable(LoadTitles(file));
+  }();
+  return enabled;
+}
 
 bool StartNow(const Host& host, std::function<void()> start) {
   const std::string file = REXCVAR_GET(fear_collection);

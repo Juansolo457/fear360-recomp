@@ -160,7 +160,7 @@ PPCContext* Context(const PPCRegister& r1) {
   return ctx;
 }
 
-// Switch Game only in a collection (fear_collection set).
+// Switch Game only in a collection with another game to start (fear_collection.h).
 bool Offered(const Item& item) {
   return item.command != kCommandSwitch || fear::collection::Enabled();
 }

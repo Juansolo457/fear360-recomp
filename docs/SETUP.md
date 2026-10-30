@@ -1,13 +1,14 @@
 # Build and play from your own disc
 
-**0.9 supports Linux and the Steam Deck:** see [Linux and Steam Deck](#linux-and-steam-deck).
-The Windows steps below still build the games, but the Windows build hasn't been tested for this
-release.
+**1.0 is F.E.A.R. on Linux and the Steam Deck:** see [Linux and Steam Deck](#linux-and-steam-deck).
+It needs only your F.E.A.R. disc. *F.E.A.R. Files* (Extraction Point + Perseus Mandate) and the
+Windows build come in later releases: the steps for them below still build, but they aren't
+tested or supported in 1.0.
 
 This project ships **source only**. There is no download that contains the game: the game's
 code is translated from your copy of the Xbox 360 disc on your own PC, and the game data comes
-from the same disc. You need your own discs of **F.E.A.R.** and, for the second game,
-**F.E.A.R. Files** (Extraction Point + Perseus Mandate).
+from the same disc. You need your own disc of **F.E.A.R.** (and, once it's supported, of
+**F.E.A.R. Files**).
 
 The first build takes 20–40 minutes. After that, rebuilds take a minute or two.
 
@@ -116,8 +117,8 @@ textures ([TEXTURES.md](TEXTURES.md)), but the Direct3D 12 renderer can't use it
 
 ## Linux and Steam Deck
 
-The games as native Linux programs on the renderer's Vulkan backend ([LINUX_NATIVE.md](LINUX_NATIVE.md)):
-no Proton, no Wine. The Steam Deck is what 0.9 was tested on.
+F.E.A.R. as a native Linux program on the renderer's Vulkan backend ([LINUX_NATIVE.md](LINUX_NATIVE.md)):
+no Proton, no Wine. The Steam Deck is what 1.0 was tested on.
 
 **Where to build:** a Linux x86-64 PC, or WSL2 (Ubuntu) on a Windows PC. In WSL, clone into
 WSL's own file system (`~/`), not under `/mnt/c`: a Windows checkout's CRLF line endings break
@@ -134,7 +135,8 @@ the SDK's FFmpeg build. The disc dumps can stay on the Windows side; link them i
   libwayland-dev libwayland-bin wayland-protocols libxkbcommon-dev libdecor-0-dev libasound2-dev
   libpulse-dev libpipewire-0.3-dev` (on 22.04 also libstdc++ 13 from the toolchain PPA; the
   Containerfile has the whole setup). To play: a GPU with Vulkan 1.3 and a CPU with AVX2 and FMA.
-- Either way: Git, Python 3, and your discs dumped as in step 3 (`python3 -I tools/xdvdfs.py`).
+- Either way: Git, Python 3, and your F.E.A.R. disc dumped as in step 3:
+  `python3 -I tools/xdvdfs.py "<your F.E.A.R. ISO>" extract port-nx/assets`.
 
 **Build:**
 
@@ -148,21 +150,24 @@ does):
 
 ```
 tools/build-deck.sh
-tools/build-deck.sh --project port-files
 python3 -I tools/steamdeck/make_package.py --linux
 ```
 
-or, for your own Linux PC, `tools/setup-sdk.sh`, then `tools/build-linux.sh` and
-`tools/build-linux.sh --project port-files`. The first build compiles the SDK and each game's
-translated code (about 200 MB of C++ per game), so it takes a long while; later ones are quick.
+or, for your own Linux PC, `tools/setup-sdk.sh`, then `tools/build-linux.sh`. The first build
+compiles the SDK and the game's translated code (about 200 MB of C++), so it takes a long while;
+later ones are quick.
 
 **Play on the Steam Deck:** `make_package.py --linux` writes
-`private/steamdeck/FEAR360-SteamDeck-linux.zip` (about 11 GB): both games' programs, your game
-data and the Deck's starting settings. Copy it to the Deck, then follow
+`private/steamdeck/FEAR360-SteamDeck-linux.zip` (about 4 GB): F.E.A.R.'s program, your game data
+and the Deck's starting settings. Copy it to the Deck, then follow
 `tools/steamdeck/README-SteamDeck-Linux.txt` (it's in the zip): extract it, add `fear-linux.sh` to
-Steam as a non-Steam game, and leave Proton off. The zip contains your game data and programs made
-from your discs: keep it to yourself. Later updates: `--linux --programs` makes a small zip of
-just the programs to extract over it.
+Steam as a non-Steam game, and leave Proton off. The zip contains your game data and a program
+made from your disc: keep it to yourself. Later updates: `--linux --programs` makes a small zip of
+just the program to extract over it. The menu lists *F.E.A.R. Files* as coming later.
+
+*F.E.A.R. Files* for development (not part of 1.0): `tools/build-deck.sh --project port-files`
+with its disc in `port-files/assets`, then `make_package.py --linux --files`; `FEAR_FILES=1
+./fear-linux.sh` lists it in the menu.
 
 **Play on your own Linux PC:** the same package runs on an x86-64 Linux with a CPU with AVX2 and
 FMA (x86-64-v3), glibc 2.35 or newer, libstdc++ 13 or newer (`GLIBCXX_3.4.32`; SteamOS and
@@ -176,15 +181,14 @@ from the game's folder with the flags `fear-linux.sh` passes (`--game_data_root`
 Optional, faster on the Deck: profile-guided optimization (PGO) from your own play. The profile
 comes from running the game's code, so it isn't in the repository; each player makes their own:
 
-1. Build the training version: `FEAR_PGO=generate tools/build-deck.sh` (and `--project
-   port-files`), then `python3 -I tools/steamdeck/make_package.py --linux --pgogen --programs`
+1. Build the training version: `FEAR_PGO=generate tools/build-deck.sh`, then
+   `python3 -I tools/steamdeck/make_package.py --linux --pgogen --programs`
    (`private/steamdeck/FEAR360-SteamDeck-linux-pgogen.zip`), and extract that zip over your
    install on the Deck.
-2. Play it for 5-10 minutes per game, in the heavy fights (it runs slower while it counts). Each
-   game writes `pgo-raw/*.profraw` beside its program.
-3. `tools/pgo-merge.sh --for deck --project port-nx <F.E.A.R.'s pgo-raw folder>`, and the same
-   with `--project port-files` for F.E.A.R. Files (`--for host` for builds made with
-   `tools/build-linux.sh` on your own Linux PC).
+2. Play it for 5-10 minutes, in the heavy fights (it runs slower while it counts). The game
+   writes `pgo-raw/*.profraw` beside its program.
+3. `tools/pgo-merge.sh --for deck --project port-nx <the pgo-raw folder>` (`--for host` for
+   builds made with `tools/build-linux.sh` on your own Linux PC).
 4. Build as usual: the builds use `pgo/<project>/default.profdata` when it's there. Then
    `make_package.py --linux --programs` and extract that update zip over the install, in place of
    the training build.
