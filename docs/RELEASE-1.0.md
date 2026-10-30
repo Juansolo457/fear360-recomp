@@ -12,6 +12,11 @@ through it.
 Perseus Mandate) is listed in the menu as coming later, and the Windows build comes with 1.5. Both
 still build from this source, but they aren't tested or supported in 1.0.
 
+**1.0.1** fixes building from a `git clone`: since the v1.0.0 tag, the SDK took this repository's
+"1.0" for its own version and stopped the CMake configure, on Windows and in the Steam Deck
+container (SDK patch 0028; a source zip was not affected). If you cloned 1.0, pull and build again;
+on Windows, run `tools/setup-sdk.ps1 -Force` first. The game itself is unchanged.
+
 ## What's in 1.0
 
 **Native on the Steam Deck.** `tools/build-deck.sh` builds the game in an Ubuntu 22.04 container,
