@@ -56,6 +56,7 @@ set(FEAR_SOURCES
     ${HOST}/display_vblank.cpp
     ${HOST}/fear_collection.cpp
     ${HOST}/fear_menu.cpp
+    ${HOST}/fear_mkb.cpp
     ${HOST}/fear_panel.cpp
     ${HOST}/fear_process.cpp
     ${HOST}/fear_settings.cpp

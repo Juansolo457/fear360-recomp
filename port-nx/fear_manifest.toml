@@ -503,6 +503,14 @@ name = "FearD3DWaitEnd"
 address = 0x82973A80
 registers = []
 
+# Keyboard and mouse (src/fear_mkb.h, #59): CBindMgr's update (sub_82336FA8, the manager in r30),
+# after its loop has built the frame's command states and before it compares them with the last
+# frame's to send the command on and off events. The commands whose keys are held go on here.
+[[entrypoint.midasm_hook]]
+name = "FearMkbCommands"
+address = 0x82337300
+registers = ["r30"]
+
 # Native C runtime (#31, docs/ARCHITECTURE.md): these guest functions are replaced by the SDK's
 # host versions (third_party/rexglue-sdk-nx/src/kernel/crt/memory.cpp), which take the same guest
 # pointers. memcpy alone was 1-4% of the game thread on the Steam Deck. Identified by disassembly:

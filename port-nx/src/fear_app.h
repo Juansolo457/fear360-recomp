@@ -27,6 +27,7 @@
 #include "display_vblank.h"
 #include "fear_collection.h"
 #include "fear_menu.h"
+#include "fear_mkb.h"
 #include "fear_panel.h"
 #include "fear_settings.h"
 #include "fear_title.h"
@@ -136,6 +137,9 @@ class FearApp : public rex::ReXApp {
     // The game gets no input while a panel (or an SDK overlay under the mouse) has it.
     if (auto* input = runtime() ? static_cast<rex::input::InputSystem*>(runtime()->input_system())
                                 : nullptr) {
+      // Keyboard and mouse, PC style (fear_mkb.h): before the callback, which reaches only the
+      // drivers already there.
+      fear::mkb::Install(*input, window());
       input->SetActiveCallback([this] {
         if (!fear::panel::GameGetsInput()) return false;
         return !(imgui_drawer() && imgui_drawer()->GetIO().WantCaptureMouse);
