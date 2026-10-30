@@ -1,0 +1,31 @@
+From a811603e3502f2e27270ef027e2447e538a12a5a Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 21:54:17 -0700
+Subject: [PATCH] build: the SDK's version comes from its own checkout, not the
+ game's
+
+rex_resolve_version runs git describe in CMAKE_SOURCE_DIR, which is the game's repository when
+a game builds the SDK as a subdirectory (REXSDK_DIR). Once the game tagged its own v1.0.0, the
+SDK read "1.0" as its version, found its 0.10 floor behind it, and stopped the configure. The
+SDK now asks its own source directory.
+---
+ CMakeLists.txt | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ac1af4a..40c5575 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -226,7 +226,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/rex_pch.cmake)
+ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/rex_version.cmake)
+ rex_resolve_version(REXGLUE_FULL_VERSION
+     FLOOR_MAJOR ${PROJECT_VERSION_MAJOR}
+-    FLOOR_MINOR ${PROJECT_VERSION_MINOR})
++    FLOOR_MINOR ${PROJECT_VERSION_MINOR}
++    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+ 
+ # Strip the -id trailer (if any) for the numeric-only version.
+ string(REGEX REPLACE "-.*$" "" REXGLUE_NUMERIC_VERSION "${REXGLUE_FULL_VERSION}")
+-- 
+2.53.0.windows.1
+
