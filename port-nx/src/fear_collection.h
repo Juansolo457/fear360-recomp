@@ -17,6 +17,8 @@
 //   exe = 'C:\...\fear.exe'
 //   working_dir = 'C:\...\port-nx'
 //   args = ['--game_data_root', 'C:\...\assets', ...]   # each title keeps its own user folder
+//   later = true                     # optional: listed as coming later, can't be started
+// (tools/steamdeck/fear-linux.sh writes one too: 1.0 lists F.E.A.R. Files with later = true.)
 // fear_collection names the file (empty: no menu, the game starts as before);
 // fear_collection_start, set when the menu starts the other program, skips the menu.
 
@@ -28,7 +30,8 @@
 
 namespace fear::collection {
 
-// Whether this run is part of a collection (Switch Game is offered in the main menu).
+// Whether Switch Game is offered in the main menu: this run is part of a collection that lists
+// another game it can start (not one coming later, and its program is there).
 bool Enabled();
 
 // In ReXApp::OnFinalizePaths. True: start this program's game now (not in a collection, or told to

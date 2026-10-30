@@ -1,16 +1,21 @@
 # Smoke test for 1.0
 
-Every level of both games played to the end on PC before 1.0 ships (#55 the setup, #56 F.E.A.R.,
-#57 F.E.A.R. Files). One row per level; file each failure as its own issue and put its number in
-Notes.
+The play-through sheet (#55 the setup, #56 F.E.A.R., #57 F.E.A.R. Files). 1.0 is F.E.A.R. on the
+Steam Deck, so its rows below are Deck results; *F.E.A.R. Files* and Windows are for the releases
+after. The Build column says which build each row was played on: `0.9.0 cc266c5` is the release
+candidate, the same game code as 1.0 (1.0 changes only the collection menu and the package). One
+row per level; file each failure as its own issue and put its number in Notes.
 
-**How to run it:** `pwsh -NoProfile -File tools/launch.ps1 -Collection -Invulnerable`, otherwise
-the default settings. With `-Invulnerable` (`fear_invulnerable`) the player can't die: where a
-hit would have killed, health refills and play carries on, with no death effect (the PC's test
-variable `HealthTest`). The log confirms it with `console variable HealthTest = 1` once a level
-has loaded. Keep each game's `cache` folder: its `prewarm-*.bin` records every shader seen, for a
-local shader warm-up list (#53, `tools/make_warmup.py`; the list stays local and is never
-committed).
+**How to run it on the Deck (1.0):** `FEAR_GOD=1 ./fear-linux.sh` in the install's folder (or that
+variable in the Steam shortcut's launch options), otherwise the default settings. The player can't
+die: where a hit would have killed, health refills and play carries on, with no death effect (the
+PC's test variable `HealthTest`). The log confirms it with `console variable HealthTest = 1` once a
+level has loaded.
+
+**On Windows (from 1.5):** `pwsh -NoProfile -File tools/launch.ps1 -Collection -Invulnerable`
+(`fear_invulnerable`). Keep each game's `cache` folder: its `prewarm-*.bin` records every shader
+seen, for a local shader warm-up list (#53, `tools/make_warmup.py`; the list stays local and is
+never committed).
 
 **A level passes when:**
 - it loads, with its chapter card or loading screen shown correctly;
@@ -28,16 +33,16 @@ a problem filed.
 
 | Interval | Level | Result | Date | Build | Log | Notes |
 |---|---|---|---|---|---|---|
-| 01 | `Intro` | | | | | |
-| 02 | `Docks` | | | | | |
-| 03 | `WTF_Entry` | | | | | |
-| 03 | `WTF_Ambush` | | | | | |
-| 03 | `Moody` | | | | | |
-| 03 | `WTF_Exfil` | | | | | |
-| 04 | `ATC_Roof` | | | | | |
-| 04 | `Admin` | | | | | |
-| 05 | `Bishop_Rescue` | | | | | |
-| 05 | `Bishop_Evac` | | | | | |
+| 01 | `Intro` | ✅ | 2026-10-29 | 0.9.0 | | Deck |
+| 02 | `Docks` | ✅ | 2026-10-29 | 0.9.0 | | Deck |
+| 03 | `WTF_Entry` | ✅ | 2026-10-29 | 0.9.0 | | Deck |
+| 03 | `WTF_Ambush` | ✅ | 2026-10-29 | 0.9.0 | | Deck |
+| 03 | `Moody` | ✅ | 2026-10-29 | 0.9.0 | | Deck |
+| 03 | `WTF_Exfil` | ⚠️ | 2026-10-29 | 0.9.0 cc266c5 | fear_132-134 | Deck: 0.08-0.16% of frames below 60 fps; the biggest water fight can dip for a second or two (#103) |
+| 04 | `ATC_Roof` | ✅ | 2026-10-29 | 0.9.0 cc266c5 | fear_134 | Deck: 0.02% below 60 fps |
+| 04 | `Admin` | ✅ | 2026-10-29 | 0.9.0 cc266c5 | fear_134 | Deck: 0.03% below 60 fps |
+| 05 | `Bishop_Rescue` | ✅ | 2026-10-29 | 0.9.0 cc266c5 | fear_135 | Deck: 0.36% below 60 fps |
+| 05 | `Bishop_Evac` | ✅ | 2026-10-29 | 0.9.0 cc266c5 | fear_135 | Deck: 0.18% below 60 fps (three water pools) |
 | 06 | `Mapes_Elevator` | | | | | |
 | 06 | `Badge` | | | | | |
 | 06 | `Hives` | | | | | |
@@ -49,7 +54,7 @@ a problem filed.
 | 09 | `Facility_Upper` | | | | | |
 | 09 | `Facility_Bypass` | | | | | |
 | 10 | `Vault` | | | | | |
-| 11 | `Alma` | | | | | |
+| 11 | `Alma` | | 2026-10-29 | 0.9.0 cc266c5 | fear_135 | Deck, partly played: 0.02% below 60 fps |
 | Epilogue | `Aftermath` (and the credits) | | | | | |
 | Bonus | `Holiday` (#39) | | | | | |
 | Instant Action | `InstantAction1` | | | | | |

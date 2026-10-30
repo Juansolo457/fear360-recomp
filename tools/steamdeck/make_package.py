@@ -12,13 +12,15 @@
         to unpack over an existing install: the Deck settings below, saves untouched
     python3 -I tools/steamdeck/make_package.py --linux [out.zip]     (on Linux: WSL)
         the native Linux package, standalone (default private/steamdeck/FEAR360-SteamDeck-linux.zip):
-        each game's program from tools/build-deck.sh and its libraries, its assets/ (game data)
+        F.E.A.R.'s program from tools/build-deck.sh and its libraries, its assets/ (game data)
         and user/settings.toml (LINUX_SETTINGS), fear-linux.sh (the launcher, no Proton) and
-        README-SteamDeck-Linux.txt. No saves
+        README-SteamDeck-Linux.txt. No saves. 1.0 is F.E.A.R. alone: only its disc is needed
     python3 -I tools/steamdeck/make_package.py --linux --programs [out.zip]
         just the Linux programs, their libraries, the launcher and the README (default
         private/steamdeck/FEAR360-SteamDeck-linux-update.zip), to unpack over an existing install:
         data, saves and settings untouched
+    --linux --files (development): F.E.A.R. Files too, from tools/build-deck.sh --project
+        port-files and port-files/assets; FEAR_FILES=1 ./fear-linux.sh lists it to play
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -43,7 +45,8 @@ import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 ARGV = [a for a in sys.argv[1:]
-        if a not in ('--programs', '--settings', '--windows', '--linux', '--nolto', '--pgogen')]
+        if a not in ('--programs', '--settings', '--windows', '--linux', '--nolto', '--pgogen',
+                     '--files')]
 PROGRAMS_ONLY = '--programs' in sys.argv[1:]
 SETTINGS_ONLY = '--settings' in sys.argv[1:]
 # --windows: the same package for another Windows PC (a private test copy): a Play F.E.A.R..cmd
@@ -51,6 +54,8 @@ SETTINGS_ONLY = '--settings' in sys.argv[1:]
 WINDOWS = '--windows' in sys.argv[1:]
 # --linux: the native Linux build (tools/build-deck.sh), no Proton (docs/LINUX_NATIVE.md).
 LINUX = '--linux' in sys.argv[1:]
+# --files, with --linux: F.E.A.R. Files too (development; 1.0 ships F.E.A.R. alone).
+FILES = '--files' in sys.argv[1:]
 # --nolto (or FEAR_LTO=OFF): the programs of FEAR_LTO=OFF tools/build-deck.sh, without ThinLTO.
 NO_LTO = '--nolto' in sys.argv[1:] or os.environ.get('FEAR_LTO') == 'OFF'
 # --pgogen (or FEAR_PGO=generate): the instrumented PGO training build (FEAR_PGO=generate
@@ -185,7 +190,7 @@ def main_linux():
         steamdeck = os.path.join(REPO, 'tools', 'steamdeck')
         add(os.path.join(steamdeck, 'fear-linux.sh'), 'fear-linux.sh', executable=True)
         add(os.path.join(steamdeck, 'README-SteamDeck-Linux.txt'), 'README-SteamDeck-Linux.txt')
-        for folder, project, exe, *_ in GAMES:
+        for folder, project, exe, *_ in (GAMES if FILES else GAMES[:1]):
             program = exe.removesuffix('.exe')
             build = os.path.join(REPO, project, 'out', 'build',
                                  'deck-amd64-release' + ('-nolto' if NO_LTO else '')
