@@ -48,7 +48,7 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 
 ## After 1.0
 
-**1.0 is F.E.A.R. on Linux and the Steam Deck**, smoke tested on the Deck ([docs/SMOKE-1.0.md](docs/SMOKE-1.0.md); what's in it: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md)). Next:
+**1.0 is F.E.A.R. on Linux and the Steam Deck**, play-tested on the Deck (the smoke test so far: [docs/SMOKE-1.0.md](docs/SMOKE-1.0.md); what's in it: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md)). Next:
 
 | | |
 |---|---|

@@ -31,7 +31,7 @@
 namespace fear::collection {
 
 // Whether Switch Game is offered in the main menu: this run is part of a collection that lists
-// another game to start (not one coming later).
+// another game it can start (not one coming later, and its program is there).
 bool Enabled();
 
 // In ReXApp::OnFinalizePaths. True: start this program's game now (not in a collection, or told to

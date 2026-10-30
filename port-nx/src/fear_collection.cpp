@@ -79,10 +79,17 @@ std::vector<Title> LoadTitles(const std::string& file) {
   return titles;
 }
 
-// Whether the collection has another game this program can switch to (not one coming later).
+// Whether a title can be started from the menu: not one coming later, and this program's own game
+// or another whose program is there.
+bool Startable(const Title& title) {
+  std::error_code error;
+  return !title.later && (title.id == fear::title::kId || fs::exists(title.exe, error));
+}
+
+// Whether the collection has another game this program can switch to.
 bool Switchable(const std::vector<Title>& titles) {
   return std::any_of(titles.begin(), titles.end(), [](const Title& title) {
-    return title.id != fear::title::kId && !title.later;
+    return title.id != fear::title::kId && Startable(title);
   });
 }
 
@@ -95,11 +102,7 @@ class CollectionMenu final : public Panel {
         file_(std::move(file)),
         titles_(std::move(titles)),
         start_(std::move(start)) {
-    for (const Title& title : titles_) {
-      std::error_code error;
-      installed_.push_back(title.id == fear::title::kId ||
-                           (!title.later && fs::exists(title.exe, error)));
-    }
+    for (const Title& title : titles_) installed_.push_back(Startable(title));
     // Start on this program's own game.
     for (size_t i = 0; i < titles_.size(); ++i) {
       if (titles_[i].id == fear::title::kId) selected_ = int(i);
@@ -266,6 +269,7 @@ class CollectionMenu final : public Panel {
       if (host_.later && host_.quit) host_.later(host_.quit);
       return;
     }
+    if (!installed_[row]) return;
     const Title& title = titles_[row];
     if (title.id == fear::title::kId) {
       // This program's game: carry on starting it, after this frame, with the controllers left
@@ -279,7 +283,6 @@ class CollectionMenu final : public Panel {
       }
       return;
     }
-    if (!installed_[row]) return;
     std::vector<std::string> args = title.args;
     args.insert(args.end(), {"--fear_collection", file_, "--fear_collection_start", title.id});
     if (!fear::process::StartAfterThis(title.exe, std::move(args), title.working_dir)) {

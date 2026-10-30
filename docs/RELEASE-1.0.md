@@ -20,9 +20,10 @@ goes into Steam as a non-Steam game with no compatibility tool. The same package
 x86-64 Linux PC with a Vulkan 1.3 GPU.
 
 **Performance on the Deck.** With the 360's settings (field of view 70, no bloom, no MSAA) and the
-120 fps limit, over about 80 minutes of play on the 1.0 build (Interval 03's water fights,
-Intervals 04 and 05, Interval 11): a median frame of 8.35 ms (120 fps), 97% of frames at 90 fps or
-more, 99.8% at 60 fps or more. What got it there:
+120 fps limit, over about 80 minutes of play on the release candidate (cc266c5, the same game code:
+1.0 changes only the collection menu and the package), in Interval 03's water fights, Intervals 04
+and 05 and Interval 11: a median frame of 8.35 ms (120 fps), 97% of frames at 90 fps or more, 99.8%
+at 60 fps or more. What got it there:
 - Vertex data the game rewrites every draw (particles) is copied to the byte, so its uploads no
   longer stall the GPU at every draw: 300-700 upload batches a frame became 1-6 in the water fights.
 - Guest memory commits no longer read `/proc/self/maps`: the game thread's spikes while the game
