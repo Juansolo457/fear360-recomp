@@ -1,19 +1,22 @@
 {
   "$schema": "https://recomp.fyi/schema/v1.json",
   "game": "F.E.A.R.",
+  "wikidata": "Q817163",
   "system": "Xbox 360",
   "type": "recomp",
   "project": "F.E.A.R. 360 Recompiled",
-  "status": "in-progress",
-  "targets": ["Windows", "Steam Deck"],
+  "status": "released",
+  "targets": ["Linux", "Steam Deck"],
   "toolchain": "Rexglue",
-  "approach": "The 360 default.xex statically recompiled with ReXGlue, drawn by fear-nx's native Vulkan Xenos renderer with integer resolution scaling and display-locked pacing.",
-  "notes": "The Xbox 360 version: Instant Action, the dual machine pistols and a bonus level the PC never got. Campaign, Instant Action and saving work on PC at up to 4K and an even 80 fps on a 240 Hz display, with optional PC textures built from your own PC copy. Runs on the Steam Deck under Proton. F.E.A.R. Files (Extraction Point and Perseus Mandate, 360) is recompiled in the same repository, and both start from one collection menu. No game data included: bring your own Xbox 360 copy.",
-  "help": ["Steam Deck performance testing", "Linux build"],
-  "tags": ["vulkan", "4k", "high-framerate", "steam-deck"],
+  "approach": "The 360 default.xex statically recompiled to x86-64 C++ with ReXGlue; the game's own Direct3D calls are drawn by a native renderer (after pgr4-native), on Vulkan with no Proton or Wine.",
+  "notes": "The Xbox 360 version: Instant Action, the dual machine pistols and a bonus level the PC never got. 1.0 (source only) runs natively on Linux and the Steam Deck: up to 120 fps on the Deck and 60 fps or more in 99.8% of frames, with PC settings (field of view, frame rate limit, EchoPatch's fixes). Next: the Windows build (1.5), then F.E.A.R. Files (Extraction Point and Perseus Mandate, 360), which already builds from the same repository. No game data included: bring your own Xbox 360 copy and build it from source.",
+  "help": ["Bug reports from Steam Deck and Linux players", "Testing on other Linux PCs and GPUs"],
+  "tags": ["vulkan", "linux", "high-framerate", "steam-deck"],
   "maintainers": [{"name": "Juansolo457", "link": "https://github.com/Juansolo457"}],
   "links": [
+    {"label": "1.0 release notes", "url": "https://github.com/Juansolo457/fear360-recomp/releases/tag/v1.0.0"},
     {"label": "Steam Deck video", "url": "https://youtu.be/6rP_icfY-sM"},
-    {"label": "fear-nx renderer", "url": "https://github.com/infriker/fear-nx"}
+    {"label": "pgr4-native renderer", "url": "https://github.com/shaunsingh/pgr4-native"},
+    {"label": "fear-nx", "url": "https://github.com/infriker/fear-nx"}
   ]
 }
