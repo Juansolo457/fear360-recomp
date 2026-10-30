@@ -44,6 +44,8 @@ REXCVAR_DEFINE_DOUBLE(fear_mouse_sensitivity, 1.0, "F.E.A.R.",
                       "Mouse look speed: 1 turns 0.022 degrees per mouse count, the usual PC "
                       "shooter default (at 800 dpi, 35 degrees an inch)");
 REXCVAR_DEFINE_BOOL(fear_mouse_invert, false, "F.E.A.R.", "Invert the mouse's up and down");
+REXCVAR_DEFINE_BOOL(fear_mkb_log, false, "F.E.A.R.",
+                    "Testing: log each keyboard command as it goes on and the mouse look each second");
 
 // The PC's default keys (the 360's own profile defaults). Key names, comma separated: A-Z, 0-9,
 // F1-F12, Space, Enter, Escape, Backspace, Tab, Shift, Ctrl, Alt (or LShift, RCtrl, ...), Up,
@@ -79,6 +81,9 @@ REXCVAR_DEFINE_STRING(fear_key_menu, "Escape", "F.E.A.R./Keys", "Pause menu");
 
 namespace {
 
+using rex::X_RESULT;  // and X_STATUS: the X_ERROR and X_STATUS macros name them
+using rex::X_STATUS;
+using namespace rex::input;  // the X_INPUT structures and pad buttons
 using rex::ui::VirtualKey;
 
 // The game's command numbers (fear_mkb.h).
@@ -271,6 +276,7 @@ Driver* g_driver = nullptr;
 // The game's side, set by the hooks.
 std::atomic<bool> g_gameplay{false};               // the binding manager is enabled
 std::atomic<int64_t> g_update_ticks{0};            // its last update, Clock ticks
+std::atomic<int64_t> g_turn_ticks{0};              // CPlayerMgr's last turn update, Clock ticks
 double g_frame_yaw = 0.0, g_frame_pitch = 0.0;     // this turn update's mouse movement, radians
 
 constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x46454152);  // FEAR
@@ -360,8 +366,10 @@ class Driver final : public rex::input::InputDriver,
 
   // The commands whose keys are held, for the binding manager's update (guest thread).
   void Commands(uint8_t* states, uint32_t count) {
+    const bool playing = Playing();
     std::lock_guard lock(mutex_);
-    SyncMode(true);
+    SyncMode(playing);
+    if (!playing) return;
     for (Action& action : Actions()) {
       const std::string& text = action.keys();
       if (text != action.parsed_from) {
@@ -378,6 +386,10 @@ class Driver final : public rex::input::InputDriver,
         }
       }
       if (on) states[action.command] = 1;
+      if (REXCVAR_GET(fear_mkb_log) && on != logged_on_[action.command & 0xFF]) {
+        logged_on_[action.command & 0xFF] = on;
+        REXLOG_INFO("F.E.A.R. keys: {} {}", action.setting, on ? "on" : "off");
+      }
     }
     // A notch is one frame on, then at least one off, so the next notch is a new press.
     for (int i = 0; i < 2; ++i) {
@@ -465,12 +477,16 @@ class Driver final : public rex::input::InputDriver,
   void OnGotFocus(rex::ui::UISetupEvent&) override { has_focus_ = true; }
 
  private:
-  // The player is in control: the binding manager is enabled and has run lately.
+  // The player is in control: the binding manager is enabled (it is in parts of the front end
+  // too, the intro movies) and the player's turn update has run lately (only in a level).
   static bool Playing() {
-    const int64_t last = g_update_ticks.load(std::memory_order_relaxed);
-    const auto since = Clock::now().time_since_epoch() - Clock::duration(last);
-    return g_gameplay.load(std::memory_order_relaxed) && last &&
-           since < std::chrono::milliseconds(500);
+    auto recent = [](const std::atomic<int64_t>& ticks) {
+      const int64_t last = ticks.load(std::memory_order_relaxed);
+      return last && Clock::now().time_since_epoch() - Clock::duration(last) <
+                         std::chrono::milliseconds(250);
+    };
+    return g_gameplay.load(std::memory_order_relaxed) && recent(g_update_ticks) &&
+           recent(g_turn_ticks);
   }
 
   static uint16_t ButtonKey(rex::ui::MouseEvent::Button button) {
@@ -497,6 +513,8 @@ class Driver final : public rex::input::InputDriver,
   void SyncMode(bool playing) {
     if (playing == mode_playing_) return;
     mode_playing_ = playing;
+    REXLOG_INFO("F.E.A.R. keyboard and mouse: {}",
+                playing ? "in play (keys are commands)" : "in the menus (keys are a pad)");
     held_over_ = down_;
     notches_[0] = notches_[1] = 0;
   }
@@ -522,6 +540,7 @@ class Driver final : public rex::input::InputDriver,
   void ApplyCapture(bool capture) {
     if (!window_ || capture == captured_) return;
     captured_ = capture;
+    REXLOG_INFO("F.E.A.R. mouse: {}", capture ? "captured for mouse look" : "released");
     if (capture) {
       cursor_before_ = window_->GetCursorVisibility();
       window_->SetCursorVisibility(rex::ui::Window::CursorVisibility::kHidden);
@@ -551,6 +570,7 @@ class Driver final : public rex::input::InputDriver,
   bool notch_on_[2] = {};
   bool notch_off_frame_[2] = {};
   uint16_t last_buttons_ = 0;
+  std::array<bool, 256> logged_on_{};
   uint32_t packet_ = 0;
 
   std::atomic<bool> has_focus_{true};
@@ -595,6 +615,7 @@ void FearMkbCommands(PPCRegister& r30) {
 // CPlayerMgr's turn update: this frame's mouse movement, for its two reads below.
 REX_EXTERN(__imp__sub_8237DC88);
 REX_HOOK_RAW(sub_8237DC88) {
+  g_turn_ticks.store(Clock::now().time_since_epoch().count(), std::memory_order_relaxed);
   g_frame_yaw = g_frame_pitch = 0.0;
   if (g_driver && REXCVAR_GET(fear_mkb)) {
     double dx = 0.0, dy = 0.0;
@@ -602,6 +623,20 @@ REX_HOOK_RAW(sub_8237DC88) {
     const double scale = REXCVAR_GET(fear_mouse_sensitivity) * kRadiansPerCount;
     g_frame_yaw = dx * scale;
     g_frame_pitch = dy * scale * (REXCVAR_GET(fear_mouse_invert) ? -1.0 : 1.0);
+    if (REXCVAR_GET(fear_mkb_log)) {
+      static double sum_x = 0.0, sum_y = 0.0;
+      static int frames = 0;
+      static Clock::time_point since = Clock::now();
+      sum_x += dx;
+      sum_y += dy;
+      ++frames;
+      if (Clock::now() - since >= std::chrono::seconds(1)) {
+        REXLOG_INFO("F.E.A.R. mouse: {} turn updates, {:.0f} x {:.0f} counts", frames, sum_x, sum_y);
+        sum_x = sum_y = 0.0;
+        frames = 0;
+        since = Clock::now();
+      }
+    }
   }
   __imp__sub_8237DC88(ctx, base);
 }
