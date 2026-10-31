@@ -16,6 +16,8 @@ function(fear_add_renderer host)
         list(FILTER sources EXCLUDE REGEX
              "/(d3d12_[a-z_]+|draw|frame_pacer|geometry_shader|pipeline_library|present|present_debug|render_targets|resolve|resolve_debug|shader_cache|shader_specialize|shader_translate|textures)\\.cpp$")
     endif()
+    # The texture pack (docs/TEXTURES.md): the D3D12 texture cache's replacements.
+    list(APPEND sources "${host}/texture_pack.cpp")
     add_library(fear_d3d12 OBJECT ${sources})
     if("FILES" IN_LIST ARGN)
         target_compile_definitions(fear_d3d12 PRIVATE FEAR_TITLE_FILES)

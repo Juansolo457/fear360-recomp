@@ -47,6 +47,9 @@
 namespace rex::memory {
 class Memory;
 }
+namespace fear::texture_pack {
+struct Entry;
+}
 
 namespace fear::d3d12 {
 
@@ -254,6 +257,14 @@ class TextureCache {
   // would never be read.
   bool ResolvesCoverAll(const Texture& t) const;
   void Transition(Texture& t, ID3D12GraphicsCommandList* list, D3D12_RESOURCE_STATES to);
+  // The texture pack's replacement for t's base level as guest memory holds it now
+  // (texture_pack.h), or null: no pack, no hit, or a texture the pack can't stand for (not 2D
+  // with one slice, a resolve destination). *key: its pack key.
+  const fear::texture_pack::Entry* PackReplacement(const Texture& t, uint64_t* key);
+  // t's resource for `pack` (a replacement, at its size, format and mips) or, null, for the
+  // guest data again: a new resource, the old one kept with its views until the GPU is done with
+  // the frame completing at frame_fence (Retire). False if the resource can't be created.
+  bool SwapResource(Texture& t, const fear::texture_pack::Entry* pack, uint64_t frame_fence);
   void WatchRange(Texture& t, uint32_t start, uint32_t length);
   // Arms the watches on the guest pages of a texture's base and mips: after its dirty flag is
   // cleared, before its data is read.
@@ -280,6 +291,10 @@ class TextureCache {
     bool deferred = false;
     D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COPY_DEST;
     uint64_t frame_fence = 0;
+    // A texture pack replacement: its DDS file is read into the footprints instead of untiling
+    // guest memory (whose pages are still watched, so a change uploads again).
+    const fear::texture_pack::Entry* pack = nullptr;
+    uint64_t pack_key = 0;
   };
   // An untiling thread's upload list: the deferred uploads it untiled since the last
   // CloseUploadLists. Its command allocators are pooled by the frame fence of the lists recorded
@@ -342,6 +357,13 @@ class TextureCache {
   static constexpr size_t kMaxEvictionsPerFrame = 128;
   std::vector<Texture*> evict_batch_;             // scratch
   std::vector<ID3D12Resource*> evict_resources_;  // scratch
+  // Resources textures stopped using (SwapResource), until the GPU passes `fence`: then their
+  // views go (evict_callback_) and their memory is freed.
+  struct Swapped {
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    uint64_t placed = 0, bytes = 0, fence = 0;
+  };
+  std::vector<Swapped> swapped_;
   // The watched ranges of every texture, listed in each 64 KB bucket of guest physical memory
   // they touch (Destroy removes a texture's).
   static constexpr uint32_t kWatchBucketShift = 16;

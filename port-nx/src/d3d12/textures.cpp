@@ -3,6 +3,9 @@
 
 #include "clock.h"
 #include "profile.h"
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+#include "../texture_pack.h"
+#endif
 
 #include <rex/graphics/pipeline/texture/info.h>
 #include <rex/graphics/pipeline/texture/util.h>
@@ -48,7 +51,13 @@ using Microsoft::WRL::ComPtr;
 
 struct TextureCache::Texture {
   TextureKey key;
-  const HostFormat* host = nullptr;
+  const HostFormat* host = nullptr;  // `resource`'s: guest_host, or pack_host
+  const HostFormat* guest_host = nullptr;
+  // A texture pack replacement (texture_pack.h) in `resource` in place of the guest data: the
+  // entry, its resource's host format and mip levels.
+  const fear::texture_pack::Entry* pack = nullptr;
+  HostFormat pack_host{};
+  uint32_t pack_levels = 0;
   ComPtr<ID3D12Resource> resource;
   D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COPY_DEST;
   texture_util::TextureGuestLayout layout{};
@@ -158,6 +167,71 @@ void ForEachResolveAddress(const TextureKey& key, const texture_util::TextureGue
   }
 }
 
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+// The DXGI format of a texture pack replacement's (texture_pack.h's VkFormat names), or UNKNOWN.
+DXGI_FORMAT PackFormat(const fear::texture_pack::Entry& e) {
+  switch (e.format) {
+    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: return DXGI_FORMAT_BC1_UNORM;
+    case VK_FORMAT_BC2_UNORM_BLOCK: return DXGI_FORMAT_BC2_UNORM;
+    case VK_FORMAT_BC3_UNORM_BLOCK: return DXGI_FORMAT_BC3_UNORM;
+    case VK_FORMAT_BC4_UNORM_BLOCK: return DXGI_FORMAT_BC4_UNORM;
+    case VK_FORMAT_BC5_UNORM_BLOCK: return DXGI_FORMAT_BC5_UNORM;
+    case VK_FORMAT_BC7_UNORM_BLOCK: return DXGI_FORMAT_BC7_UNORM;
+    case VK_FORMAT_R8G8B8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case VK_FORMAT_R8G8_UNORM: return DXGI_FORMAT_R8G8_UNORM;
+    case VK_FORMAT_R8_UNORM: return DXGI_FORMAT_R8_UNORM;
+    default: return DXGI_FORMAT_UNKNOWN;
+  }
+}
+
+// The host format a replacement is bound with. In the 360 texture's own host format when that is
+// the replacement's (BC5 for DXN, RGBA8 for k_8_8_8_8), its signed view included, so signed
+// fetches read it as they read the 360's; otherwise the replacement's format, unsigned only. The
+// channels follow the pack's swizzle when it gives one (a PC DXT texture for a 360 BGRA one).
+HostFormat PackHostFormat(const fear::texture_pack::Entry& e, const HostFormat& guest) {
+  HostFormat h = {};
+  const DXGI_FORMAT f = PackFormat(e);
+  if (guest.unorm == f) {
+    h.resource = guest.resource;
+    h.unorm = guest.unorm;
+    h.snorm = guest.snorm;
+  } else {
+    h.resource = h.unorm = f;
+    h.snorm = DXGI_FORMAT_UNKNOWN;
+  }
+  h.conversion = TextureConversion::kCopy;
+  h.block_compressed = e.block_width > 1;
+  h.host_swizzle = e.swizzle != fear::texture_pack::kSameSwizzle ? e.swizzle : guest.host_swizzle;
+  h.expand = 1;
+  return h;
+}
+
+// Upload footprints of a replacement's first `levels` mips (D3D12 placement alignment), and the
+// buffer size.
+uint64_t PackFootprints(const fear::texture_pack::Entry& e, uint32_t levels,
+                        std::vector<HostSubresource>* out) {
+  out->clear();
+  uint64_t size = 0;
+  for (uint32_t level = 0; level < levels; ++level) {
+    HostSubresource s;
+    s.level = level;
+    s.width = std::max(e.width >> level, 1u);
+    s.height = std::max(e.height >> level, 1u);
+    s.depth = 1;
+    s.block_columns = (s.width + e.block_width - 1) / e.block_width;
+    s.block_rows = (s.height + e.block_height - 1) / e.block_height;
+    s.row_bytes = s.block_columns * e.block_bytes;
+    s.row_pitch = (s.row_bytes + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
+                  ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    s.offset = (size + D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) &
+               ~uint64_t(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1);
+    size = s.offset + s.size();
+    out->push_back(s);
+  }
+  return size;
+}
+#endif
+
 }  // namespace
 
 TextureCache::TextureCache(ID3D12Device* device, const uint8_t* physical_membase)
@@ -186,6 +260,14 @@ TextureCache::TextureCache(ID3D12Device* device, rex::memory::Memory* memory)
   budget_.hard_bytes = limit(REXCVAR_GET(fear_d3d12_texture_memory_hard_mb));
   budget_.soft_lifetime_ms =
       uint64_t(std::max(REXCVAR_GET(fear_d3d12_texture_memory_soft_lifetime_s), 0)) * 1000;
+  // Texture pack replacements are the PC's size, about four times the 360's in memory: the
+  // budget grows with them, or evictions would read the same DDS files again and again.
+  if (fear::texture_pack::Enabled()) {
+    if (budget_.soft_bytes != ~0ull) budget_.soft_bytes *= 4;
+    if (budget_.hard_bytes != ~0ull) budget_.hard_bytes *= 4;
+    REXLOG_INFO("D3D12 textures: texture pack in use; memory budget {} MB soft, {} MB hard",
+                budget_.soft_bytes >> 20, budget_.hard_bytes >> 20);
+  }
   std::string_view trace = REXCVAR_GET(fear_d3d12_texture_trace);
   if (trace.starts_with("0x") || trace.starts_with("0X")) trace.remove_prefix(2);
   std::from_chars(trace.data(), trace.data() + trace.size(), trace_address_, 16);
@@ -246,6 +328,27 @@ bool TextureCache::UploadsDone() {
 
 uint64_t TextureCache::RunUntile(const UntileJob& job, std::vector<uint8_t>* scratch) {
   const uint64_t t0 = NowNs();
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+  if (job.pack) {
+    // A texture pack replacement: its DDS mips, tight, level after level, into the footprints.
+    const fear::texture_pack::Entry& e = *job.pack;
+    scratch->resize(size_t(e.data_size));
+    if (!fear::texture_pack::ReadData(e, scratch->data(), scratch->size())) {
+      // Black this once; the 360 texture is used from its next new content on.
+      std::memset(job.dst, 0, size_t(job.size));
+      fear::texture_pack::MarkBad(job.pack_key);
+      return NowNs() - t0;
+    }
+    uint64_t src = 0;
+    for (const HostSubresource& s : job.footprints) {
+      for (uint32_t row = 0; row < s.block_rows; ++row)
+        std::memcpy(job.dst + s.offset + uint64_t(row) * s.row_pitch,
+                    scratch->data() + src + uint64_t(row) * s.row_bytes, s.row_bytes);
+      src += uint64_t(s.row_bytes) * s.block_rows;
+    }
+    return NowNs() - t0;
+  }
+#endif
   UntileTexture(job.key, job.layout, job.guest, job.footprints, job.dst, scratch);
   const uint64_t ns = NowNs() - t0;
   if (ns > 500000) {
@@ -427,7 +530,7 @@ TextureCache::Texture* TextureCache::NewTexture(const TextureKey& key) {
 
 TextureCache::Texture* TextureCache::Create(const TextureKey& key, const HostFormat& host) {
   Texture& t = *NewTexture(key);
-  t.host = &host;
+  t.host = t.guest_host = &host;
   t.layout = GetGuestLayout(key);
   GetGuestExtents(key, t.layout, &t.base_bytes, &t.mips_bytes);
   t.resolved_seq.assign(size_t(key.mip_levels()) * key.array_size(), 0);
@@ -674,11 +777,124 @@ void TextureCache::Transition(Texture& t, ID3D12GraphicsCommandList* list,
   t.state = to;
 }
 
+const fear::texture_pack::Entry* TextureCache::PackReplacement(const Texture& t, uint64_t* key) {
+#ifdef FEAR_D3D12_TEXTURES_OFFLINE
+  return nullptr;
+#else
+  namespace pack = fear::texture_pack;
+  const bool log_keys = pack::LogKeys();
+  if (!pack::Enabled() && !log_keys) return nullptr;
+  const TextureKey& k = t.key;
+  if (k.dimension != xenos::DataDimension::k2DOrStacked || k.array_size() != 1 || !k.base_page ||
+      t.alias)
+    return nullptr;
+  // The base level's guest bytes, as the offline indexer (tools/texindex.cpp) hashes them.
+  const uint32_t base = k.base_page << 12, base_size = t.layout.base.level_data_extent_bytes;
+  if (!base_size || base >= kMemorySize || base_size > kMemorySize - base) return nullptr;
+  // A resolve destination holds what the GPU drew, not a file's texels.
+  if (resolved_lookup_) {
+    bool resolved = false;
+    ForEachResolveAddress(k, t.layout, [&](size_t, uint32_t address) {
+      resolved = resolved || resolved_lookup_(address);
+    });
+    if (resolved) return nullptr;
+  }
+  *key = pack::ReplacementKey(membase_ + base, base_size, uint32_t(k.format), k.width, k.height,
+                              k.tiled, k.pitch);
+  if (log_keys) {
+    D3D12_LOG_FIRST(65536, INFO,
+                    "[texpack] key={:016X} format={} size={}x{} tiled={} pitch={} base={} mips={} "
+                    "address={:08X}",
+                    *key, uint32_t(k.format), k.width, k.height, uint32_t(k.tiled), k.pitch,
+                    base_size, k.mip_levels(), base);
+  }
+  const pack::Entry* e = pack::Find(*key);
+  if (pack::Enabled()) pack::CountLookup(e != nullptr);
+  if (e && PackFormat(*e) == DXGI_FORMAT_UNKNOWN) return nullptr;
+  // BC textures need sizes in whole blocks unless the device takes unaligned ones.
+  if (e && e->block_width > 1 && !unaligned_bc_supported_ &&
+      ((e->width % e->block_width) || (e->height % e->block_height)))
+    return nullptr;
+  return e;
+#endif
+}
+
+bool TextureCache::SwapResource(Texture& t, const fear::texture_pack::Entry* pack,
+                                uint64_t frame_fence) {
+  const TextureKey& key = t.key;
+  HostFormat host = *t.guest_host;
+  D3D12_RESOURCE_DESC desc = {};
+  desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  desc.DepthOrArraySize = 1;
+  desc.SampleDesc.Count = 1;
+  desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+  bool small_placement = false;
+  uint32_t levels = key.mip_levels();
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+  if (pack) {
+    host = PackHostFormat(*pack, *t.guest_host);
+    levels = std::min<uint32_t>(pack->mip_count, D3D12_REQ_MIP_LEVELS);
+    desc.Width = pack->width;
+    desc.Height = pack->height;
+  } else
+#endif
+  {
+    desc.Width = key.width;
+    desc.Height = key.height;
+    const rex::graphics::FormatInfo* info = rex::graphics::FormatInfo::Get(key.format);
+    const uint32_t bw = host.block_compressed ? info->block_width : 1;
+    const uint32_t bh = host.block_compressed ? info->block_height : 1;
+    small_placement = uint64_t(key.width) * key.height * info->bytes_per_block() * host.expand /
+                          (bw * bh) <=
+                      D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+  }
+  desc.MipLevels = uint16_t(levels);
+  desc.Format = host.resource;
+  ComPtr<ID3D12Resource> resource;
+  uint64_t placed = kCommitted, bytes = 0;
+  const HRESULT hr = CreateTextureResource(desc, small_placement, &resource, &placed, &bytes);
+  if (FAILED(hr)) {
+    D3D12_LOG_FIRST(4, WARN, "D3D12 textures: {}x{} resource for {:08X} ({}) failed: {:08X}",
+                    uint32_t(desc.Width), desc.Height, key.base_page << 12,
+                    pack ? "texture pack" : "guest data", uint32_t(hr));
+    return false;
+  }
+  // The frames up to this one may still read the old resource through views of it.
+  if (t.resource) swapped_.push_back({std::move(t.resource), t.placed, t.bytes, frame_fence});
+  resident_bytes_ -= t.bytes;
+  t.resource = std::move(resource);
+  t.placed = placed;
+  t.bytes = bytes;
+  resident_bytes_ += bytes;
+  t.state = D3D12_RESOURCE_STATE_COPY_DEST;
+  t.pack = pack;
+  t.pack_levels = pack ? levels : 0;
+  t.pack_host = host;
+  t.host = pack ? &t.pack_host : t.guest_host;
+  // Bindings of the texture name the old resource.
+  ++slots_[t.slot].generation;
+  change_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  return true;
+}
+
 bool TextureCache::Upload(Texture& t, ID3D12GraphicsCommandList* list, uint64_t frame_fence,
                           bool defer) {
   const TextureKey& key = t.key;
   uint64_t size = GetHostFootprints(key, true, &footprints_);
   if (!size) return false;
+  // The texture pack (texture_pack.h): the new content may have the PC's copy, at its own size,
+  // format and mips, in a resource of its own; content without one (a resolve destination
+  // included) goes back to the guest's, which the resolved images below may then fill.
+  uint64_t pack_key = 0;
+  const fear::texture_pack::Entry* pack = PackReplacement(t, &pack_key);
+  if (pack != t.pack && !SwapResource(t, pack, frame_fence)) {
+    if (!pack) return false;
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+    fear::texture_pack::MarkBad(pack_key);
+#endif
+    pack = nullptr;
+    if (t.pack && !SwapResource(t, nullptr, frame_fence)) return false;
+  }
   if (ResolvesCoverAll(t)) {
     // The CopyResolved that follows overwrites every subresource in full (it copies even over
     // fresh guest data), so the untile and its copies would be dead work: 1280x720 RGBA8
@@ -688,6 +904,9 @@ bool TextureCache::Upload(Texture& t, ID3D12GraphicsCommandList* list, uint64_t 
     profile::Count(profile::kUploadSkipped);
     return true;
   }
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+  if (pack) size = PackFootprints(*pack, t.pack_levels, &footprints_);
+#endif
   UploadPool::Alloc a;
   if (!upload_.Allocate(size, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, frame_fence, &a))
     return false;
@@ -701,12 +920,18 @@ bool TextureCache::Upload(Texture& t, ID3D12GraphicsCommandList* list, uint64_t 
   copies.source = a.resource;
   copies.source_offset = a.offset;
   copies.format = t.host->resource;
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+  if (pack) {
+    copies.block_width = pack->block_width;
+    copies.block_height = pack->block_height;
+  } else
+#endif
   if (t.host->block_compressed) {
     const rex::graphics::FormatInfo* info = rex::graphics::FormatInfo::Get(key.format);
     copies.block_width = info->block_width;
     copies.block_height = info->block_height;
   }
-  copies.mip_levels = key.mip_levels();
+  copies.mip_levels = pack ? t.pack_levels : key.mip_levels();
   if (defer) {
     job.deferred = true;
     job.state = t.state;
@@ -735,6 +960,8 @@ bool TextureCache::Upload(Texture& t, ID3D12GraphicsCommandList* list, uint64_t 
   job.base_bytes = t.base_bytes;
   job.mips_bytes = t.mips_bytes;
   job.conversion = t.host->conversion;
+  job.pack = pack;
+  job.pack_key = pack_key;
   if (workers_.empty()) {
     ArmWatches(job.key, job.base_bytes, job.mips_bytes);
     stats_.untile_ns += RunUntile(job, &untile_scratch_);
@@ -906,6 +1133,9 @@ bool TextureCache::Get(const uint32_t fetch_dwords[6], ID3D12GraphicsCommandList
     }
   }
   if (t->failed) return false;
+  // A resolve into a texture pack replacement's address (OnResolved): what the GPU drew wins, so
+  // the texture uploads again, back in a guest-format resource for CopyResolved to fill.
+  if (t->pack && t->resolve_pending) t->dirty.store(true, std::memory_order_release);
   const bool first_use = t->used_fence != frame_fence;
   MarkUsed(*t, frame_fence);
   const bool was_dirty = t->dirty.load(std::memory_order_acquire);
@@ -980,7 +1210,8 @@ bool TextureCache::Get(const uint32_t fetch_dwords[6], ID3D12GraphicsCommandList
       break;
     default:
       srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-      srv.Texture2DArray.MipLevels = key.mip_levels();
+      // A texture pack replacement has its own mips (one more for the PC's twice the size).
+      srv.Texture2DArray.MipLevels = t->pack ? t->pack_levels : key.mip_levels();
       srv.Texture2DArray.ArraySize = key.array_size();
       break;
   }
@@ -1089,7 +1320,24 @@ void TextureCache::Retire(uint64_t completed_fence) {
   completed_fence_.store(completed_fence, std::memory_order_relaxed);
   upload_.EndFrame(completed_fence);
   now_ms_ = NowNs() / 1000000;
+  // Resources textures swapped out (SwapResource) once no frame in flight reads them.
+  if (!swapped_.empty()) {
+    evict_resources_.clear();
+    for (const Swapped& s : swapped_)
+      if (s.fence <= completed_fence) evict_resources_.push_back(s.resource.Get());
+    if (!evict_resources_.empty()) {
+      if (evict_callback_) evict_callback_(evict_resources_);
+      std::erase_if(swapped_, [&](const Swapped& s) {
+        if (s.fence > completed_fence) return false;
+        if (s.placed != kCommitted) FreePlaced(s.placed, s.bytes);
+        return true;
+      });
+    }
+  }
   EvictOverBudget(completed_fence);
+#ifndef FEAR_D3D12_TEXTURES_OFFLINE
+  fear::texture_pack::ReportStats();
+#endif
 }
 
 }  // namespace fear::d3d12

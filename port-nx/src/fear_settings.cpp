@@ -127,6 +127,25 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
                       "sharpest setting can shimmer on fine patterns."});
+#if defined(_WIN32)
+  // The D3D12 renderer's texture pack (docs/TEXTURES.md; the Vulkan renderer has none yet).
+  const std::string pack = CvarValue("fear_texture_pack");
+  if (pack.empty()) {
+    settings.push_back({"PC textures",
+                        "fear_texture_pack_enabled",
+                        {{"true", "Not built"}},
+                        false,
+                        "Built on your PC from your own copy of the PC game: "
+                        "tools/texture_pack.py (docs/TEXTURES.md)."});
+  } else {
+    settings.push_back({"PC textures",
+                        "fear_texture_pack_enabled",
+                        {{"true", "On"}, {"false", "Off (the 360's)"}},
+                        false,
+                        "The PC version's textures, from the pack built from your own copy: " +
+                            pack});
+  }
+#endif
   settings.push_back({"Right stick at its edge",
                       "fear_look_ramp",
                       {{"off", "No boost"},
