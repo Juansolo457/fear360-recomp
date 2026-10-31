@@ -323,20 +323,37 @@ bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& value
   }
   std::error_code error;
   fs::create_directories(g_path.parent_path(), error);
-  std::ofstream out(g_path, std::ios::trunc);
-  if (!out) {
-    REXLOG_ERROR("F.E.A.R. settings: can't write {}", g_path.string());
+  // Written whole to a file beside it, then renamed over it: a crash mid-write leaves the old
+  // file, not a truncated one (docs/REVIEW.md).
+  fs::path temp = g_path;
+  temp += ".tmp";
+  {
+    std::ofstream out(temp, std::ios::trunc);
+    if (!out) {
+      REXLOG_ERROR("F.E.A.R. settings: can't write {}", temp.string());
+      return false;
+    }
+    out << "# F.E.A.R. PC Settings, written by the panel in the main menu.\n"
+           "# Loaded at startup; a flag on the command line still wins for that run.\n";
+    for (const std::string& line : kept) out << line << "\n";
+    for (const auto& [name, value] : values) {
+      const auto* info = rex::cvar::GetFlagInfo(name);
+      const bool text = info && info->type == rex::cvar::FlagType::String;
+      out << name << " = " << (text ? TomlString(value) : value) << "\n";
+    }
+    out.close();
+    if (!out) {
+      REXLOG_ERROR("F.E.A.R. settings: couldn't finish writing {}", temp.string());
+      return false;
+    }
+  }
+  fs::rename(temp, g_path, error);
+  if (error) {
+    REXLOG_ERROR("F.E.A.R. settings: can't replace {} ({})", g_path.string(), error.message());
+    fs::remove(temp, error);
     return false;
   }
-  out << "# F.E.A.R. PC Settings, written by the panel in the main menu.\n"
-         "# Loaded at startup; a flag on the command line still wins for that run.\n";
-  for (const std::string& line : kept) out << line << "\n";
-  for (const auto& [name, value] : values) {
-    const auto* info = rex::cvar::GetFlagInfo(name);
-    const bool text = info && info->type == rex::cvar::FlagType::String;
-    out << name << " = " << (text ? TomlString(value) : value) << "\n";
-  }
-  return bool(out);
+  return true;
 }
 
 // Starts the game again with this run's arguments, minus the flags for the settings (so the

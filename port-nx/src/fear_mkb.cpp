@@ -497,13 +497,16 @@ class Driver final : public rex::input::InputDriver,
   }
 
   // The same keys as pad keystrokes, for the menus that read those (XUI scenes, which the game's
-  // XUI manager feeds from XInputGetKeystroke): queued as the keys go down, repeat and come up.
+  // XUI manager feeds from XInputGetKeystroke): queued as the keys go down, repeat and come up,
+  // while the game has the input (SetKey). One not read within a quarter second is dropped.
   X_RESULT GetDeviceKeystroke(rex::input::DeviceId id, uint32_t,
                               X_INPUT_KEYSTROKE* out) override {
     if (id != kDevice || !REXCVAR_GET(fear_mkb)) return X_ERROR_DEVICE_NOT_CONNECTED;
     std::lock_guard lock(mutex_);
+    const Clock::time_point oldest = Clock::now() - std::chrono::milliseconds(250);
+    while (!keystrokes_.empty() && keystrokes_.front().second < oldest) keystrokes_.pop_front();
     if (keystrokes_.empty()) return X_ERROR_EMPTY;
-    if (out) *out = keystrokes_.front();
+    if (out) *out = keystrokes_.front().first;
     keystrokes_.pop_front();
     return X_ERROR_SUCCESS;
   }
@@ -606,7 +609,7 @@ class Driver final : public rex::input::InputDriver,
       X_INPUT_KEYSTROKE ks = {};
       ks.virtual_key = uint16_t(pad);
       ks.flags = flags;
-      keystrokes_.push_back(ks);
+      keystrokes_.emplace_back(ks, Clock::now());
     }
   }
 
@@ -732,7 +735,9 @@ class Driver final : public rex::input::InputDriver,
   void SetKey(uint16_t key, bool down) {
     if (!key || key >= 256) return;
     if (down && !has_focus_) return;
-    const bool menus = !Playing() && REXCVAR_GET(fear_mkb);
+    // For the menus' pad keystrokes: the menus, while the game has the input (with a panel of ours
+    // open, its Enter would reach the scene under it). A key up still follows a key down sent.
+    const bool menus = !Playing() && REXCVAR_GET(fear_mkb) && is_active();
     std::lock_guard lock(mutex_);
     // A new press, not the key's repeat or one held when rebinding began (Enter that chose it).
     if (down && !down_[key] && rebinding_ && !rebound_) rebound_ = key;
@@ -756,7 +761,7 @@ class Driver final : public rex::input::InputDriver,
                           : down_[key] ? X_INPUT_KEYSTROKE_KEYDOWN | X_INPUT_KEYSTROKE_REPEAT
                                        : X_INPUT_KEYSTROKE_KEYDOWN);
       ks.user_index = 0;  // the input system stamps the player this device drives
-      keystrokes_.push_back(ks);
+      keystrokes_.emplace_back(ks, Clock::now());
       keystroke_sent_[key] = down;
       return;
     }
@@ -846,7 +851,9 @@ class Driver final : public rex::input::InputDriver,
   static constexpr size_t kMenuMouseKept = 64;
   std::vector<std::pair<MenuMouse, Clock::time_point>> menu_mouse_;
   static constexpr size_t kKeystrokesKept = 16;
-  std::deque<X_INPUT_KEYSTROKE> keystrokes_;
+  // Each with when it was queued: one not read within a quarter second (nothing was reading
+  // keystrokes then) is dropped, so it can't land on the next scene that does.
+  std::deque<std::pair<X_INPUT_KEYSTROKE, Clock::time_point>> keystrokes_;
   std::array<bool, 256> keystroke_sent_{};  // the key's last keystroke was a key down
   uint16_t pressed_button_ = 0;             // PressPad's, until pressed_until_
   Clock::time_point pressed_until_{};
