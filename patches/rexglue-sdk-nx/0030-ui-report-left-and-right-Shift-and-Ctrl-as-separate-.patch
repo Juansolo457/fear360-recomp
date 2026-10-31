@@ -1,0 +1,144 @@
+From 76e3c9589cf035fb22971fca2810790e6588154a Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Sat, 31 Oct 2026 15:38:52 -0700
+Subject: [PATCH] ui: report left and right Shift and Ctrl as separate keys
+
+SDL told the two sides apart, but the key mapping folded both into VK_SHIFT and VK_CONTROL, so
+a game could not bind Right Ctrl apart from Left Ctrl (PC F.E.A.R.: slow-mo on Left Ctrl, strafe
+on Right Ctrl). They now arrive as VK_LSHIFT/VK_RSHIFT and VK_LCONTROL/VK_RCONTROL, as Win32
+reports them. The consumers that want "a Shift" or "a Ctrl" take either side: ImGuiDrawer keeps
+io.KeyShift/KeyCtrl on while either is held (and maps each side to its ImGui key), and
+MnkInputDriver holds the generic key while either side is, so its binds and modifiers naming
+Shift or Control work as before. Alt stays merged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/ui/imgui_drawer.h      |  3 +++
+ src/input/mnk/mnk_input_driver.cpp | 18 ++++++++++++++++++
+ src/ui/imgui_drawer.cpp            | 22 ++++++++++++++++++++--
+ src/ui/sdl_virtual_key.cpp         |  8 ++++++--
+ 4 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
+index a570fa0..ac8a63b 100644
+--- a/include/rex/ui/imgui_drawer.h
++++ b/include/rex/ui/imgui_drawer.h
+@@ -83,6 +83,9 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+ 
+   void ClearInput();
+   void OnKey(KeyEvent& e, bool is_down);
++  // Sides of Shift and Ctrl held (OnKey): io.KeyShift/KeyCtrl stay on while either is.
++  uint8_t shift_held_ = 0;
++  uint8_t control_held_ = 0;
+   void UpdateMousePosition(float x, float y);
+   void SwitchToPhysicalMouseAndUpdateMousePosition(const MouseEvent& e);
+ 
+diff --git a/src/input/mnk/mnk_input_driver.cpp b/src/input/mnk/mnk_input_driver.cpp
+index 3f9422d..63ca315 100644
+--- a/src/input/mnk/mnk_input_driver.cpp
++++ b/src/input/mnk/mnk_input_driver.cpp
+@@ -478,6 +478,24 @@ void MnkInputDriver::SetKeyState(uint16_t vk, bool down) {
+   if (vk < 256) {
+     key_down_[vk] = down;
+   }
++  // Left and right Shift and Ctrl arrive apart (sdl_virtual_key.cpp): the generic key is held
++  // while either side is, so binds and modifiers naming "Shift" or "Control" still work.
++  using rex::ui::VirtualKey;
++  const auto either = [&](VirtualKey generic, VirtualKey left, VirtualKey right) {
++    key_down_[uint16_t(generic)] = key_down_[uint16_t(left)] || key_down_[uint16_t(right)];
++  };
++  switch (VirtualKey(vk)) {
++    case VirtualKey::kLShift:
++    case VirtualKey::kRShift:
++      either(VirtualKey::kShift, VirtualKey::kLShift, VirtualKey::kRShift);
++      break;
++    case VirtualKey::kLControl:
++    case VirtualKey::kRControl:
++      either(VirtualKey::kControl, VirtualKey::kLControl, VirtualKey::kRControl);
++      break;
++    default:
++      break;
++  }
+ }
+ 
+ void MnkInputDriver::OnKeyDown(rex::ui::KeyEvent& e) {
+diff --git a/src/ui/imgui_drawer.cpp b/src/ui/imgui_drawer.cpp
+index 25be1cd..6148c36 100644
+--- a/src/ui/imgui_drawer.cpp
++++ b/src/ui/imgui_drawer.cpp
+@@ -312,6 +312,10 @@ std::optional<ImGuiKey> ImGuiDrawer::VirtualKeyToImGuiKey(VirtualKey vkey) {
+       // Modifiers
+       {ui::VirtualKey::kShift, ImGuiKey_LeftShift},
+       {ui::VirtualKey::kControl, ImGuiKey_LeftCtrl},
++      {ui::VirtualKey::kLShift, ImGuiKey_LeftShift},
++      {ui::VirtualKey::kRShift, ImGuiKey_RightShift},
++      {ui::VirtualKey::kLControl, ImGuiKey_LeftCtrl},
++      {ui::VirtualKey::kRControl, ImGuiKey_RightCtrl},
+       {ui::VirtualKey::kMenu, ImGuiKey_LeftAlt},
+       {ui::VirtualKey::kCapital, ImGuiKey_CapsLock},
+       {ui::VirtualKey::kNumLock, ImGuiKey_NumLock},
+@@ -652,10 +656,17 @@ void ImGuiDrawer::ClearInput() {
+   io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+   std::memset(io.MouseDown, 0, sizeof(io.MouseDown));
+   io.ClearInputKeys();
++  shift_held_ = control_held_ = 0;
+   touch_pointer_id_ = TouchEvent::kPointerIDNone;
+   reset_mouse_position_after_next_frame_ = false;
+ }
+ 
++// Which sides of a modifier are held: bit 1 the right key, bit 0 the left or the generic one.
++static uint8_t HeldSides(uint8_t held, VirtualKey key, VirtualKey right, bool is_down) {
++  const uint8_t bit = key == right ? 2 : 1;
++  return is_down ? uint8_t(held | bit) : uint8_t(held & ~bit);
++}
++
+ void ImGuiDrawer::OnKey(KeyEvent& e, bool is_down) {
+   auto& io = GetIO();
+   const VirtualKey virtual_key = e.virtual_key();
+@@ -663,11 +674,18 @@ void ImGuiDrawer::OnKey(KeyEvent& e, bool is_down) {
+     io.AddKeyEvent(*imGuiKey, is_down);
+   }
+   switch (virtual_key) {
++    // Either side holds the modifier (sdl_virtual_key.cpp reports left and right apart).
+     case VirtualKey::kShift:
+-      io.KeyShift = is_down;
++    case VirtualKey::kLShift:
++    case VirtualKey::kRShift:
++      shift_held_ = HeldSides(shift_held_, virtual_key, VirtualKey::kRShift, is_down);
++      io.KeyShift = shift_held_ != 0;
+       break;
+     case VirtualKey::kControl:
+-      io.KeyCtrl = is_down;
++    case VirtualKey::kLControl:
++    case VirtualKey::kRControl:
++      control_held_ = HeldSides(control_held_, virtual_key, VirtualKey::kRControl, is_down);
++      io.KeyCtrl = control_held_ != 0;
+       break;
+     case VirtualKey::kMenu:
+       // FIXME(Triang3l): Doesn't work in xenia-ui-window-demo.
+diff --git a/src/ui/sdl_virtual_key.cpp b/src/ui/sdl_virtual_key.cpp
+index 3a152b8..1867614 100644
+--- a/src/ui/sdl_virtual_key.cpp
++++ b/src/ui/sdl_virtual_key.cpp
+@@ -69,12 +69,16 @@ VirtualKey TranslateSDLScancode(SDL_Scancode scancode) {
+       return VirtualKey::kInsert;
+     case SDL_SCANCODE_DELETE:
+       return VirtualKey::kDelete;
++    // Left and right apart, as Win32's VK_LSHIFT/VK_RSHIFT, so each can be bound on its own. The
++    // consumers that want "a Shift" or "a Ctrl" (ImGuiDrawer, MnkInputDriver) take either side.
+     case SDL_SCANCODE_LSHIFT:
++      return VirtualKey::kLShift;
+     case SDL_SCANCODE_RSHIFT:
+-      return VirtualKey::kShift;
++      return VirtualKey::kRShift;
+     case SDL_SCANCODE_LCTRL:
++      return VirtualKey::kLControl;
+     case SDL_SCANCODE_RCTRL:
+-      return VirtualKey::kControl;
++      return VirtualKey::kRControl;
+     case SDL_SCANCODE_LALT:
+     case SDL_SCANCODE_RALT:
+       return VirtualKey::kMenu;
+-- 
+2.53.0.windows.1
+

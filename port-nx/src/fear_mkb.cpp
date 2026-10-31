@@ -68,6 +68,8 @@ REXCVAR_DEFINE_STRING(fear_key_forward, "W", "F.E.A.R./Keys", "Move forward");
 REXCVAR_DEFINE_STRING(fear_key_backward, "S", "F.E.A.R./Keys", "Move backward");
 REXCVAR_DEFINE_STRING(fear_key_strafe_left, "A", "F.E.A.R./Keys", "Strafe left");
 REXCVAR_DEFINE_STRING(fear_key_strafe_right, "D", "F.E.A.R./Keys", "Strafe right");
+REXCVAR_DEFINE_STRING(fear_key_strafe, "RCtrl", "F.E.A.R./Keys",
+                      "Strafe, held: turning strafes instead (the PC's Strafe key)");
 REXCVAR_DEFINE_STRING(fear_key_jump, "Space", "F.E.A.R./Keys", "Jump");
 REXCVAR_DEFINE_STRING(fear_key_crouch, "C", "F.E.A.R./Keys", "Crouch");
 REXCVAR_DEFINE_STRING(fear_key_crouch_toggle, "", "F.E.A.R./Keys", "Crouch, toggled");
@@ -84,7 +86,7 @@ REXCVAR_DEFINE_STRING(fear_key_melee, "Mouse2", "F.E.A.R./Keys", "Melee (the PC'
 REXCVAR_DEFINE_STRING(fear_key_zoom, "Shift,Mouse3", "F.E.A.R./Keys", "Zoom");
 REXCVAR_DEFINE_STRING(fear_key_reload, "R", "F.E.A.R./Keys", "Reload");
 REXCVAR_DEFINE_STRING(fear_key_use, "F", "F.E.A.R./Keys", "Use (doors, switches, pick up)");
-REXCVAR_DEFINE_STRING(fear_key_slow_mo, "Ctrl", "F.E.A.R./Keys", "Slow-mo (reflexes)");
+REXCVAR_DEFINE_STRING(fear_key_slow_mo, "LCtrl", "F.E.A.R./Keys", "Slow-mo (reflexes)");
 REXCVAR_DEFINE_STRING(fear_key_flashlight, "X", "F.E.A.R./Keys", "Flashlight");
 REXCVAR_DEFINE_STRING(fear_key_medkit, "Z", "F.E.A.R./Keys", "Use a medkit");
 REXCVAR_DEFINE_STRING(fear_key_throw_grenade, "G", "F.E.A.R./Keys", "Throw a grenade");
@@ -119,6 +121,7 @@ enum Command : uint32_t {
   kBackward = 0x01,
   kStrafeLeft = 0x03,
   kStrafeRight = 0x04,
+  kStrafe = 0x06,
   kLookDown = 0x07,
   kLookUp = 0x08,
   kTurnRight = 0x09,
@@ -187,6 +190,7 @@ std::vector<Action>& Table() {
       FEAR_MKB_ACTION(backward, kBackward, "Move backward", kMovement, nullptr),
       FEAR_MKB_ACTION(strafe_left, kStrafeLeft, "Strafe left", kMovement, nullptr),
       FEAR_MKB_ACTION(strafe_right, kStrafeRight, "Strafe right", kMovement, nullptr),
+      FEAR_MKB_ACTION(strafe, kStrafe, "Strafe", kMovement, "Held: turning strafes instead."),
       FEAR_MKB_ACTION(jump, kJump, "Jump", kMovement, nullptr),
       FEAR_MKB_ACTION(crouch, kDuck, "Crouch", kMovement, "Held."),
       FEAR_MKB_ACTION(crouch_toggle, kCrouchToggle, "Crouch (toggle)", kMovement,
@@ -348,12 +352,14 @@ const KeyName* FindName(std::string_view name) {
 
 // The name written for a code (a key pressed while rebinding); empty if it has none.
 std::string NameOf(uint16_t code) {
+  // The name of that key alone first ("LCtrl", not "Ctrl", which is either side).
+  const KeyName* any = nullptr;
   for (const KeyName& entry : KeyNames()) {
-    if (std::find(entry.codes.begin(), entry.codes.end(), code) != entry.codes.end()) {
-      return entry.name;
-    }
+    if (std::find(entry.codes.begin(), entry.codes.end(), code) == entry.codes.end()) continue;
+    if (entry.codes.size() == 1) return entry.name;
+    if (!any) any = &entry;
   }
-  return {};
+  return any ? any->name : std::string();
 }
 
 std::vector<std::string_view> Split(std::string_view text) {
