@@ -137,7 +137,8 @@ std::vector<Setting> BuildSettings() {
                        {"80", "80"},
                        {"85", "85"},
                        {"90", "90"},
-                       {"95", "95"}},
+                       {"95", "95"},
+                       {"100", "100"}},
                       false,
                       "Vertical, in degrees. Above 70 the gun moves forward to keep its place on "
                       "screen, as EchoPatch does on PC."});
