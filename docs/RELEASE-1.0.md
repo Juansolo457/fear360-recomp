@@ -17,6 +17,11 @@ still build from this source, but they aren't tested or supported in 1.0.
 container (SDK patch 0028; a source zip was not affected). If you cloned 1.0, pull and build again;
 on Windows, run `tools/setup-sdk.ps1 -Force` first. The game itself is unchanged.
 
+**1.0.2** adds **Bonus Mission** to the main menu: *Holiday*, the 360's bonus level, which the PC
+version never had. On the 360 it waits in the Campaign screen until you finish Interval 05; the
+main menu's item opens it from the start, with the game's own difficulty choice (#111). Nothing
+else changed.
+
 ## What's in 1.0
 
 **Native on the Steam Deck.** `tools/build-deck.sh` builds the game in an Ubuntu 22.04 container,

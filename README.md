@@ -6,7 +6,7 @@ The Xbox 360 F.E.A.R., running natively on Linux and the Steam Deck. A native Vu
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v1.0.1](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only (1.0.1 fixes building from a git clone): **F.E.A.R. on native Linux and the Steam Deck** (no Proton). On the Deck it runs at 120 fps most of the time and holds 60 fps or more in 99.8% of frames. You need only your F.E.A.R. disc. **Next:** the Windows build (1.5) and *F.E.A.R. Files* ([After 1.0](#after-10)).
+**Latest release: [v1.0.2](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only (1.0.2 adds the 360's bonus level, Holiday, to the main menu): **F.E.A.R. on native Linux and the Steam Deck** (no Proton). On the Deck it runs at 120 fps most of the time and holds 60 fps or more in 99.8% of frames. You need only your F.E.A.R. disc. **Next:** the Windows build (1.5) and *F.E.A.R. Files* ([After 1.0](#after-10)).
 
 ## Why
 
