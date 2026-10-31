@@ -1,4 +1,5 @@
-// F.E.A.R. 360 - PC Settings, Switch Game and Quit to Desktop in the main menu. See fear_menu.h.
+// F.E.A.R. 360 - Bonus Mission, PC Settings, Switch Game and Quit to Desktop in the main menu.
+// See fear_menu.h.
 
 #include "fear_menu.h"
 
@@ -24,6 +25,9 @@ namespace {
 // Each executable's own functions and data, the same code at different addresses.
 struct MenuCode {
   uint32_t add_text_item;  // CBaseScreen::AddTextItem(const wchar_t*, layout, ...)
+  // The same with a string ID (the game's own text, translated), the same layout arguments; 0:
+  // not looked up.
+  uint32_t add_text_id_item;
   uint32_t add_control;    // CBaseScreen::AddControl(ctrl)
   uint32_t empty_help;     // "": no help line under the item
   // Options' layout arguments when its Build ends: the registers that go in r6-r10, and the one
@@ -33,9 +37,10 @@ struct MenuCode {
   uint32_t game_items;  // the game's own list: Campaign/Extraction Point ... Options
 };
 // F.E.A.R. (565507D9): Build sub_823FF3C0, OnCommand sub_823FF7E8.
-constexpr MenuCode kFear = {0x824A7288, 0x824AA8B0, 0x82001C4A, {27, 26, 25, 24, 23}, 28, 4};
+constexpr MenuCode kFear = {0x824A7288, 0x824A86E0, 0x824AA8B0, 0x82001C4A,
+                            {27, 26, 25, 24, 23}, 28, 4};
 // F.E.A.R. Files (565507E8): Build sub_823EAAC0, OnCommand sub_823EAF68.
-constexpr MenuCode kFiles = {0x823E2388, 0x823E5948, 0x82000C38, {28, 27, 26, 25, 24}, 29, 5};
+constexpr MenuCode kFiles = {0x823E2388, 0, 0x823E5948, 0x82000C38, {28, 27, 26, 25, 24}, 29, 5};
 constexpr MenuCode kCode = fear::title::kFiles ? kFiles : kFear;
 
 constexpr uint32_t kShowSlot = 160;    // the control's Show(bool) in its method table
@@ -56,6 +61,23 @@ constexpr int32_t kColumnOffset = fear::title::kFiles ? 330 : 220;
 constexpr uint32_t kCommandSettings = 9001;
 constexpr uint32_t kCommandQuit = 9002;
 constexpr uint32_t kCommandSwitch = 9003;
+constexpr uint32_t kCommandBonus = 9004;
+
+// The bonus mission, Holiday (F.E.A.R. only, #111), through the Campaign screen's own way in. The
+// main menu's Campaign command (12) is CScreenMgr::SetCurrentScreen(2), whose switch runs the
+// Campaign screen's OnFocus at once (CScreenMgr::SwitchToScreen); that screen's command 33, its
+// "Bonus Mission" item, shows the difficulty list in bonus mode, and a difficulty then starts
+// Missions/Shared.BonusMission instead of a new campaign. The Campaign item waits for the
+// profile's unlock (finishing Interval 05, #39); ours is open from the start.
+constexpr uint32_t kBonusText = 0x820295DC;  // "IDS_BONUSMISSION"
+constexpr uint32_t kBonusHelp = 0x820295C4;  // "IDS_HELP_BONUSMISSION"
+constexpr uint32_t kScreenMgr = 0xC;          // CBaseScreen: its screen manager
+constexpr uint32_t kSetCurrentScreen = 0x50;  // CScreenMgr: SetCurrentScreen(screen ID)
+constexpr uint32_t kCurrentScreen = 0x60;     // CScreenMgr: the current screen
+constexpr uint32_t kScreenCampaign = 2;
+constexpr uint32_t kOnCommandSlot = 4;  // a screen's OnCommand(command, param1, param2)
+constexpr uint32_t kCampaignOnCommand = 0x824C2830;  // CScreenSingle::OnCommand
+constexpr uint32_t kCampaignBonus = 33;
 
 // The help line under the menu while an item is selected. A control's help is a string ID, which
 // the screen looks up in the game's string table (an unknown one shows "[ERROR: Invalid String
@@ -65,8 +87,12 @@ struct Item {
   uint32_t command;
   const char* help_id;
   const char16_t* help;
+  // Or the game's own string IDs, text and help (its translations; F.E.A.R.'s image): 0, ours.
+  uint32_t game_text = 0;
+  uint32_t game_help = 0;
 };
 constexpr Item kItems[] = {
+    {u"Bonus Mission", kCommandBonus, nullptr, nullptr, kBonusText, kBonusHelp},
     {u"PC Settings", kCommandSettings, "Fear360_Help_PCSettings",
      u"Change the display, controls and gameplay options."},
     {u"Switch Game", kCommandSwitch, "Fear360_Help_SwitchGame",
@@ -160,9 +186,34 @@ PPCContext* Context(const PPCRegister& r1) {
   return ctx;
 }
 
-// Switch Game only in a collection with another game to start (fear_collection.h).
+// Switch Game only in a collection with another game to start (fear_collection.h); the game's own
+// texts only where they're mapped (the bonus mission: F.E.A.R.).
 bool Offered(const Item& item) {
+  if (item.game_text && !kCode.add_text_id_item) return false;
   return item.command != kCommandSwitch || fear::collection::Enabled();
+}
+
+// The bonus mission (see kBonusText): from the main screen to the Campaign screen, then its Bonus
+// Mission command, as if picked there.
+void StartBonus(PPCContext& ctx, uint32_t screen) {
+  const uint32_t screens = Load32(screen + kScreenMgr);
+  if (!screens) return;
+  const PPCContext saved = ctx;
+  ctx.r3.u64 = screens;
+  ctx.r4.u64 = kScreenCampaign;
+  Call(ctx, Load32(Load32(screens) + kSetCurrentScreen));
+  const uint32_t campaign = Load32(screens + kCurrentScreen);
+  if (campaign && Load32(Load32(campaign) + kOnCommandSlot) == kCampaignOnCommand) {
+    ctx.r3.u64 = campaign;
+    ctx.r4.u64 = kCampaignBonus;
+    ctx.r5.u64 = 0;
+    ctx.r6.u64 = 0;
+    Call(ctx, kCampaignOnCommand);
+    REXLOG_INFO("F.E.A.R. menu: bonus mission: the Campaign screen's difficulty list");
+  } else {
+    REXLOG_ERROR("F.E.A.R. menu: bonus mission: the Campaign screen didn't open");
+  }
+  ctx = saved;
 }
 
 }  // namespace
@@ -215,14 +266,18 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
   std::vector<std::u16string_view> added;
   for (size_t i = 0; i < kItemCount; ++i) {
     if (!Offered(kItems[i])) continue;
-    {
-      std::lock_guard<std::mutex> lock(g_mutex);
-      if (!g_texts[i]) g_texts[i] = GuestText(kItems[i].text);
-      if (!g_helps[i]) g_helps[i] = GuestText(kItems[i].help);
-      if (g_helps[i] && !g_help_ids[i]) g_help_ids[i] = GuestCString(kItems[i].help_id);
+    uint32_t text = kItems[i].game_text, help = kItems[i].game_help;
+    if (!text) {
+      {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_texts[i]) g_texts[i] = GuestText(kItems[i].text);
+        if (!g_helps[i]) g_helps[i] = GuestText(kItems[i].help);
+        if (g_helps[i] && !g_help_ids[i]) g_help_ids[i] = GuestCString(kItems[i].help_id);
+      }
+      if (!g_texts[i]) continue;
+      text = g_texts[i];
+      help = g_help_ids[i] ? g_help_ids[i].load() : kCode.empty_help;
     }
-    if (!g_texts[i]) continue;
-    const uint32_t help = g_help_ids[i] ? g_help_ids[i].load() : kCode.empty_help;
     Store32(sp + 80, gpr(kCode.stack_word).u32);
     Base()[sp + 95] = 0;      // fixed width: no
     Store32(sp + 100, 0);     // font: the screen's
@@ -230,14 +285,14 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
     Store32(sp + 112, kItems[i].command);
     Store32(sp + 116, help);
     ctx->r3.u64 = screen;
-    ctx->r4.u64 = g_texts[i];
+    ctx->r4.u64 = text;
     ctx->r5.u64 = (uint64_t(kItems[i].command) << 32) | help;
     ctx->r6 = gpr(kCode.layout[0]);
     ctx->r7 = gpr(kCode.layout[1]);
     ctx->r8 = gpr(kCode.layout[2]);
     ctx->r9 = gpr(kCode.layout[3]);
     ctx->r10 = gpr(kCode.layout[4]);
-    Call(*ctx, kCode.add_text_item);
+    Call(*ctx, kItems[i].game_text ? kCode.add_text_id_item : kCode.add_text_item);
     const uint32_t control = ctx->r3.u32;
     if (!control) continue;
     ctx->r3.u64 = screen;
@@ -292,8 +347,13 @@ bool FearMenuHelpText(PPCRegister& r3, PPCRegister& r4) {
 }
 
 // CScreenMain::OnCommand(command, param1, param2): ours return 1 (handled) without the game.
-bool FearMenuCommand(PPCRegister& r3, PPCRegister& r4) {
+bool FearMenuCommand(PPCRegister& r1, PPCRegister& r3, PPCRegister& r4) {
   const uint32_t command = r4.u32;
+  if (command == kCommandBonus) {
+    if (PPCContext* ctx = Context(r1)) StartBonus(*ctx, r3.u32);
+    r3.u64 = 1;
+    return true;
+  }
   if (command != kCommandSettings && command != kCommandQuit && command != kCommandSwitch) {
     return false;
   }

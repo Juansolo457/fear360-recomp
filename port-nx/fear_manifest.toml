@@ -255,8 +255,9 @@ name = "FearDebugDecalSize"
 address = 0x82B98A40
 registers = ["r31", "f0", "f13", "f1", "f12"]
 
-# PC Settings and Quit to Desktop in the main menu (src/fear_menu.*). CScreenMain::Build
-# (sub_823FF3C0) ends at 0x823FF7A8, where both its paths meet: add our two items after Options.
+# Bonus Mission, PC Settings, Switch Game and Quit to Desktop in the main menu (src/fear_menu.*).
+# CScreenMain::Build (sub_823FF3C0) ends at 0x823FF7A8, where both its paths meet: add our items
+# after Options.
 # The hooks take r1 and the non-volatiles they read (Options' layout is in r23-r28).
 [[entrypoint.midasm_hook]]
 name = "FearMenuAddItems"
@@ -269,11 +270,12 @@ name = "FearMenuShowItems"
 address = 0x823FF910
 registers = ["r1", "r31"]
 
-# CScreenMain::OnCommand (sub_823FF7E8): our commands are handled by the host (r3 = 1).
+# CScreenMain::OnCommand (sub_823FF7E8): our commands are handled by the host (r3 = 1). r1:
+# Bonus Mission calls into the game (the Campaign screen and its own Bonus Mission command).
 [[entrypoint.midasm_hook]]
 name = "FearMenuCommand"
 address = 0x823FF7E8
-registers = ["r3", "r4"]
+registers = ["r1", "r3", "r4"]
 return_on_true = true
 
 # The string table's lookup (table, ID) -> text, at its start: the help lines of our
