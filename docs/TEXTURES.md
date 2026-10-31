@@ -50,6 +50,18 @@ About 6 minutes and 1.3 GB. `report.tsv` in the pack says what happened to every
 `compare <work> <run.log> --pack <pack>` breaks down a run logged with
 `--fear_texture_log_keys true`.
 
+## Sharper text (#42)
+The 360's text comes from bitmap fonts made for 720p (`interface\fonts\*.xpr`: a k_4_4_4_4
+glyph atlas and an ATG font table), so at 4K every glyph is magnified about 3x and stair-steps.
+`bundle` also takes the eight font atlases, and `build` redraws each at 4x from its TrueType face
+(`tools/font_atlas.py`): the PC install's own (`FEARL.Arch00`: Neuropol, Typist, Digital, Lucida
+Sans Unicode) and the system's Arial (Windows; Liberation Sans on Linux). The face's size,
+baseline, weight and the outline in alpha are fitted to the 360 atlas, and each glyph is drawn
+in its own cell at its best x, so the layout is the 360's. The controller-button glyphs and the
+characters a face lacks (Neuropol has no accented capitals) stay the 360's, upscaled. About 30
+seconds; `report.tsv` gives each font's fit. Only an upscale of the 360 atlas was tried first:
+it kept the stair-steps.
+
 ## How it works
 - **Key.** XXH3 of the 360 texture's base level exactly as it sits in guest memory (tiled,
   big-endian), seeded with format, size, tiling and pitch. The runtime computes it when the

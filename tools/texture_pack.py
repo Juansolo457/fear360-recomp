@@ -11,6 +11,8 @@ folder (gitignored private/ by default).
 
 `build` matches 360 textures to PC files by path, decodes both base levels, and keeps a pair
 only if the PC texture, scaled down to the 360 size, looks like the 360 one (the quality gate).
+It also redraws the 360's font atlases (interface\\fonts\\*.xpr) at 4x from the PC install's
+faces (tools/font_atlas.py, #42): sharper text.
 """
 import io
 import os
@@ -22,6 +24,10 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+# Run with -I, which leaves this folder off the path: its own modules.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import font_atlas  # noqa: E402
 
 # Xenos TextureFormat numbers (rex::graphics::xenos::TextureFormat).
 K_8_8_8_8, K_DXT1, K_DXT2_3, K_DXT4_5, K_DXN = 6, 18, 19, 20, 49
@@ -60,7 +66,9 @@ def read_catalog(path):
 def cmd_bundle(catalog, work):
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
-    texs = [e for e in read_catalog(catalog) if e[0].lower().endswith('.tex')]
+    texs = [e for e in read_catalog(catalog)
+            if e[0].lower().endswith('.tex') or font_atlas.is_font(e[0])]
+    (work / 'fonts').mkdir(exist_ok=True)
     with open(catalog, 'rb') as f, open(work / 'x360.bundle', 'wb') as out:
         out.write(b'FTB1' + struct.pack('<I', len(texs)))
         stored = 0
@@ -72,6 +80,10 @@ def cmd_bundle(catalog, work):
                 stored += 1
             else:
                 data = zlib.decompress(f.read(csize))
+            if font_atlas.is_font(name):
+                # A font: its atlas as a .tex for fear_texindex, the file itself for `build`.
+                (work / 'fonts' / re.split(r'[\\/]', name)[-1]).write_bytes(data)
+                data = font_atlas.texture_payload(data) or b''
             raw = name.encode('latin-1')
             out.write(struct.pack('<I', len(raw)) + raw + struct.pack('<I', len(data)) + data)
     print(f'bundled {len(texs)} textures ({stored} stored uncompressed) into {work / "x360.bundle"}')
@@ -102,6 +114,17 @@ def read_ltar(path):
             name_off, off, _, size, _ = struct.unpack_from('<IQQQI', files, 32 * file_index)
             file_index += 1
             yield (folder + '/' + name(name_off)).strip('/'), off, size
+
+
+def pc_file(pc_root, path):
+    """A file from the base game's archives by its path (case ignored), or None."""
+    for arch in sorted(Path(pc_root).glob('*.Arch00')):
+        for name, off, size in read_ltar(arch):
+            if name.lower() == path.lower():
+                with open(arch, 'rb') as f:
+                    f.seek(off)
+                    return f.read(size)
+    return None
 
 
 def pc_textures(pc_root, expansions=()):
@@ -265,6 +288,41 @@ def plan_replacement(fmt, kind):
     return None
 
 
+def build_font(r, work, pc_root, pack, blob, note, report):
+    """A font atlas redrawn from its face (font_atlas.py): its index line, or None."""
+    name = re.split(r'[\\/]', r['name'])[-1]
+    face = font_atlas.face_of(r['name'])
+    if not face or int(r['format']) != 15:
+        note('font-unknown')
+        return None
+    path, max_weight = face
+    if path == 'arial':
+        ttf = next((p for p in font_atlas.ARIAL if os.path.exists(p)), None)
+    else:
+        data = pc_file(pc_root, path)
+        ttf = None
+        if data:
+            ttf = Path(work) / 'fonts' / Path(path).name
+            ttf.write_bytes(data)
+    if not ttf:
+        note('font-face-missing')
+        return None
+    xpr = (Path(work) / 'fonts' / name).read_bytes()
+    width, height = int(r['width']), int(r['height'])
+    blob.seek(int(r['linear_offset']))
+    rgba, summary = font_atlas.redraw(blob.read(int(r['linear_size'])), width, height, xpr,
+                                      str(ttf), max_weight)
+    h, w = rgba.shape[:2]
+    out_name = f"fonts/{r['key']}.dds"
+    (pack / 'fonts').mkdir(exist_ok=True)
+    head = dds_header(w, h, 1, rgba=True)
+    (pack / out_name).write_bytes(head + rgba.tobytes())
+    note('font-redrawn')
+    report[-1] += f'\t{width}x{height}->{w}x{h}\t{summary}'
+    print(f'  font {name}: {summary}')
+    return f"{r['key']}\t{VK_R8G8B8A8_UNORM}\t{w}\t{h}\t1\t{len(head)}\t{out_name}"
+
+
 def cmd_build(work, pc_root, pack, formats='all', limit=None, min_psnr=24.0, min_corr=0.9,
               expansions=()):
     work, pack = Path(work), Path(pack)
@@ -289,6 +347,14 @@ def cmd_build(work, pc_root, pack, formats='all', limit=None, min_psnr=24.0, min
             note('360-' + r['status'])
             continue
         fmt = int(r['format'])
+        if font_atlas.is_font(r['name']):
+            if formats != 'dxt' and r['key'] not in seen_keys:
+                line = build_font(r, work, pc_root, pack, blob, note, report)
+                if line:
+                    seen_keys.add(r['key'])
+                    index_lines.append(line)
+                    done += 1
+            continue
         if formats == 'dxt' and fmt not in DXT_PLAN:
             note('format-not-in-this-pass')
             continue
