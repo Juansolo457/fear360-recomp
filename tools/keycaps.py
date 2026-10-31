@@ -19,18 +19,20 @@ def keycap(label):
     s = SIZE * scale
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pad, radius = 3 * scale, 9 * scale
+    # The game draws the prompt's image right before its text, at the 360 button's size; that
+    # button had a clear margin, so the key leaves one on its right, and a little all round.
+    pad, right, radius = 5 * scale, 13 * scale, 8 * scale
     # The key's side (darker), then its top face.
-    d.rounded_rectangle([pad, pad + 3 * scale, s - pad, s - pad], radius, fill=(120, 120, 124, 255))
-    d.rounded_rectangle([pad, pad, s - pad, s - pad - 5 * scale], radius, fill=(226, 226, 230, 255),
+    d.rounded_rectangle([pad, pad + 3 * scale, s - right, s - pad], radius, fill=(120, 120, 124, 255))
+    d.rounded_rectangle([pad, pad, s - right, s - pad - 5 * scale], radius, fill=(226, 226, 230, 255),
                         outline=(150, 150, 156, 255), width=scale)
     font_path = next(p for p in FONTS if os.path.exists(p))
-    size = 22 * scale if len(label) <= 3 else 17 * scale
+    size = 19 * scale if len(label) <= 3 else 14 * scale
     font = ImageFont.truetype(font_path, size)
     box = d.textbbox((0, 0), label, font=font)
     w, h = box[2] - box[0], box[3] - box[1]
     face_h = s - 2 * pad - 5 * scale
-    d.text(((s - w) / 2 - box[0], pad + (face_h - h) / 2 - box[1]), label, font=font,
+    d.text(((pad + s - right - w) / 2 - box[0], pad + (face_h - h) / 2 - box[1]), label, font=font,
            fill=(24, 24, 28, 255))
     return img.resize((SIZE, SIZE), Image.LANCZOS)
 
