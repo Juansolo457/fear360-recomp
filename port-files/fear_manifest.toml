@@ -251,11 +251,12 @@ name = "FearMenuShowItems"
 address = 0x823EB274
 registers = ["r1", "r31"]
 
-# CScreenMain::OnCommand (sub_823EAF68): our commands are handled by the host (r3 = 1).
+# CScreenMain::OnCommand (sub_823EAF68): our commands are handled by the host (r3 = 1). r1, as
+# in F.E.A.R. (one hook for both; Files has no Bonus Mission item).
 [[entrypoint.midasm_hook]]
 name = "FearMenuCommand"
 address = 0x823EAF68
-registers = ["r3", "r4"]
+registers = ["r1", "r3", "r4"]
 return_on_true = true
 
 # The string table's lookup (table, ID) -> text, at its start: the help lines of our

@@ -1,15 +1,18 @@
-// F.E.A.R. 360 - entries added to the game's own main menu: PC Settings, Switch Game (in a
-// collection, fear_collection.h) and Quit to Desktop. F.E.A.R. and F.E.A.R. Files alike.
+// F.E.A.R. 360 - entries added to the game's own main menu: Bonus Mission (F.E.A.R. only), PC
+// Settings, Switch Game (in a collection, fear_collection.h) and Quit to Desktop. F.E.A.R. and
+// F.E.A.R. Files alike.
 //
 // The 360's main screen (the SDK's CScreenMain) builds its list in code, each item a text control
 // hidden until "Press Start" is accepted, when OnCommand shows them. Three
 // [[entrypoint.midasm_hook]]s in each fear_manifest.toml:
 //   FearMenuAddItems   at the end of Build, where both its paths meet: adds our controls after
 //                      Options, with Options' layout arguments, by calling the game's own
-//                      functions (CBaseScreen::AddTextItem with a text, AddControl, Show(false))
+//                      functions (CBaseScreen::AddTextItem with a text or the game's string ID,
+//                      AddControl, Show(false))
 //   FearMenuShowItems  where Press Start has shown the game's items: shows ours too
 //   FearMenuCommand    at OnCommand's entry: our commands go to the host (SetActions) instead
-//                      of the game
+//                      of the game; Bonus Mission opens the Campaign screen and picks its own
+//                      Bonus Mission item there (the difficulty list, then Holiday; #111)
 //                      F.E.A.R.            F.E.A.R. Files
 //   Build              sub_823FF3C0        sub_823EAAC0     (method 4 of the screen's table)
 //     end              0x823FF7A8          0x823EAF24
@@ -47,4 +50,4 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
                       PPCRegister& r26, PPCRegister& r27, PPCRegister& r28, PPCRegister& r29,
                       PPCRegister& r30);
 void FearMenuShowItems(PPCRegister& r1, PPCRegister& r31);
-bool FearMenuCommand(PPCRegister& r3, PPCRegister& r4);
+bool FearMenuCommand(PPCRegister& r1, PPCRegister& r3, PPCRegister& r4);
