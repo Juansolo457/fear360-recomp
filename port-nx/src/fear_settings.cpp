@@ -414,64 +414,90 @@ class SettingsPanel final : public HostPanel {
       DrawControls(polled);
       return;
     }
-    // The Controls page's row first when it's offered, then the settings, then the actions.
+    // The Controls page's row first when it's offered, then the settings, then the actions. The
+    // rows fill two columns (#124), left then right, in that order: Up and Down walk them all,
+    // Left and Right change the selected value. The actions sit side by side under them.
     const int first = controls_offered_ ? 1 : 0;
     const int rows = int(settings_.size());
+    const int items = first + rows;
+    const int left = (items + 1) / 2;
     const int actions = 3;  // Save, Save and restart, Cancel
-    const int total = first + rows + actions;
+    const int total = items + actions;
     const uint32_t input = polled;
-    if (input & kUp) selected_ = (selected_ + total - 1) % total;
-    if (input & kDown) selected_ = (selected_ + 1) % total;
-    if (selected_ < first) {
-      if (input & (kRight | kAccept)) OpenControls();
-    } else if (selected_ < first + rows) {
-      if (input & kLeft) Step(selected_ - first, -1);
-      if (input & (kRight | kAccept)) Step(selected_ - first, +1);
-    } else if (input & kAccept) {
-      Act(selected_ - first - rows);
+    if (selected_ >= items) {
+      // On the actions: Left and Right move along them, Up goes back to the right column's end.
+      if (input & kLeft) selected_ = items + (selected_ - items + actions - 1) % actions;
+      if (input & kRight) selected_ = items + (selected_ - items + 1) % actions;
+      if (input & kUp) selected_ = items - 1;
+      if (input & kDown) selected_ = 0;
+      if (input & kAccept) Act(selected_ - items);
+    } else {
+      if (input & kUp) selected_ = (selected_ + total - 1) % total;
+      if (input & kDown) selected_ = (selected_ + 1) % total;
+      if (selected_ < first) {
+        if (input & (kRight | kAccept)) OpenControls();
+      } else if (selected_ < items) {
+        if (input & kLeft) Step(selected_ - first, -1);
+        if (input & (kRight | kAccept)) Step(selected_ - first, +1);
+      }
     }
     if (input & kBack) Act(2);
 
-    if (BeginPanel("##fear_settings", 30.0f)) {
+    if (BeginPanel("##fear_settings", 56.0f, fit_scale_)) {
       ImGui::TextUnformatted("RECOMPILATION SETTINGS");
       ImGui::SameLine();
       ImGui::TextDisabled("%s", fear::version::Text());
       ImGui::Separator();
-      if (ImGui::BeginTable("##settings", 2, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_WidthStretch, 0.85f);
-        ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 1.15f);
-        if (controls_offered_) {
-          ImGui::TableNextRow();
-          ImGui::TableNextColumn();
+      // One row of the list: the Controls page's, or a setting's.
+      auto item = [&](int index) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        if (index < first) {
           if (Row("Controls", 0, selected_)) OpenControls();
           ImGui::TableNextColumn();
           std::string value = controls_ && controls_->Changed() ? "Changed, not saved yet"
                                                                 : "Keyboard and mouse";
           if (selected_ == 0) value += "  >";
           ImGui::TextUnformatted(value.c_str());
+          return;
         }
-        for (int i = 0; i < rows; ++i) {
-          const Setting& setting = settings_[i];
-          ImGui::TableNextRow();
+        const int i = index - first;
+        const Setting& setting = settings_[i];
+        if (Row(setting.label.c_str(), index, selected_)) {
+          Step(i, ImGui::GetIO().KeyShift ? -1 : +1);
+        }
+        ImGui::TableNextColumn();
+        std::string value = setting.options[chosen_[i]].label;
+        if (selected_ == index && setting.options.size() > 1) value = "<  " + value + "  >";
+        ImGui::TextUnformatted(value.c_str());
+        if (chosen_[i] != running_[i] && !setting.live) {
+          ImGui::SameLine();
+          ImGui::TextDisabled("(on restart)");
+        }
+      };
+      if (ImGui::BeginTable("##columns", 2, ImGuiTableFlags_SizingStretchSame)) {
+        for (int column = 0; column < 2; ++column) {
           ImGui::TableNextColumn();
-          if (Row(setting.label.c_str(), first + i, selected_)) {
-            Step(i, ImGui::GetIO().KeyShift ? -1 : +1);
-          }
-          ImGui::TableNextColumn();
-          std::string value = setting.options[chosen_[i]].label;
-          if (selected_ == first + i && setting.options.size() > 1) value = "<  " + value + "  >";
-          ImGui::TextUnformatted(value.c_str());
-          if (chosen_[i] != running_[i] && !setting.live) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(on restart)");
+          if (ImGui::BeginTable(column ? "##right" : "##left", 2,
+                                ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_WidthStretch, 0.85f);
+            ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 1.15f);
+            for (int index = column ? left : 0; index < (column ? items : left); ++index) {
+              item(index);
+            }
+            ImGui::EndTable();
           }
         }
         ImGui::EndTable();
       }
       ImGui::Separator();
       const char* labels[] = {"Save", "Save and restart", "Cancel"};
+      const float width = (ImGui::GetContentRegionAvail().x -
+                           ImGui::GetStyle().ItemSpacing.x * float(actions - 1)) /
+                          float(actions);
       for (int a = 0; a < actions; ++a) {
-        if (Row(labels[a], first + rows + a, selected_)) Act(a);
+        if (a) ImGui::SameLine();
+        if (Row(labels[a], items + a, selected_, width)) Act(a);
       }
       ImGui::Separator();
       if (!message_.empty()) {
@@ -479,7 +505,7 @@ class SettingsPanel final : public HostPanel {
       } else if (selected_ < first) {
         Dim("Rebind the keys and set the mouse's sensitivity, up and down speed, invert and "
             "smoothing.");
-      } else if (selected_ < first + rows) {
+      } else if (selected_ < items) {
         const Setting& setting = settings_[selected_ - first];
         std::string note = setting.note;
         if (rex::cvar::GetFlagSource(setting.cvar) == rex::cvar::Source::kCommandLine) {
@@ -492,10 +518,16 @@ class SettingsPanel final : public HostPanel {
         }
         Dim(note.c_str());
       } else {
-        Dim(selected_ == first + rows + 1
+        Dim(selected_ == items + 1
                 ? "Saves, closes the game and starts it again with these settings."
                 : "Changes marked (on restart) apply the next time the game starts. "
                   "Saved in your user data folder (settings.toml).");
+      }
+      // Still taller than the screen (a long note, a small display): a smaller font next frame.
+      const float limit = ImGui::GetIO().DisplaySize.y * 0.96f;
+      const float height = ImGui::GetWindowHeight();
+      if (height > limit) {
+        fit_scale_ = std::max(0.5f, fit_scale_ * limit / height);
       }
     }
     EndPanel();
@@ -599,6 +631,7 @@ class SettingsPanel final : public HostPanel {
   const bool controls_offered_ = fear::controls::Available();
   std::unique_ptr<fear::controls::Page> controls_;  // made when first opened
   bool controls_open_ = false;
+  float fit_scale_ = 1.0f;  // the font's, shrunk when the panel came out taller than the screen
 };
 
 class QuitPanel final : public HostPanel {

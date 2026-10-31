@@ -263,10 +263,10 @@ void PushFont(float scale) { ImGui::PushFont(g_font, FontSize() * scale); }
 
 void PopFont() { ImGui::PopFont(); }
 
-bool BeginPanel(const char* id, float width_em) {
+bool BeginPanel(const char* id, float width_em, float font_scale) {
   const ImGuiIO& io = ImGui::GetIO();
-  const float size = FontSize();
-  PushFont();
+  const float size = FontSize() * font_scale;
+  PushFont(font_scale);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(size * 1.0f, size * 0.8f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(size * 0.4f, size * 0.15f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -300,11 +300,15 @@ void Dim(const char* text) {
   ImGui::PopStyleColor();
 }
 
-bool Row(const char* label, int index, int& selected) {
+bool Row(const char* label, int index, int& selected, float width) {
   ImGui::PushID(index);
-  const bool clicked = ImGui::Selectable(label, selected == index,
-                                         ImGuiSelectableFlags_SpanAllColumns |
-                                             ImGuiSelectableFlags_AllowOverlap);
+  const bool clicked =
+      width > 0.0f
+          ? ImGui::Selectable(label, selected == index, ImGuiSelectableFlags_None,
+                              ImVec2(width, 0.0f))
+          : ImGui::Selectable(label, selected == index,
+                              ImGuiSelectableFlags_SpanAllColumns |
+                                  ImGuiSelectableFlags_AllowOverlap);
   const ImGuiIO& io = ImGui::GetIO();
   if (ImGui::IsItemHovered() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
     selected = index;
