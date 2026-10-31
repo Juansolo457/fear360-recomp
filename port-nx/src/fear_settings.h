@@ -7,7 +7,11 @@
 // to <user data>/settings.toml, which is loaded at startup before the cvars are finalised, below
 // the command line: a flag the launcher passes still wins for that run. "Save and restart" starts
 // the game again without those flags (and waits for this run to exit first), so what was saved
-// applies. Window mode and animation timing apply at once; the rest on the next start.
+// applies. Window mode and animation timing apply at once; the rest on the next start. Saving
+// keeps the file's lines for settings the panel doesn't write.
+//
+// With the keyboard and mouse on, its first row opens the Controls page (fear_controls.h): key
+// bindings and the mouse's settings, saved with the rest and applied at once.
 //
 // The panels' look and input are fear_panel.h's; the restart is fear_process.h's.
 

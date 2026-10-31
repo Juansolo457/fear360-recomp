@@ -67,6 +67,7 @@ set(FEAR_SOURCES
     src/crash_report.cpp
     src/display_vblank.cpp
     src/fear_collection.cpp
+    src/fear_controls.cpp
     src/fear_menu.cpp
     src/fear_mkb.cpp
     src/fear_panel.cpp

@@ -22,19 +22,29 @@
 //     per notch.
 // The keys are the PC's defaults from that profile, each a setting (fear_key_*: key names,
 // comma separated, e.g. "W,Up"). The command numbers come from the game's tables (the 360
-// controller configurations' names at 0x830ABD40, the PC names built in sub_823F9910) and
-// CInterfaceMgr::OnCommandOn's switch (sub_82364950: weapons 0x4C-0x4D, slots from 0x5B).
+// controller configurations' names at 0x830ABD40, the PC names and IDs registered in
+// sub_823F9910) and CInterfaceMgr::OnCommandOn's switch (sub_82364950: weapons 0x4C-0x4D, slots
+// from 0x5B). PC Settings' Controls page (fear_controls.h) rebinds them and sets the mouse's
+// speed, vertical speed, invert and smoothing, the options PC F.E.A.R.'s Controls screens have.
 //
-// In the game's own menus (XUI, which only reads a pad), the keyboard is a pad instead: arrows
-// and WASD the D-pad, Enter and Space A, Escape and Backspace B, Q and E the shoulders. Which one
-// applies follows the binding manager's enabled flag (+0x40): on while the player is in control.
-// The mouse is captured (hidden, relative motion) only then and while no panel is open.
+// In the game's own menus, the keyboard is a pad instead: arrows and WASD the D-pad, Enter and
+// Space A, Escape and Backspace B, Q and E the shoulders, both as the pad's state (the PC's menu
+// screens) and as its keystrokes (the XUI scenes, #110). The mouse points and clicks there through
+// the PC's own menu code (TakeMenuMouse, fear_menu.h). Which one applies follows the binding
+// manager's enabled flag (+0x40): on while the player is in control. The mouse is captured
+// (hidden, relative motion) only then and while no panel is open.
 //
 // Both always work together with a controller; the Steam Deck build leaves this off
 // (fear_mkb), since there a trackpad can send mouse movement. F.E.A.R. only for now: F.E.A.R.
 // Files has its own addresses.
 
 #pragma once
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include <rex/ppc/context.h>
 
@@ -50,6 +60,51 @@ namespace fear::mkb {
 // Adds the keyboard and mouse to the runtime's input. Call before the input system's active
 // callback is set (it reaches only the drivers it already has).
 void Install(rex::input::InputSystem& input, rex::ui::Window* window);
+
+// Whether the keyboard and mouse are on in this run (F.E.A.R. with fear_mkb).
+bool Enabled();
+
+// For PC Settings' Controls page (fear_controls.h).
+
+// An action keys can be bound to, in the page's order.
+struct ActionInfo {
+  const char* setting;  // its fear_key_* setting
+  const char* label;
+  const char* group;    // Movement, Weapons, Actions, Interface
+  const char* note;     // or nullptr
+};
+std::vector<ActionInfo> BindableActions();
+
+// The key names in a fear_key_* setting's text, in order, as written.
+std::vector<std::string> SplitKeys(std::string_view text);
+// A key name as the page shows it ("Mouse1": "Mouse Left"); unknown names as written.
+std::string KeyLabel(std::string_view name);
+
+// Rebinding, on the UI thread: after StartCapture, the next key, mouse button or wheel notch
+// pressed, as a key name ("Escape" for Escape), once; empty until then.
+void StartCapture();
+std::string TakeCapture();
+void StopCapture();
+
+// Sets keyboard and mouse settings (cvar, value) between two reads by the game's thread.
+void SetFlags(const std::vector<std::pair<std::string, std::string>>& values);
+
+// The mouse in the game's menus, while it isn't captured for mouse look: what it did since the
+// last call (at most a quarter second back), for fear_menu.h's hook on the game's thread. Empty
+// while the keyboard and mouse are off.
+struct MenuMouse {
+  enum class Kind : uint8_t { kMove, kLeftDown, kLeftUp, kRightDown, kRightUp, kWheel };
+  Kind kind;
+  int32_t x, y;            // in the window, physical pixels
+  uint32_t width, height;  // the window's size then, physical pixels
+  int32_t wheel;           // kWheel: up positive, 120 a notch
+};
+std::vector<MenuMouse> TakeMenuMouse();
+
+// A click on a menu screen's button prompt ("B Back", "A Select", #110): that pad button, pressed
+// for the menus as a controller would (its state for a moment, and its keystrokes). Game thread.
+enum class MenuPad : uint8_t { kA, kB };
+void PressMenuPad(MenuPad pad);
 
 }  // namespace fear::mkb
 

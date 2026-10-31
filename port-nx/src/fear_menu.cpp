@@ -3,21 +3,28 @@
 
 #include "fear_menu.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
 #include <rex/ppc/func.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/thread_state.h>
 #include <rex/system/xmemory.h>
+#include <rex/system/xvideo.h>
 #include <rex/types.h>
 
 #include "fear_collection.h"
+#include "fear_mkb.h"
+#include "fear_panel.h"
 #include "fear_title.h"
 
 namespace {
@@ -35,12 +42,14 @@ struct MenuCode {
   int layout[5];
   int stack_word;
   uint32_t game_items;  // the game's own list: Campaign/Extraction Point ... Options
+  uint32_t set_selection;  // CBaseScreen::SetSelection(index, find_selectable)
 };
 // F.E.A.R. (565507D9): Build sub_823FF3C0, OnCommand sub_823FF7E8.
 constexpr MenuCode kFear = {0x824A7288, 0x824A86E0, 0x824AA8B0, 0x82001C4A,
-                            {27, 26, 25, 24, 23}, 28, 4};
+                            {27, 26, 25, 24, 23}, 28, 4, 0x824A6F40};
 // F.E.A.R. Files (565507E8): Build sub_823EAAC0, OnCommand sub_823EAF68.
-constexpr MenuCode kFiles = {0x823E2388, 0, 0x823E5948, 0x82000C38, {28, 27, 26, 25, 24}, 29, 5};
+constexpr MenuCode kFiles = {0x823E2388, 0, 0x823E5948, 0x82000C38, {28, 27, 26, 25, 24}, 29, 5,
+                             0x823E2060};
 constexpr MenuCode kCode = fear::title::kFiles ? kFiles : kFear;
 
 constexpr uint32_t kShowSlot = 160;    // the control's Show(bool) in its method table
@@ -58,6 +67,36 @@ constexpr uint32_t kBasePosSlot = 0x3C;  // control method: its position (into r
 // Perseus Mandate Campaign, which ends near 357), from screenshots (2026-10-28).
 constexpr int32_t kColumnOffset = fear::title::kFiles ? 330 : 220;
 
+// The mouse (#109): see fear_menu.h.
+constexpr uint32_t kInterfaceMgr = fear::title::kFiles ? 0x834227DC : 0x83370664;  // g_pInterfaceMgr
+constexpr uint32_t kCurrentScreen = 0x60;  // CScreenMgr: the current screen
+// CBaseScreen's mouse handlers in its method table: (x, y), the wheel's also its delta.
+constexpr uint32_t kScreenLButtonDown = 0x44, kScreenLButtonUp = 0x48, kScreenRButtonDown = 0x50,
+                   kScreenRButtonUp = 0x54, kScreenMouseMove = 0x5C, kScreenMouseWheel = 0x60;
+// CBaseScreen: its button prompts at the bottom ("B Back", "A Select"), text controls outside
+// the screen's list (#110), and CLTGUICtrl's IsOnMe(x, y) in its method table.
+constexpr uint32_t kPromptBack = 0x1B4, kPromptSelect = 0x1B8;
+constexpr uint32_t kCtrlIsOnMe = 0x68;
+constexpr uint32_t kSelection = 0x114;  // CBaseScreen: the selected control's index (16 bits)
+// The menus over play (F.E.A.R. only so far): CInterfaceMgr's interface state and its two
+// CMenuMgrs, the user menus (the pause menu; open in state 5) and the system menus (state 1).
+// Their mouse handlers in CMenuMgr's method table, (x, y), the wheel's also its delta; the open
+// menu (a CLTGUIWindow); and its button prompts, text controls inside the menu (CBaseMenu).
+constexpr uint32_t kGameState = 8;
+constexpr uint32_t kStatePlaying = 1, kStateMenu = 5;
+constexpr uint32_t kUserMenus = 0x5AC, kSystemMenus = 0x32C8;
+constexpr uint32_t kMenusLButtonDown = 0x20, kMenusLButtonUp = 0x24, kMenusRButtonDown = 0x2C,
+                   kMenusRButtonUp = 0x30, kMenusMouseMove = 0x38, kMenusMouseWheel = 0x3C;
+constexpr uint32_t kCurrentMenu = 8;
+constexpr uint32_t kMenuPromptBack = 0xC6C, kMenuPromptSelect = 0xD4C;
+constexpr uint32_t kMessageBox = 0x42F0;        // CInterfaceMgr: its CMessageBox
+constexpr uint32_t kMessageBoxShown = 0x580;    // CMessageBox: shown (byte)
+constexpr uint32_t kMessageBoxWindow = 0x2C;    // CMessageBox: its window, a CLTGUICtrl
+// CMessageBox: its button prompts ("A Yes", "B No"), text controls it creates (pointers).
+constexpr uint32_t kMessageBoxPromptA = 0x574, kMessageBoxPromptB = 0x578;
+// CLTGUICtrl's mouse handlers in its method table, (x, y).
+constexpr uint32_t kCtrlLButtonDown = 0x78, kCtrlLButtonUp = 0x7C, kCtrlMouseMove = 0x90;
+
 constexpr uint32_t kCommandSettings = 9001;
 constexpr uint32_t kCommandQuit = 9002;
 constexpr uint32_t kCommandSwitch = 9003;
@@ -73,7 +112,6 @@ constexpr uint32_t kBonusText = 0x820295DC;  // "IDS_BONUSMISSION"
 constexpr uint32_t kBonusHelp = 0x820295C4;  // "IDS_HELP_BONUSMISSION"
 constexpr uint32_t kScreenMgr = 0xC;          // CBaseScreen: its screen manager
 constexpr uint32_t kSetCurrentScreen = 0x50;  // CScreenMgr: SetCurrentScreen(screen ID)
-constexpr uint32_t kCurrentScreen = 0x60;     // CScreenMgr: the current screen
 constexpr uint32_t kScreenCampaign = 2;
 constexpr uint32_t kOnCommandSlot = 4;  // a screen's OnCommand(command, param1, param2)
 constexpr uint32_t kCampaignOnCommand = 0x824C2830;  // CScreenSingle::OnCommand
@@ -119,6 +157,11 @@ uint32_t Load32(uint32_t address) {
   return rex::byte_swap(value);
 }
 uint8_t Load8(uint32_t address) { return Base()[address]; }
+uint16_t Load16(uint32_t address) {
+  uint16_t value;
+  std::memcpy(&value, Base() + address, 2);
+  return rex::byte_swap(value);
+}
 void Store32(uint32_t address, uint32_t value) {
   value = rex::byte_swap(value);
   std::memcpy(Base() + address, &value, 4);
@@ -215,6 +258,132 @@ void StartBonus(PPCContext& ctx, uint32_t screen) {
   }
   ctx = saved;
 }
+
+// A window position on the game's screen, in its pixels, as the presenter shows the screen: the
+// display mode fitted to the window, centred, aspect kept.
+void ToScreen(const fear::mkb::MenuMouse& m, uint32_t screen_width, uint32_t screen_height,
+              int32_t& x, int32_t& y) {
+  const double sw = screen_width, sh = screen_height;
+  const double scale = std::min(double(m.width) / sw, double(m.height) / sh);
+  const double left = (double(m.width) - sw * scale) * 0.5;
+  const double top = (double(m.height) - sh * scale) * 0.5;
+  x = int32_t(std::floor((m.x - left) / scale));
+  y = int32_t(std::floor((m.y - top) / scale));
+}
+
+// The screen's size for the mouse, in its pixels: the display mode's. Logged the first time.
+void ScreenSize(const fear::mkb::MenuMouse& first, uint32_t& width, uint32_t& height) {
+  rex::system::X_VIDEO_MODE mode;
+  rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
+  width = std::max(1u, uint32_t(mode.display_width));
+  height = std::max(1u, uint32_t(mode.display_height));
+  static bool logged = false;
+  if (!logged) {
+    logged = true;
+    REXLOG_INFO("F.E.A.R. menu: the mouse on the menus ({}x{} window, {}x{} screen)", first.width,
+                first.height, width, height);
+  }
+}
+
+// The message box's window takes the left button and moves while one shows: its method for the
+// event, or 0.
+uint32_t MessageBoxSlot(fear::mkb::MenuMouse::Kind kind) {
+  using Kind = fear::mkb::MenuMouse::Kind;
+  return kind == Kind::kMove       ? kCtrlMouseMove
+         : kind == Kind::kLeftDown ? kCtrlLButtonDown
+         : kind == Kind::kLeftUp   ? kCtrlLButtonUp
+                                   : 0;
+}
+
+// Which of a screen's or menu's button prompts (controls; 0: none) is at (x, y), shown: B (Back
+// or Cancel), A, or none.
+enum class Prompt { kNone, kBack, kSelect };
+Prompt PromptAt(PPCContext& ctx, uint32_t back, uint32_t select, int32_t x, int32_t y) {
+  for (const auto& [control, prompt] :
+       {std::pair{back, Prompt::kBack}, std::pair{select, Prompt::kSelect}}) {
+    if (!control) continue;
+    ctx.r3.u64 = control;
+    ctx.r4.s64 = x;
+    ctx.r5.s64 = y;
+    Call(ctx, Load32(Load32(control) + kCtrlIsOnMe));
+    if (ctx.r3.u32 & 0xFF) return prompt;
+  }
+  return Prompt::kNone;
+}
+Prompt g_prompt_down = Prompt::kNone;  // the prompt the left button went down on (game thread)
+
+// The prompts stand in for the PC's Back button: a click on one (down and up on it) presses its
+// button, and the screen or menu doesn't get that click. True: the event was the prompts'.
+bool PromptClick(PPCContext& ctx, fear::mkb::MenuMouse::Kind kind, uint32_t back,
+                 uint32_t select, int32_t x, int32_t y) {
+  using Kind = fear::mkb::MenuMouse::Kind;
+  if (kind == Kind::kLeftDown) {
+    g_prompt_down = PromptAt(ctx, back, select, x, y);
+    return g_prompt_down != Prompt::kNone;
+  }
+  if (kind != Kind::kLeftUp || g_prompt_down == Prompt::kNone) return false;
+  if (PromptAt(ctx, back, select, x, y) == g_prompt_down) {
+    fear::mkb::PressMenuPad(g_prompt_down == Prompt::kBack ? fear::mkb::MenuPad::kB
+                                                           : fear::mkb::MenuPad::kA);
+  }
+  g_prompt_down = Prompt::kNone;
+  return true;
+}
+
+// While a message box shows, the mouse is its: its prompts ("A Yes", "B No") are clicked like a
+// screen's, and its window takes the left button and moves. False: no message box shows.
+bool ToMessageBox(PPCContext& ctx, uint32_t interface_mgr, const fear::mkb::MenuMouse& m,
+                  int32_t x, int32_t y) {
+  const uint32_t box = interface_mgr + kMessageBox;
+  if (!interface_mgr || !Load8(box + kMessageBoxShown)) return false;
+  if (PromptClick(ctx, m.kind, Load32(box + kMessageBoxPromptB), Load32(box + kMessageBoxPromptA),
+                  x, y)) {
+    return true;
+  }
+  const uint32_t window = box + kMessageBoxWindow;
+  if (const uint32_t slot = MessageBoxSlot(m.kind)) {
+    ctx.r3.u64 = window;
+    ctx.r4.s64 = x;
+    ctx.r5.s64 = y;
+    Call(ctx, Load32(Load32(window) + slot));
+  }
+  return true;
+}
+
+// Which of our items is at (x, y) on the main screen, or 0.
+uint32_t OurItemAt(PPCContext& ctx, uint32_t screen, int32_t x, int32_t y) {
+  uint32_t controls[kItemCount];
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (screen != g_screen) return 0;
+    std::memcpy(controls, g_controls, sizeof(controls));
+  }
+  for (uint32_t control : controls) {
+    if (!control) continue;
+    ctx.r3.u64 = control;
+    ctx.r4.s64 = x;
+    ctx.r5.s64 = y;
+    Call(ctx, Load32(Load32(control) + kCtrlIsOnMe));
+    if (ctx.r3.u32 & 0xFF) return control;
+  }
+  return 0;
+}
+
+// Selects one of the screen's controls, as pointing at it does.
+void Select(PPCContext& ctx, uint32_t screen, uint32_t control) {
+  const uint32_t begin = Load32(screen + kControls + 4), end = Load32(screen + kControls + 8);
+  for (uint32_t i = 0; begin && begin + 4 * i < end; ++i) {
+    if (Load32(begin + 4 * i) != control) continue;
+    if (Load16(screen + kSelection) != i) {
+      ctx.r3.u64 = screen;
+      ctx.r4.u64 = i;
+      ctx.r5.u64 = 0;
+      Call(ctx, kCode.set_selection);
+    }
+    return;
+  }
+}
+uint32_t g_item_down = 0;  // our item the left button went down on (game thread)
 
 }  // namespace
 
@@ -344,6 +513,115 @@ bool FearMenuHelpText(PPCRegister& r3, PPCRegister& r4) {
     }
   }
   return false;
+}
+
+// CScreenMgr::UpdateInterfaceSFX at its entry, once a frame while a menu screen is up (r3: the
+// screen manager): what the mouse did since the last frame goes to the PC's handlers, as
+// CInterfaceMgr's did on PC: to the message box's window while one shows (left button and moves
+// only), otherwise to the current screen.
+void FearMenuMouse(PPCRegister& r1, PPCRegister& r3) {
+  using Kind = fear::mkb::MenuMouse::Kind;
+  std::vector<fear::mkb::MenuMouse> events = fear::mkb::TakeMenuMouse();
+  if (events.empty() || fear::panel::AnyOpen()) return;  // a panel of ours has the mouse
+  PPCContext* ctx = Context(r1);
+  if (!ctx) return;
+  const uint32_t screens = r3.u32;
+  uint32_t screen_width = 0, screen_height = 0;
+  ScreenSize(events[0], screen_width, screen_height);
+
+  const PPCContext saved = *ctx;
+  for (const fear::mkb::MenuMouse& m : events) {
+    int32_t x = 0, y = 0;
+    ToScreen(m, screen_width, screen_height, x, y);
+    // Read again for each: a click can change the screen or open a message box.
+    if (ToMessageBox(*ctx, Load32(kInterfaceMgr), m, x, y)) continue;
+    const uint32_t target = Load32(screens + kCurrentScreen);
+    if (!target || PromptClick(*ctx, m.kind, Load32(target + kPromptBack),
+                               Load32(target + kPromptSelect), x, y)) {
+      continue;
+    }
+    // Our items on the main screen: the game's items are wider than their text and reach into our
+    // column, and the screen takes the first item under the point, so theirs would win. A point
+    // on one of ours goes to it here: a move selects it, a click (down and up) clicks it.
+    if (m.kind == Kind::kLeftUp && g_item_down) {
+      if (OurItemAt(*ctx, target, x, y) == g_item_down) {
+        ctx->r3.u64 = g_item_down;
+        ctx->r4.s64 = x;
+        ctx->r5.s64 = y;
+        Call(*ctx, Load32(Load32(g_item_down) + kCtrlLButtonUp));
+      }
+      g_item_down = 0;
+      continue;
+    }
+    if (m.kind == Kind::kMove || m.kind == Kind::kLeftDown) {
+      if (const uint32_t item = OurItemAt(*ctx, target, x, y)) {
+        Select(*ctx, target, item);
+        if (m.kind == Kind::kLeftDown) g_item_down = item;
+        continue;
+      }
+    }
+    const uint32_t slot = m.kind == Kind::kMove        ? kScreenMouseMove
+                          : m.kind == Kind::kLeftDown  ? kScreenLButtonDown
+                          : m.kind == Kind::kLeftUp    ? kScreenLButtonUp
+                          : m.kind == Kind::kRightDown ? kScreenRButtonDown
+                          : m.kind == Kind::kRightUp   ? kScreenRButtonUp
+                                                       : kScreenMouseWheel;
+    ctx->r3.u64 = target;
+    ctx->r4.s64 = x;
+    ctx->r5.s64 = y;
+    ctx->r6.s64 = m.wheel;
+    Call(*ctx, Load32(Load32(target) + slot));
+  }
+  *ctx = saved;
+}
+
+// CBindMgr's update at its entry (F.E.A.R.: sub_82336FA8), once a frame on the game's thread
+// whatever the interface is doing: in the menus over play (the pause menu and the rest), what the
+// mouse did goes to the open menu's manager, as CInterfaceMgr's handlers did on PC, or to the
+// message box over it. Elsewhere it's left for FearMenuMouse (the screens).
+void FearMenuMouseInGame(PPCRegister& r1) {
+  using Kind = fear::mkb::MenuMouse::Kind;
+  if constexpr (fear::title::kFiles) return;  // its menus aren't mapped (no keyboard and mouse)
+  const uint32_t interface_mgr = Load32(kInterfaceMgr);
+  if (!interface_mgr) return;
+  const uint32_t state = Load32(interface_mgr + kGameState);
+  const uint32_t menus = state == kStateMenu      ? interface_mgr + kUserMenus
+                         : state == kStatePlaying ? interface_mgr + kSystemMenus
+                                                  : 0;
+  if (!menus) return;
+  if (!Load32(menus + kCurrentMenu) && !Load8(interface_mgr + kMessageBox + kMessageBoxShown)) {
+    return;
+  }
+  std::vector<fear::mkb::MenuMouse> events = fear::mkb::TakeMenuMouse();
+  if (events.empty() || fear::panel::AnyOpen()) return;
+  PPCContext* ctx = Context(r1);
+  if (!ctx) return;
+  uint32_t screen_width = 0, screen_height = 0;
+  ScreenSize(events[0], screen_width, screen_height);
+
+  const PPCContext saved = *ctx;
+  for (const fear::mkb::MenuMouse& m : events) {
+    int32_t x = 0, y = 0;
+    ToScreen(m, screen_width, screen_height, x, y);
+    if (ToMessageBox(*ctx, interface_mgr, m, x, y)) continue;
+    const uint32_t menu = Load32(menus + kCurrentMenu);
+    if (!menu ||
+        PromptClick(*ctx, m.kind, menu + kMenuPromptBack, menu + kMenuPromptSelect, x, y)) {
+      continue;
+    }
+    const uint32_t slot = m.kind == Kind::kMove        ? kMenusMouseMove
+                          : m.kind == Kind::kLeftDown  ? kMenusLButtonDown
+                          : m.kind == Kind::kLeftUp    ? kMenusLButtonUp
+                          : m.kind == Kind::kRightDown ? kMenusRButtonDown
+                          : m.kind == Kind::kRightUp   ? kMenusRButtonUp
+                                                       : kMenusMouseWheel;
+    ctx->r3.u64 = menus;
+    ctx->r4.s64 = x;
+    ctx->r5.s64 = y;
+    ctx->r6.s64 = m.wheel;
+    Call(*ctx, Load32(Load32(menus) + slot));
+  }
+  *ctx = saved;
 }
 
 // CScreenMain::OnCommand(command, param1, param2): ours return 1 (handled) without the game.

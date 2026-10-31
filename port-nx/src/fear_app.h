@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -142,7 +143,23 @@ class FearApp : public rex::ReXApp {
       fear::mkb::Install(*input, window());
       input->SetActiveCallback([this] {
         if (!fear::panel::GameGetsInput()) return false;
-        return !(imgui_drawer() && imgui_drawer()->GetIO().WantCaptureMouse);
+        // WantCaptureMouse is ImGui's answer from its last frame, and with no dialog open ImGui
+        // draws no frames: the last one's answer (the pointer over a panel as it closed) would
+        // hold for good, and the game would get no input, the mouse never captured for mouse
+        // look. Only an open dialog's answer counts. Logged as it changes.
+        auto* drawer = imgui_drawer();
+        const bool wants = drawer && drawer->GetIO().WantCaptureMouse;
+        const bool dialogs = drawer && drawer->HasDialogs();
+        static std::atomic<int> logged{0};  // 0: nothing to say, 1: an overlay has it, 2: stale
+        const int now = !wants ? 0 : dialogs ? 1 : 2;
+        if (logged.exchange(now) != now) {
+          REXLOG_INFO("F.E.A.R. input: {}",
+                      now == 1   ? "an ImGui window has the mouse; the game waits"
+                      : now == 2 ? "ImGui's last frame still claims the mouse, with nothing open: "
+                                   "ignored"
+                                 : "ImGui has let go of the mouse");
+        }
+        return now != 1;
       });
     }
 

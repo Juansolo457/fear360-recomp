@@ -24,6 +24,35 @@
 //                      shown at 0x823FF910 shown at 0x823EB274
 // The host side (the settings panel, the quit confirmation) lives in fear_settings.*, the switch
 // in fear_collection.*.
+//
+// The mouse (#109). The 360 kept the PC menus' mouse code; only the window messages that called
+// it are gone. CBaseScreen's handlers find the control under a point (in the screen's pixels),
+// select it and click it, and CMessageBox's window does the same while a message box shows. A
+// fourth hook, FearMenuMouse, at CScreenMgr::UpdateInterfaceSFX's entry (once a frame while a menu
+// screen is up), hands them what the mouse did since the last frame (fear_mkb.h), from the window
+// to the screen's pixels (the display mode, fitted to the window as the presenter shows it).
+// The 360 replaced the PC screens' Back button with button prompts ("B Back", "A Select"; text
+// controls at CBaseScreen +0x1B4 and +0x1B8 in both games, outside the screen's list): a click on
+// one presses its button, as a controller would (#110). On the main screen the game's items are
+// wider than their text and reach into our column; the screen takes the first item under the
+// point, so a point on one of ours goes to it directly (SetSelection, its OnLButtonUp).
+//
+// The menus over play (the pause menu and the rest) aren't screens but CMenuMgr's, with the PC's
+// mouse handlers too: CInterfaceMgr's user menus (+0x5AC, open in interface state 5, the pause
+// menu) and system menus (+0x32C8, state 1), methods 8 OnLButtonDown, 9 OnLButtonUp,
+// 11 OnRButtonDown, 12 OnRButtonUp, 14 OnMouseMove, 15 OnMouseWheel, each passing the event to
+// the open menu (+8). A fifth hook, FearMenuMouseInGame, at the binding manager's per-frame
+// update (sub_82336FA8, every state) hands them the mouse in those states. The menu's prompts are
+// text controls inside it (CBaseMenu +0xC6C B, +0xD4C A). F.E.A.R. only so far. A message box's
+// prompts ("A Yes", "B No") are text controls it creates (CMessageBox +0x574 A, +0x578 B), clicked
+// the same way wherever the box shows.
+//                        F.E.A.R.            F.E.A.R. Files
+//   UpdateInterfaceSFX   sub_8245FF30        sub_82454C28     (CScreenMgr method 28; Files 29)
+//   g_pInterfaceMgr      0x83370664          0x834227DC
+// Both: the current screen at CScreenMgr +0x60; CBaseScreen methods 17 OnLButtonDown,
+// 18 OnLButtonUp, 20 OnRButtonDown, 21 OnRButtonUp, 23 OnMouseMove, 24 OnMouseWheel (one later
+// than the PC's); CInterfaceMgr's message box at +0x42F0 (shown: byte +0x580; its window +0x2C,
+// CLTGUICtrl methods 30 OnLButtonDown, 31 OnLButtonUp, 36 OnMouseMove).
 
 #pragma once
 
@@ -51,3 +80,5 @@ void FearMenuAddItems(PPCRegister& r1, PPCRegister& r23, PPCRegister& r24, PPCRe
                       PPCRegister& r30);
 void FearMenuShowItems(PPCRegister& r1, PPCRegister& r31);
 bool FearMenuCommand(PPCRegister& r1, PPCRegister& r3, PPCRegister& r4);
+void FearMenuMouse(PPCRegister& r1, PPCRegister& r3);
+void FearMenuMouseInGame(PPCRegister& r1);

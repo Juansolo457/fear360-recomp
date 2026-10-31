@@ -286,6 +286,13 @@ address = 0x828797D0
 registers = ["r3", "r4"]
 return_on_true = true
 
+# CScreenMgr::UpdateInterfaceSFX (sub_8245FF30), once a frame while a menu screen is up: the
+# mouse's moves, clicks and wheel go to the PC's own menu handlers (src/fear_menu.cpp, #109).
+[[entrypoint.midasm_hook]]
+name = "FearMenuMouse"
+address = 0x8245FF30
+registers = ["r1", "r3"]
+
 # Debugging (src/fx_debug.cpp, fear_debug_weapon_fire): CClientWeapon::HandleFireKey's check that
 # the weapon is still firing (state 2) before a fire key becomes a shot, and each impact's
 # CWeaponFX::CreateObject. For the pistol's missing impacts.
@@ -512,6 +519,13 @@ registers = []
 name = "FearMkbCommands"
 address = 0x82337300
 registers = ["r30"]
+
+# The same update at its entry, once a frame whatever the interface is doing: the mouse goes to
+# the menus over play, the pause menu among them (src/fear_menu.cpp, #109).
+[[entrypoint.midasm_hook]]
+name = "FearMenuMouseInGame"
+address = 0x82336FA8
+registers = ["r1"]
 
 # Native C runtime (#31, docs/ARCHITECTURE.md): these guest functions are replaced by the SDK's
 # host versions (third_party/rexglue-sdk-nx/src/kernel/crt/memory.cpp), which take the same guest

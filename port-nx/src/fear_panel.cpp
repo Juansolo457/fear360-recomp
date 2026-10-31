@@ -352,7 +352,17 @@ bool GameGetsInput() {
   if (AnyOpen()) return false;
   if (!g_wait_release) return true;
   const PadState pad = ReadPads();
-  if (pad.buttons || pad.triggers || PanelKeysHeld()) return false;
+  const bool keys = PanelKeysHeld();
+  // What the game waits for, logged as it changes (a button that never reads as let go would keep
+  // the game from its input for good).
+  static std::atomic<uint32_t> logged{0};
+  const uint32_t held = pad.buttons | (pad.triggers ? 0x10000u : 0u) | (keys ? 0x20000u : 0u);
+  if (held && logged.exchange(held) != held) {
+    REXLOG_INFO("F.E.A.R. panels: the game waits for buttons {:#06x}{}{} to be let go", pad.buttons,
+                pad.triggers ? ", a trigger" : "", keys ? ", a panel key" : "");
+  }
+  if (held) return false;
+  logged = 0;
   g_wait_release = false;
   return true;
 }

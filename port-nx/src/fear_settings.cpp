@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +22,8 @@
 #include <rex/ui/imgui_drawer.h>
 
 #include "display_vblank.h"
+#include "fear_controls.h"
+#include "fear_mkb.h"
 #include "fear_panel.h"
 #include "fear_process.h"
 #include "fear_title.h"
@@ -257,7 +261,33 @@ std::string TomlString(const std::string& text) {
   return out + "\"";
 }
 
+// The setting a settings.toml line sets ("name = value"), or empty.
+std::string SettingName(std::string_view line) {
+  while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+  size_t end = 0;
+  while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_')) {
+    ++end;
+  }
+  std::string_view rest = line.substr(end);
+  while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) rest.remove_prefix(1);
+  return end && !rest.empty() && rest.front() == '=' ? std::string(line.substr(0, end)) : std::string();
+}
+
+// Writes these settings, keeping the file's lines for any others (the Controls page's while it
+// wasn't opened, a line added by hand).
 bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& values) {
+  std::vector<std::string> kept;
+  {
+    std::ifstream in(g_path);
+    for (std::string line; std::getline(in, line);) {
+      if (!line.empty() && line.back() == '\r') line.pop_back();
+      const std::string name = SettingName(line);
+      if (name.empty()) continue;  // comments and blanks: the header is written again
+      const bool written = std::any_of(values.begin(), values.end(),
+                                       [&](const auto& value) { return value.first == name; });
+      if (!written) kept.push_back(line);
+    }
+  }
   std::error_code error;
   fs::create_directories(g_path.parent_path(), error);
   std::ofstream out(g_path, std::ios::trunc);
@@ -267,6 +297,7 @@ bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& value
   }
   out << "# F.E.A.R. PC Settings, written by the panel in the main menu.\n"
          "# Loaded at startup; a flag on the command line still wins for that run.\n";
+  for (const std::string& line : kept) out << line << "\n";
   for (const auto& [name, value] : values) {
     const auto* info = rex::cvar::GetFlagInfo(name);
     const bool text = info && info->type == rex::cvar::FlagType::String;
@@ -313,16 +344,26 @@ class SettingsPanel final : public HostPanel {
  protected:
   void OnDraw(ImGuiIO& io) override {
     (void)io;
+    const uint32_t polled = closing_ ? 0 : navigator_.Poll();
+    if (controls_open_) {
+      DrawControls(polled);
+      return;
+    }
+    // The Controls page's row first when it's offered, then the settings, then the actions.
+    const int first = controls_offered_ ? 1 : 0;
     const int rows = int(settings_.size());
     const int actions = 3;  // Save, Save and restart, Cancel
-    const uint32_t input = closing_ ? 0 : navigator_.Poll();
-    if (input & kUp) selected_ = (selected_ + rows + actions - 1) % (rows + actions);
-    if (input & kDown) selected_ = (selected_ + 1) % (rows + actions);
-    if (selected_ < rows) {
-      if (input & kLeft) Step(selected_, -1);
-      if (input & (kRight | kAccept)) Step(selected_, +1);
+    const int total = first + rows + actions;
+    const uint32_t input = polled;
+    if (input & kUp) selected_ = (selected_ + total - 1) % total;
+    if (input & kDown) selected_ = (selected_ + 1) % total;
+    if (selected_ < first) {
+      if (input & (kRight | kAccept)) OpenControls();
+    } else if (selected_ < first + rows) {
+      if (input & kLeft) Step(selected_ - first, -1);
+      if (input & (kRight | kAccept)) Step(selected_ - first, +1);
     } else if (input & kAccept) {
-      Act(selected_ - rows);
+      Act(selected_ - first - rows);
     }
     if (input & kBack) Act(2);
 
@@ -334,16 +375,26 @@ class SettingsPanel final : public HostPanel {
       if (ImGui::BeginTable("##settings", 2, ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_WidthStretch, 0.85f);
         ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 1.15f);
+        if (controls_offered_) {
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          if (Row("Controls", 0, selected_)) OpenControls();
+          ImGui::TableNextColumn();
+          std::string value = controls_ && controls_->Changed() ? "Changed, not saved yet"
+                                                                : "Keyboard and mouse";
+          if (selected_ == 0) value += "  >";
+          ImGui::TextUnformatted(value.c_str());
+        }
         for (int i = 0; i < rows; ++i) {
           const Setting& setting = settings_[i];
           ImGui::TableNextRow();
           ImGui::TableNextColumn();
-          if (Row(setting.label.c_str(), i, selected_)) {
+          if (Row(setting.label.c_str(), first + i, selected_)) {
             Step(i, ImGui::GetIO().KeyShift ? -1 : +1);
           }
           ImGui::TableNextColumn();
           std::string value = setting.options[chosen_[i]].label;
-          if (selected_ == i && setting.options.size() > 1) value = "<  " + value + "  >";
+          if (selected_ == first + i && setting.options.size() > 1) value = "<  " + value + "  >";
           ImGui::TextUnformatted(value.c_str());
           if (chosen_[i] != running_[i] && !setting.live) {
             ImGui::SameLine();
@@ -355,13 +406,16 @@ class SettingsPanel final : public HostPanel {
       ImGui::Separator();
       const char* labels[] = {"Save", "Save and restart", "Cancel"};
       for (int a = 0; a < actions; ++a) {
-        if (Row(labels[a], rows + a, selected_)) Act(a);
+        if (Row(labels[a], first + rows + a, selected_)) Act(a);
       }
       ImGui::Separator();
       if (!message_.empty()) {
         ImGui::TextWrapped("%s", message_.c_str());
-      } else if (selected_ < rows) {
-        const Setting& setting = settings_[selected_];
+      } else if (selected_ < first) {
+        Dim("Rebind the keys and set the mouse's sensitivity, up and down speed, invert and "
+            "smoothing.");
+      } else if (selected_ < first + rows) {
+        const Setting& setting = settings_[selected_ - first];
         std::string note = setting.note;
         if (rex::cvar::GetFlagSource(setting.cvar) == rex::cvar::Source::kCommandLine) {
           note += " This run: set by a command-line flag, which wins over the saved value; "
@@ -373,7 +427,7 @@ class SettingsPanel final : public HostPanel {
         }
         Dim(note.c_str());
       } else {
-        Dim(selected_ == rows + 1
+        Dim(selected_ == first + rows + 1
                 ? "Saves, closes the game and starts it again with these settings."
                 : "Changes marked (on restart) apply the next time the game starts. "
                   "Saved in your user data folder (settings.toml).");
@@ -396,11 +450,17 @@ class SettingsPanel final : public HostPanel {
     }
     const std::string pack = CvarValue("fear_texture_pack");
     if (!pack.empty()) values.emplace_back("fear_texture_pack", pack);
+    // The Controls page's, when it was opened (its settings are left as they are otherwise).
+    const auto controls = controls_ ? controls_->Values()
+                                    : std::vector<std::pair<std::string, std::string>>();
+    values.insert(values.end(), controls.begin(), controls.end());
     if (!WriteSettings(values)) {
       message_ = "Couldn't write " + g_path.string() + ".";
       return false;
     }
     REXLOG_INFO("F.E.A.R. settings: saved to {}", g_path.string());
+    // The keys and the mouse now: the game reads them live.
+    if (!controls.empty()) fear::mkb::SetFlags(controls);
     // Window mode and animation timing now, on the UI thread after this frame.
     std::vector<std::pair<std::string, std::string>> live;
     for (size_t i = 0; i < settings_.size(); ++i) {
@@ -444,11 +504,35 @@ class SettingsPanel final : public HostPanel {
 
   static bool TimerPaced() { return CvarValue("fear_vblank_source") == "timer"; }
 
+  void OpenControls() {
+    if (!controls_) controls_ = std::make_unique<fear::controls::Page>();
+    controls_open_ = true;
+    message_.clear();
+  }
+
+  // The Controls page (fear_controls.h) in this panel, a little wider for its two key columns.
+  void DrawControls(uint32_t input) {
+    using Result = fear::controls::Page::Result;
+    Result result = Result::kStay;
+    if (BeginPanel("##fear_settings", 34.0f)) result = controls_->Draw(input);
+    EndPanel();
+    if (result == Result::kBack) {
+      controls_open_ = false;
+      selected_ = 0;
+    } else if (result == Result::kSave) {
+      Act(0);
+      if (!closing_) controls_open_ = false;  // couldn't save: the message is on the main page
+    }
+  }
+
   std::vector<Setting> settings_;
   std::vector<size_t> running_;  // the option in effect, by row
   std::vector<size_t> chosen_;
   std::string message_;
   bool closing_ = false;
+  const bool controls_offered_ = fear::controls::Available();
+  std::unique_ptr<fear::controls::Page> controls_;  // made when first opened
+  bool controls_open_ = false;
 };
 
 class QuitPanel final : public HostPanel {
