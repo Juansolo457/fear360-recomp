@@ -65,6 +65,8 @@ struct TextureCache::Texture {
   bool resolve_pending = true;
   // The resolved image bound in place of `resource` (CopyResolved), or null.
   ID3D12Resource* alias = nullptr;
+  // When `alias` is a scaled image: its guest-sized twin, the texels at this texture's size.
+  ID3D12Resource* alias_guest_sized = nullptr;
   uint32_t uploads = 0;  // Upload calls so far (the slow-upload log)
   uint32_t slot = 0;
   uint64_t placed = kCommitted, bytes = 0;  // CreateTextureResource's placement and size
@@ -349,7 +351,8 @@ bool TextureCache::Clean(const Texture& t) {
   return !t.dirty.load(std::memory_order_acquire) && !t.resolve_pending;
 }
 
-void TextureCache::SetAlias(Texture& t, ID3D12Resource* alias) {
+void TextureCache::SetAlias(Texture& t, ID3D12Resource* alias, ID3D12Resource* guest_sized) {
+  t.alias_guest_sized = alias ? guest_sized : nullptr;
   if (t.alias == alias) return;
   t.alias = alias;
   // Bindings of the texture memoized by other fetch constants (GetMemo, callers' memos through
@@ -797,7 +800,14 @@ bool TextureCache::CopyResolved(Texture& t, ID3D12GraphicsCommandList* list) {
     if (source) {
       const D3D12_RESOURCE_DESC sd = source->GetDesc();
       if (sd.Width == key.width && sd.Height == key.height) {
-        SetAlias(t, source);
+        // Above 1x the scaled twin: the texture at the draw resolution.
+        ID3D12Resource* const scaled = source == image->texture      ? image->texture_scaled
+                                       : source == image->depth_r32f ? image->depth_r32f_scaled
+                                                                     : nullptr;
+        if (scaled)
+          SetAlias(t, scaled, source);
+        else
+          SetAlias(t, source);
         t.resolved_seq[0] = image->seq;
         ++stats_.resolved_aliases;
         return true;
@@ -807,12 +817,13 @@ bool TextureCache::CopyResolved(Texture& t, ID3D12GraphicsCommandList* list) {
   if (t.alias) {
     // Leaving the alias (the address now holds an image of another size or format): the
     // resource takes over the aliased image's texels, which resolved_seq describes, before the
-    // copies below update it. Images outlive the cache's use of them (Resolver).
+    // copies below update it (a scaled image's from its guest-sized twin, the resource's size).
+    // Images outlive the cache's use of them (Resolver).
     Transition(t, list, D3D12_RESOURCE_STATE_COPY_DEST);
     D3D12_TEXTURE_COPY_LOCATION dst = {}, src = {};
     dst.pResource = t.resource.Get();
     dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    src.pResource = t.alias;
+    src.pResource = t.alias_guest_sized ? t.alias_guest_sized : t.alias;
     src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
     ++stats_.resolved_copies;
@@ -950,6 +961,7 @@ bool TextureCache::Get(const uint32_t fetch_dwords[6], ID3D12GraphicsCommandList
   out->key = key;
   out->entry = {t->slot, slots_[t->slot].generation};
   out->aliased = t->alias != nullptr;
+  out->scaled = t->alias_guest_sized != nullptr;
   out->stale = stale;
   out->srv_signed_format = t->host->snorm;
   out->swizzled_signs = texture_util::SwizzleSigns(fetch);

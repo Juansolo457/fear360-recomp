@@ -14,6 +14,7 @@
 #include <cstring>
 
 REXCVAR_DECLARE(bool, fear_d3d12_msaa);
+REXCVAR_DECLARE(int32_t, fear_d3d12_resolution_scale);
 
 namespace fear::d3d12 {
 namespace {
@@ -163,6 +164,34 @@ void EdramFills::ForEach(
 uint32_t HostSamples(uint32_t surface_info) {
   static const bool msaa = REXCVAR_GET(fear_d3d12_msaa);
   return msaa ? SurfaceSamples(surface_info) : 1;
+}
+
+// --fear_d3d12_resolution_scale (surfaces.h), decided once and logged.
+uint32_t DrawResolutionScale() {
+  static const uint32_t scale = [] {
+    const int32_t asked = REXCVAR_GET(fear_d3d12_resolution_scale);
+    uint32_t s = uint32_t(std::clamp(asked, 0, int32_t(kMaxDrawResolutionScale)));
+    uint32_t display_height = 0;
+#if defined(_WIN32)
+    // The primary display's mode, in pixels whatever the process's DPI awareness.
+    DEVMODEW mode = {};
+    mode.dmSize = sizeof(mode);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode))
+      display_height = mode.dmPelsHeight;
+#endif
+    if (!s) {
+      s = 1;
+      while (s < kMaxDrawResolutionScale && 720 * s < display_height) ++s;
+    }
+    if (asked) {
+      REXLOG_INFO("D3D12: drawing at {}x{} ({}x the 360's 1280x720)", 1280 * s, 720 * s, s);
+    } else {
+      REXLOG_INFO("D3D12: drawing at {}x{} ({}x the 360's 1280x720, for the display's {} rows)",
+                  1280 * s, 720 * s, s, display_height);
+    }
+    return s;
+  }();
+  return scale;
 }
 
 SurfaceRegs SurfaceRegsFromRegisters(const uint32_t* regs) {

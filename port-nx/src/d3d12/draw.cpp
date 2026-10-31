@@ -415,7 +415,8 @@ struct DrawRenderer::Impl : GuestMemoryMirror::Sink {
     uint32_t bound = 0;    // textures bound, in order: their cache entries and signs[] writes
     uint32_t textures = 0;
     // The shader's fetch constants in ShaderSlots::mask order (count x 6 dwords), then its
-    // descriptor table (n), then one signs[] write per bound texture (slot | value << 8).
+    // descriptor table (n), then one signs[] write per bound texture (slot | value << 8, and
+    // 1 << 16 when it binds a resolution-scaled image).
     uint32_t data[kMaxSlots * 6 + kMaxIndices + kMaxBound];
     TextureHandle entry[kMaxBound];
   };
@@ -614,7 +615,7 @@ struct DrawRenderer::Impl : GuestMemoryMirror::Sink {
   void WriteSnapshots(uint64_t completed_fence);
 
   Impl(D3D12Backend& renderer, DrawRenderer::Stats& s)
-      : r(renderer), stats(s), shaders(renderer.device().vendor_id()) {}
+      : r(renderer), stats(s), shaders(renderer.device().vendor_id(), DrawResolutionScale()) {}
   ~Impl() {
     if (!pso_threads.empty()) {
       {
@@ -666,12 +667,13 @@ struct DrawRenderer::Impl : GuestMemoryMirror::Sink {
     uint64_t frame_fence;
     uint64_t captured;  // TextureCache::MarkCapture stamp
     uint8_t* signs;     // [32], by fetch constant: the bound textures' swizzled signs
+    uint32_t* scaled;   // bit per fetch constant bound to a resolution-scaled image (OR'd in)
   };
   // The shader's descriptor table into `indices`; returns its entry count.
   uint32_t BindTextures(const TextureBindContext& ctx, const DxbcShader& shader, uint32_t* indices);
   void FillSystemConstants(const DrawState& s, const RegisterFile& regs, xenos::PrimitiveType prim,
                            bool polygonal, xenos::Endian index_endian, const ViewportInfo& vp,
-                           uint32_t used_textures, const uint8_t* signs,
+                           uint32_t used_textures, const uint8_t* signs, uint32_t scaled_textures,
                            DxbcShaderTranslator::SystemConstants& sys);
   DxbcShader* LoadShader(ShaderMemo* table, ShaderMemo*& last, const ShaderRef& ref,
                          xenos::ShaderType type);
@@ -930,7 +932,11 @@ bool DrawRenderer::Impl::Initialize() {
       // Shaders translated the other way can't share the cache's pipelines.
       dir /= rex::graphics::g_dxbc_implicit_gradients ? "fear-d3d12" : "fear-d3d12-gradients";
       store.Open(dir, sizeof(PipelineKey), kPipelineKeyVersion);
-      library_path = dir / "pipelines.d3d12lib";
+      // The store keeps guest shaders and keys, translated again at start-up, so every scale
+      // warms up the pipelines any run has seen; the compiled pipelines differ per scale.
+      const uint32_t scale = DrawResolutionScale();
+      library_path = dir / (scale > 1 ? "pipelines-x" + std::to_string(scale) + ".d3d12lib"
+                                      : std::string("pipelines.d3d12lib"));
     }
   }
   if (REXCVAR_GET(fear_d3d12_async_pipelines)) {
@@ -1860,7 +1866,10 @@ PipelineKey DrawRenderer::Impl::BuildPipelineKey(
     GetPreferredFacePolygonOffset(regs, polygonal, poly_offset_scale, poly_offset);
     key.depth_bias = rex::graphics::draw_util::GetD3D10IntegerPolygonOffset(
         regs.Get<reg::RB_DEPTH_INFO>().depth_format, poly_offset);
-    key.slope_scaled_depth_bias = poly_offset_scale * xenos::kPolygonOffsetScaleSubpixelUnit;
+    // The guest's slope is per guest pixel; a host pixel at the draw resolution scale sees a
+    // slope that many times smaller.
+    key.slope_scaled_depth_bias = poly_offset_scale * xenos::kPolygonOffsetScaleSubpixelUnit *
+                                  float(r.render_targets().scale());
     key.depth_clip = !regs.Get<reg::PA_CL_CLIP_CNTL>().clip_disable;
     if (targets.depth) {
       uint8_t func = uint8_t(xenos::CompareFunction::kAlways);
@@ -2206,7 +2215,10 @@ uint32_t DrawRenderer::Impl::BindTextures(const TextureBindContext& ctx, const D
         const uint32_t* stored = bm->data + ss.count * 6;
         std::memcpy(indices, stored, n * sizeof(uint32_t));
         stored += n;
-        for (uint32_t i = 0; i < bm->bound; ++i) signs[stored[i] & 0xFF] = uint8_t(stored[i] >> 8);
+        for (uint32_t i = 0; i < bm->bound; ++i) {
+          signs[stored[i] & 0xFF] = uint8_t(stored[i] >> 8);
+          if (stored[i] >> 16 & 1) *ctx.scaled |= 1u << (stored[i] & 0x1F);
+        }
         stats.textures += bm->textures;
         ++stats.bind_memo_hits;
         profile::Count(profile::kBindHit);
@@ -2261,10 +2273,12 @@ uint32_t DrawRenderer::Impl::BindTextures(const TextureBindContext& ctx, const D
         m.index = index;
       }
       signs[tb.fetch_constant] = b.swizzled_signs;
+      if (b.scaled) *ctx.scaled |= 1u << (tb.fetch_constant & 0x1F);
       if (bm) {
         bm->entry[bound] = b.entry;
-        bm->data[ss.count * 6 + n + bound] =
-            uint32_t(uint8_t(tb.fetch_constant)) | uint32_t(b.swizzled_signs) << 8;
+        bm->data[ss.count * 6 + n + bound] = uint32_t(uint8_t(tb.fetch_constant)) |
+                                             uint32_t(b.swizzled_signs) << 8 |
+                                             uint32_t(b.scaled) << 16;
       }
       ++bound;
     } else {
@@ -2320,8 +2334,12 @@ void DrawRenderer::Impl::FillSystemConstants(const DrawState& s, const RegisterF
                                              xenos::PrimitiveType prim, bool polygonal,
                                              xenos::Endian index_endian, const ViewportInfo& vp,
                                              uint32_t used_textures, const uint8_t* signs,
+                                             uint32_t scaled_textures,
                                              DxbcShaderTranslator::SystemConstants& sys) {
   std::memset(&sys, 0, sizeof(sys));
+  // Resolved images bound at the draw resolution scale: the shaders (translated for the scale)
+  // offset and size their fetches in host texels.
+  sys.textures_resolution_scaled = scaled_textures;
   auto vte = regs.Get<reg::PA_CL_VTE_CNTL>();
   auto clip = regs.Get<reg::PA_CL_CLIP_CNTL>();
   auto colorcontrol = regs.Get<reg::RB_COLORCONTROL>();
@@ -2680,20 +2698,23 @@ void DrawRenderer::Impl::Draw(const DrawState& s, const DrawPrep* prep) {
                                  (ps ? ps->GetUsedTextureMaskAfterTranslation() : 0);
   uint32_t desc_vs[64], desc_ps[64];
   uint8_t signs[32] = {};
+  uint32_t scaled_textures = 0;
   const TextureBindContext bind = {s,
                                    regs,
                                    list,
                                    r.textures(),
                                    r.frame_fence(),
                                    prep ? prep->captured : TextureCache::kCapturedNow,
-                                   signs};
+                                   signs,
+                                   &scaled_textures};
   const uint32_t n_desc_vs = BindTextures(bind, *vs, desc_vs);
   const uint32_t n_desc_ps = ps ? BindTextures(bind, *ps, desc_ps) : 1;
   if (!ps) desc_ps[0] = 0;
   profile::Mark(profile::kTextures);
 
   DxbcShaderTranslator::SystemConstants sys;
-  FillSystemConstants(s, regs, prim, polygonal, index_endian, vp, used_textures, signs, sys);
+  FillSystemConstants(s, regs, prim, polygonal, index_endian, vp, used_textures, signs,
+                      scaled_textures, sys);
   profile::Mark(profile::kSysConst);
 
   // Float constants packed by the shaders' maps (UpdateBindings), compared and staged in place.
@@ -2716,16 +2737,19 @@ void DrawRenderer::Impl::Draw(const DrawState& s, const DrawPrep* prep) {
   FlushCopies(list);
   profile::Mark(profile::kVertices);
 
-  // Fixed-function state.
-  D3D12_VIEWPORT viewport = {float(vp.xy_offset[0]),
-                             float(vp.xy_offset[1]),
-                             float(vp.xy_extent[0]),
-                             float(vp.xy_extent[1]),
+  // Fixed-function state, in the targets' host pixels: the guest's pixels times the draw
+  // resolution scale. The NDC transform (system constants) stays the guest's.
+  const uint32_t res_scale = r.render_targets().scale();
+  D3D12_VIEWPORT viewport = {float(vp.xy_offset[0] * res_scale),
+                             float(vp.xy_offset[1] * res_scale),
+                             float(vp.xy_extent[0] * res_scale),
+                             float(vp.xy_extent[1] * res_scale),
                              vp.z_min,
                              vp.z_max};
-  D3D12_RECT scissor_rect = {LONG(scissor.offset[0]), LONG(scissor.offset[1]),
-                             LONG(scissor.offset[0] + scissor.extent[0]),
-                             LONG(scissor.offset[1] + scissor.extent[1])};
+  D3D12_RECT scissor_rect = {LONG(scissor.offset[0] * res_scale),
+                             LONG(scissor.offset[1] * res_scale),
+                             LONG((scissor.offset[0] + scissor.extent[0]) * res_scale),
+                             LONG((scissor.offset[1] + scissor.extent[1]) * res_scale)};
 
   // Root state.
   if (list_dirty) {

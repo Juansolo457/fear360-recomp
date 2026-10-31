@@ -73,6 +73,9 @@ struct TextureBinding {
   TextureKey key;
   TextureHandle entry;   // the cache's texture, for TextureCache::Unchanged and Touch
   bool aliased = false;  // `resource` is a resolved image bound in place of the texture's own
+  // ... at the draw resolution scale (ResolvedImage::texture_scaled): the shaders must treat the
+  // fetch as resolution-scaled (DxbcShaderTranslator's textures_resolution_scaled).
+  bool scaled = false;
   // The game wrote the texture's memory after it queued the draw. With capture order on, bound
   // with the data from before that write, which is still to be uploaded for later draws (not
   // memoizable).
@@ -199,8 +202,10 @@ class TextureCache {
   Texture* NewTexture(const TextureKey& key);
   Texture* Create(const TextureKey& key, const HostFormat& host);
   static bool Clean(const Texture& t);
-  // Binds `alias` (a resolved image, or null for the texture's own resource) for t.
-  void SetAlias(Texture& t, ID3D12Resource* alias);
+  // Binds `alias` (a resolved image, or null for the texture's own resource) for t. A scaled
+  // image (ResolvedImage::texture_scaled) comes with `guest_sized`, its guest-sized twin, which
+  // holds the texels at t's own size when t leaves the alias.
+  void SetAlias(Texture& t, ID3D12Resource* alias, ID3D12Resource* guest_sized = nullptr);
   // Clears t's dirty flag and re-arms the watches of its guest pages, before their data is read.
   void ClearDirty(Texture& t);
   // t's resource holds guest-memory data in every subresource: the next Get runs CopyResolved.

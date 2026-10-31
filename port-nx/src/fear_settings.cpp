@@ -88,6 +88,19 @@ std::vector<Setting> BuildSettings() {
                       {{"true", "Fullscreen"}, {"false", "Window"}},
                       true,
                       "Alt+Enter switches too."});
+#if defined(_WIN32)
+  // The D3D12 renderer's (the Vulkan renderer, Linux's, draws at the 360's 1280x720).
+  settings.push_back({"Resolution",
+                      "fear_d3d12_resolution_scale",
+                      {{"0", "Your display's"},
+                       {"1", "1280x720 (the 360's)"},
+                       {"2", "2560x1440"},
+                       {"3", "3840x2160"}},
+                      false,
+                      "What the game is drawn at before it's fitted to the screen. Your display's: "
+                      "the smallest of these at least as tall as your screen. Each step up costs "
+                      "the GPU more."});
+#endif
   settings.push_back({"Frame rate",
                       "fear_frame_rate_limit",
                       {{"30", FrameRateLabel(30) + " (the 360's)"},
@@ -574,8 +587,7 @@ namespace fear::settings {
 void Load(const std::filesystem::path& user_data_root) {
   fear::process::WaitForPreviousRun();
   g_path = user_data_root / "settings.toml";
-  // (fear-nx's renderer started a first run at the display's multiple of 720p; the D3D12
-  // renderer has no resolution scale yet: docs/NATIVE_RENDERER.md.)
+  // (The D3D12 renderer's resolution, fear_d3d12_resolution_scale, defaults to the display's.)
   rex::cvar::LoadConfig(g_path);
 }
 

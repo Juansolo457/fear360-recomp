@@ -70,6 +70,7 @@ struct RenderTarget {
   uint32_t pitch = 0;       // pixels (RB_SURFACE_INFO surface_pitch)
   uint32_t samples = 1;     // 1, 2 or 4: the host resource's (HostSamples)
   uint32_t guest_samples = 1;  // the guest's, for the EDRAM layout
+  // In guest pixels; the resource is RenderTargets::scale() times larger each way.
   uint32_t width = 0, height = 0;
   uint32_t guest_format = 0;  // last xenos::ColorRenderTargetFormat / DepthRenderTargetFormat
   DXGI_FORMAT resource_format = DXGI_FORMAT_UNKNOWN;
@@ -104,6 +105,10 @@ class RenderTargets {
   ~RenderTargets();
 
   bool Initialize(ID3D12Device* device);
+
+  // Host pixels per guest pixel across and down (DrawResolutionScale, surfaces.h). Sizes and
+  // rectangles here are in guest pixels; the resources and the D3D12 calls are scaled.
+  uint32_t scale() const { return scale_; }
 
   // Host targets for a draw. color_mask bit i: guest RT i is used (its RB_COLOR_MASK nibble is
   // non-zero); depth_used: depth or stencil test/write enabled. height: rows the draw can
@@ -174,6 +179,7 @@ class RenderTargets {
   uint32_t AllocView(bool depth);
 
   ID3D12Device* device_ = nullptr;
+  uint32_t scale_ = 1;
   ComPtr<ID3D12DescriptorHeap> rtv_heap_, dsv_heap_;
   uint32_t rtv_stride_ = 0, dsv_stride_ = 0;
   std::vector<uint32_t> free_rtv_, free_dsv_;
