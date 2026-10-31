@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <numbers>
 #include <string>
@@ -21,6 +22,7 @@
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
+#include <rex/input/device_assignment.h>
 #include <rex/input/input.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
@@ -40,8 +42,9 @@ inline constexpr bool kMkbDefault = false;  // the Steam Deck: a trackpad can se
 #endif
 
 REXCVAR_DEFINE_BOOL(fear_mkb, kMkbDefault, "F.E.A.R.",
-                    "Keyboard and mouse, PC style (#59): mouse look and the PC's keys in play, the "
-                    "keyboard as a pad in the menus");
+                    "What plays (#59, PC Settings > Input): true, the keyboard and mouse, PC style "
+                    "(mouse look and the PC's keys; controllers are left out of play); false, the "
+                    "controllers. In the menus the keyboard is a pad and the mouse points either way");
 REXCVAR_DEFINE_DOUBLE(fear_mouse_sensitivity, 1.0, "F.E.A.R.",
                       "Mouse look speed: 1 turns 0.022 degrees per mouse count, the usual PC "
                       "shooter default (at 800 dpi, 35 degrees an inch)");
@@ -70,11 +73,11 @@ REXCVAR_DEFINE_STRING(fear_key_crouch_toggle, "", "F.E.A.R./Keys", "Crouch, togg
 REXCVAR_DEFINE_STRING(fear_key_lean_left, "Q", "F.E.A.R./Keys", "Lean left");
 REXCVAR_DEFINE_STRING(fear_key_lean_right, "E", "F.E.A.R./Keys", "Lean right");
 REXCVAR_DEFINE_STRING(fear_key_walk, "", "F.E.A.R./Keys", "Walk (the PC's Run key, held)");
-REXCVAR_DEFINE_STRING(fear_key_turn_left, "", "F.E.A.R./Keys", "Turn left");
-REXCVAR_DEFINE_STRING(fear_key_turn_right, "", "F.E.A.R./Keys", "Turn right");
-REXCVAR_DEFINE_STRING(fear_key_look_up, "", "F.E.A.R./Keys", "Look up");
-REXCVAR_DEFINE_STRING(fear_key_look_down, "", "F.E.A.R./Keys", "Look down");
-REXCVAR_DEFINE_STRING(fear_key_center_view, "", "F.E.A.R./Keys", "Center the view");
+REXCVAR_DEFINE_STRING(fear_key_turn_left, "Left", "F.E.A.R./Keys", "Turn left");
+REXCVAR_DEFINE_STRING(fear_key_turn_right, "Right", "F.E.A.R./Keys", "Turn right");
+REXCVAR_DEFINE_STRING(fear_key_look_up, "Up", "F.E.A.R./Keys", "Look up");
+REXCVAR_DEFINE_STRING(fear_key_look_down, "Down", "F.E.A.R./Keys", "Look down");
+REXCVAR_DEFINE_STRING(fear_key_center_view, "End", "F.E.A.R./Keys", "Center the view");
 REXCVAR_DEFINE_STRING(fear_key_fire, "Mouse1", "F.E.A.R./Keys", "Fire");
 REXCVAR_DEFINE_STRING(fear_key_melee, "Mouse2", "F.E.A.R./Keys", "Melee (the PC's Alt-Fire)");
 REXCVAR_DEFINE_STRING(fear_key_zoom, "Shift,Mouse3", "F.E.A.R./Keys", "Zoom");
@@ -218,7 +221,8 @@ std::vector<Action>& Table() {
                       "Slots past 5 need 10 weapon slots (PC Settings)."),
       FEAR_MKB_ACTION(weapon_9, kWeapon1 + 8, "Weapon 9", kWeapons,
                       "Slots past 5 need 10 weapon slots (PC Settings)."),
-      FEAR_MKB_ACTION(use, kActivate, "Use", kActions, "Doors, switches, picking things up."),
+      FEAR_MKB_ACTION(use, kActivate, "Use", kActions,
+                      "Doors, switches; held, picks up a weapon. The 360's X, so it reloads too."),
       FEAR_MKB_ACTION(throw_grenade, kThrowGrenade, "Throw grenade", kActions, nullptr),
       FEAR_MKB_ACTION(next_grenade, kNextGrenade, "Next grenade type", kActions, nullptr),
       FEAR_MKB_ACTION(slow_mo, kSlowMo, "Slow-mo", kActions, "Reflexes."),
@@ -398,6 +402,12 @@ double g_frame_yaw = 0.0, g_frame_pitch = 0.0;     // this turn update's mouse m
 
 constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x46454152);  // FEAR
 
+std::atomic<bool> g_plays{kMkbDefault};  // fear_mkb as last applied (Install, then ModeChanged)
+
+// The player is in control: the binding manager is enabled (it is in parts of the front end too,
+// the intro movies) and the player's turn update has run lately (only in a level). Below Driver.
+bool InPlay();
+
 // The keyboard as a pad in the game's menus: the key, the button it holds and the button's
 // keystroke.
 struct MenuKey {
@@ -438,7 +448,6 @@ class Driver final : public rex::input::InputDriver,
   X_STATUS Setup() override { return X_STATUS_SUCCESS; }
 
   void EnumerateDevices(std::vector<rex::input::DeviceInfo>& out) override {
-    if (!REXCVAR_GET(fear_mkb)) return;
     rex::input::DeviceInfo info;
     info.id = kDevice;
     info.name = "F.E.A.R. keyboard and mouse";
@@ -448,7 +457,7 @@ class Driver final : public rex::input::InputDriver,
 
   X_RESULT GetDeviceCapabilities(rex::input::DeviceId id, uint32_t,
                                  X_INPUT_CAPABILITIES* out) override {
-    if (id != kDevice || !REXCVAR_GET(fear_mkb)) return X_ERROR_DEVICE_NOT_CONNECTED;
+    if (id != kDevice) return X_ERROR_DEVICE_NOT_CONNECTED;
     if (out) {
       std::memset(out, 0, sizeof(*out));
       out->type = 0x01;
@@ -461,14 +470,15 @@ class Driver final : public rex::input::InputDriver,
   }
 
   // The pad the game's menus read; nothing while the player is in control (the keys are commands
-  // then), so a controller works as before.
+  // then), so the controllers work there as before, whichever plays.
   X_RESULT GetDeviceState(rex::input::DeviceId id, X_INPUT_STATE* out) override {
-    if (id != kDevice || !REXCVAR_GET(fear_mkb)) return X_ERROR_DEVICE_NOT_CONNECTED;
-    const bool playing = Playing();
+    if (id != kDevice) return X_ERROR_DEVICE_NOT_CONNECTED;
+    const bool playing = Playing(), plays = REXCVAR_GET(fear_mkb);
     const bool active = is_active(), focus = has_focus_.load();
-    UpdateCapture(playing && active && focus);
-    // Why the mouse isn't captured in play, logged as it changes.
-    const int blocked = !playing ? 0 : !focus ? 1 : !active ? 2 : 0;
+    UpdateCapture(playing && plays && active && focus);
+    // Why the mouse isn't captured in play (with the keyboard and mouse what plays), logged as it
+    // changes.
+    const int blocked = !playing || !plays ? 0 : !focus ? 1 : !active ? 2 : 0;
     if (logged_blocked_.exchange(blocked) != blocked && blocked) {
       REXLOG_INFO("F.E.A.R. mouse: in play but not captured: {}",
                   blocked == 1 ? "the window doesn't have the focus" : "the game has no input now");
@@ -493,7 +503,7 @@ class Driver final : public rex::input::InputDriver,
   }
 
   X_RESULT SetDeviceVibration(rex::input::DeviceId id, X_INPUT_VIBRATION*) override {
-    return id == kDevice && REXCVAR_GET(fear_mkb) ? X_ERROR_SUCCESS : X_ERROR_DEVICE_NOT_CONNECTED;
+    return id == kDevice ? X_ERROR_SUCCESS : X_ERROR_DEVICE_NOT_CONNECTED;
   }
 
   // The same keys as pad keystrokes, for the menus that read those (XUI scenes, which the game's
@@ -501,7 +511,7 @@ class Driver final : public rex::input::InputDriver,
   // while the game has the input (SetKey). One not read within a quarter second is dropped.
   X_RESULT GetDeviceKeystroke(rex::input::DeviceId id, uint32_t,
                               X_INPUT_KEYSTROKE* out) override {
-    if (id != kDevice || !REXCVAR_GET(fear_mkb)) return X_ERROR_DEVICE_NOT_CONNECTED;
+    if (id != kDevice) return X_ERROR_DEVICE_NOT_CONNECTED;
     std::lock_guard lock(mutex_);
     const Clock::time_point oldest = Clock::now() - std::chrono::milliseconds(250);
     while (!keystrokes_.empty() && keystrokes_.front().second < oldest) keystrokes_.pop_front();
@@ -543,6 +553,9 @@ class Driver final : public rex::input::InputDriver,
         }
       }
       if (on) states[action.command] = 1;
+      // The 360 binds no button to Activate: its X, Reload, uses things and, held, picks up a
+      // weapon ("Press and hold X to pick up"). So Use is Reload too, as X is.
+      if (on && action.command == kActivate && kReload < count) states[kReload] = 1;
       if (REXCVAR_GET(fear_mkb_log) && on != logged_on_[action.command & 0xFF]) {
         logged_on_[action.command & 0xFF] = on;
         REXLOG_INFO("F.E.A.R. keys: {} {}", action.setting, on ? "on" : "off");
@@ -612,6 +625,10 @@ class Driver final : public rex::input::InputDriver,
       keystrokes_.emplace_back(ks, Clock::now());
     }
   }
+
+  // The controllers play now (PC Settings' Input row): the mouse is let go at once, since the
+  // game's polls no longer reach the capture's update.
+  void Release() { UpdateCapture(false); }
 
   // The mouse movement since the last call, in counts (guest thread).
   void TakeMouse(double& dx, double& dy) {
@@ -709,17 +726,8 @@ class Driver final : public rex::input::InputDriver,
   }
 
  private:
-  // The player is in control: the binding manager is enabled (it is in parts of the front end
-  // too, the intro movies) and the player's turn update has run lately (only in a level).
-  static bool Playing() {
-    auto recent = [](const std::atomic<int64_t>& ticks) {
-      const int64_t last = ticks.load(std::memory_order_relaxed);
-      return last && Clock::now().time_since_epoch() - Clock::duration(last) <
-                         std::chrono::milliseconds(250);
-    };
-    return g_gameplay.load(std::memory_order_relaxed) && recent(g_update_ticks) &&
-           recent(g_turn_ticks);
-  }
+  // The player is in control (InPlay).
+  static bool Playing() { return InPlay(); }
 
   static uint16_t ButtonKey(rex::ui::MouseEvent::Button button) {
     switch (button) {
@@ -737,7 +745,7 @@ class Driver final : public rex::input::InputDriver,
     if (down && !has_focus_) return;
     // For the menus' pad keystrokes: the menus, while the game has the input (with a panel of ours
     // open, its Enter would reach the scene under it). A key up still follows a key down sent.
-    const bool menus = !Playing() && REXCVAR_GET(fear_mkb) && is_active();
+    const bool menus = !Playing() && is_active();
     std::lock_guard lock(mutex_);
     // A new press, not the key's repeat or one held when rebinding began (Enter that chose it).
     if (down && !down_[key] && rebinding_ && !rebound_) rebound_ = key;
@@ -769,7 +777,7 @@ class Driver final : public rex::input::InputDriver,
 
   // The mouse in the menus (UI thread), for TakeMenuMouse: a move replaces a move just before it.
   void PushMenuMouse(MenuMouse::Kind kind, const rex::ui::MouseEvent& e, int32_t wheel = 0) {
-    if (captured_ || !window_ || !has_focus_ || !REXCVAR_GET(fear_mkb)) return;
+    if (captured_ || !window_ || !has_focus_) return;
     const MenuMouse m = {kind, e.x(), e.y(), window_->GetActualPhysicalWidth(),
                          window_->GetActualPhysicalHeight(), wheel};
     std::lock_guard lock(mutex_);
@@ -890,6 +898,40 @@ void Smooth(double& yaw, double& pitch) {
   pending_pitch -= pitch;
 }
 
+bool InPlay() {
+  auto recent = [](const std::atomic<int64_t>& ticks) {
+    const int64_t last = ticks.load(std::memory_order_relaxed);
+    return last && Clock::now().time_since_epoch() - Clock::duration(last) <
+                       std::chrono::milliseconds(250);
+  };
+  return g_gameplay.load(std::memory_order_relaxed) && recent(g_update_ticks) &&
+         recent(g_turn_ticks);
+}
+
+// Which devices the game reads, over the SDK's assignment of the controllers (one per player
+// slot, or every one to player 1 with fear_shared_controllers): in play with the keyboard and
+// mouse what plays (fear_mkb), only their device, so the controllers are left out; otherwise, in
+// the menus and with the controllers playing, everything, as before. Decided at each poll, so
+// PC Settings' Input row applies at once; the panels read the pads and the keys themselves.
+class Assignment final : public rex::input::DeviceAssignment {
+ public:
+  explicit Assignment(std::unique_ptr<rex::input::DeviceAssignment> pads) : pads_(std::move(pads)) {}
+
+  void OnDevicesChanged(const std::vector<rex::input::DeviceInfo>& devices) override {
+    pads_->OnDevicesChanged(devices);
+  }
+
+  void DevicesForUser(uint32_t user_index, std::vector<rex::input::DeviceId>& out) const override {
+    pads_->DevicesForUser(user_index, out);
+    if (REXCVAR_GET(fear_mkb) && InPlay()) {
+      std::erase_if(out, [](rex::input::DeviceId id) { return id != kDevice; });
+    }
+  }
+
+ private:
+  std::unique_ptr<rex::input::DeviceAssignment> pads_;
+};
+
 }  // namespace
 
 namespace fear::mkb {
@@ -901,10 +943,25 @@ void Install(rex::input::InputSystem& input, rex::ui::Window* window) {
   input.AddDriver(std::move(driver));
   // A driver added after the window reaches the input system gets it here.
   if (window) g_driver->OnWindowAvailable(window);
-  REXLOG_INFO("F.E.A.R. keyboard and mouse: {}", REXCVAR_GET(fear_mkb) ? "on" : "off");
+  g_plays = REXCVAR_GET(fear_mkb);
+  REXLOG_INFO("F.E.A.R. input: {} play; the keyboard and mouse work in the menus either way",
+              g_plays ? "the keyboard and mouse" : "the controllers");
 }
 
-bool Enabled() { return !fear::title::kFiles && g_driver && REXCVAR_GET(fear_mkb); }
+bool Enabled() { return !fear::title::kFiles && g_driver; }
+
+std::unique_ptr<rex::input::DeviceAssignment> Assign(
+    std::unique_ptr<rex::input::DeviceAssignment> pads) {
+  if constexpr (fear::title::kFiles) return pads;  // no keyboard and mouse there yet
+  return std::make_unique<Assignment>(std::move(pads));
+}
+
+void ModeChanged() {
+  const bool plays = REXCVAR_GET(fear_mkb);
+  if (g_plays.exchange(plays) == plays) return;
+  REXLOG_INFO("F.E.A.R. input: {} play now", plays ? "the keyboard and mouse" : "the controllers");
+  if (g_driver && !plays) g_driver->Release();
+}
 
 std::vector<ActionInfo> BindableActions() {
   std::vector<ActionInfo> out;
@@ -961,7 +1018,106 @@ void PressMenuPad(MenuPad pad) {
   }
 }
 
+std::string HintKey(std::string_view command) {
+  if (!Enabled() || !g_plays.load()) return {};
+  auto lower = [](std::string_view text) {
+    std::string out(text);
+    for (char& c : out) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+  };
+  // The game's command names (the 360 controller configurations' and the hint strings'), to our
+  // settings. The two movement axes and the two look axes name their keys together.
+  struct Name {
+    const char* command;
+    const char* settings[4];
+  };
+  static constexpr Name kNames[] = {
+      {"activate", {"fear_key_use"}},
+      {"reload", {"fear_key_reload"}},
+      {"fire", {"fear_key_fire"}},
+      {"alt-fire", {"fear_key_melee"}},
+      {"toggle melee", {"fear_key_melee"}},
+      {"zoomin", {"fear_key_zoom"}},
+      {"jump", {"fear_key_jump"}},
+      {"duck", {"fear_key_crouch"}},
+      {"leanleft", {"fear_key_lean_left"}},
+      {"leanright", {"fear_key_lean_right"}},
+      {"flashlight", {"fear_key_flashlight"}},
+      {"medkit", {"fear_key_medkit"}},
+      {"slowmo", {"fear_key_slow_mo"}},
+      {"throwgrenade", {"fear_key_throw_grenade"}},
+      {"nextgrenade", {"fear_key_next_grenade"}},
+      {"nextweapon", {"fear_key_next_weapon"}},
+      {"lastweapon", {"fear_key_last_weapon"}},
+      {"mission", {"fear_key_objectives"}},
+      {"controls", {"fear_key_objectives"}},
+      {"forwardaxis", {"fear_key_forward", "fear_key_backward"}},
+      {"strafeaxis", {"fear_key_strafe_left", "fear_key_strafe_right"}},
+  };
+  const std::string name = lower(command);
+  if (name == "ingamemenu") return "Escape";
+  if (name == "yaw" || name == "pitch") return "Mouse";
+  for (const Name& entry : kNames) {
+    if (name != entry.command) continue;
+    std::string out;
+    std::lock_guard lock(g_keys_mutex);
+    for (const char* setting : entry.settings) {
+      if (!setting) break;
+      const std::vector<std::string> keys = SplitKeys(rex::cvar::GetFlagByName(setting));
+      if (keys.empty()) continue;
+      if (!out.empty()) out += "/";
+      out += KeyLabel(keys.front());
+    }
+    return out;
+  }
+  return {};
+}
+
 }  // namespace fear::mkb
+
+#if !defined(FEAR_TITLE_FILES)
+// The hint text's |Command| expanders (four copies, fear_manifest.toml): at their insert call
+// (sub_8236F290: the text at r5, r6 characters) the command's name is the wide string at r1+276
+// (MSVC layout: 8 characters in place, size +16, capacity +20) and r5 the button's glyph. With the
+// keyboard and mouse playing, the bound key's name goes in instead (fear_mkb.h).
+void FearHintKey(PPCRegister& r1, PPCRegister& r5, PPCRegister& r6) {
+  uint8_t* base = rex::system::kernel_memory()->virtual_membase();
+  const uint32_t name_at = r1.u32 + 276;
+  const uint32_t size = LoadWord(base, name_at + 16);
+  const uint32_t capacity = LoadWord(base, name_at + 20);
+  if (size == 0 || size > 64) return;
+  const uint32_t chars = capacity >= 8 ? LoadWord(base, name_at) : name_at;
+  std::string command;
+  for (uint32_t i = 0; i < size; ++i) {
+    const uint16_t c = uint16_t(base[chars + i * 2] << 8 | base[chars + i * 2 + 1]);
+    command += c < 0x80 ? char(c) : '?';
+  }
+  const std::string key = fear::mkb::HintKey(command);
+  static std::mutex logged_mutex;
+  static std::vector<std::string> logged;
+  {
+    std::lock_guard lock(logged_mutex);
+    if (std::find(logged.begin(), logged.end(), command) == logged.end()) {
+      logged.push_back(command);
+      REXLOG_INFO("F.E.A.R. hints: |{}| shows {}", command, key.empty() ? "the button" : key);
+    }
+  }
+  if (key.empty()) return;
+  // One buffer: the insert copies it at once, and the hints are built on the game's thread.
+  static uint32_t buffer = 0;
+  constexpr uint32_t kChars = 48;
+  if (!buffer) buffer = rex::system::kernel_memory()->SystemHeapAlloc(kChars * 2);
+  if (!buffer) return;
+  const size_t count = std::min<size_t>(key.size(), kChars - 1);
+  for (size_t i = 0; i < count; ++i) {
+    base[buffer + i * 2] = 0;
+    base[buffer + i * 2 + 1] = uint8_t(key[i]);
+  }
+  base[buffer + count * 2] = base[buffer + count * 2 + 1] = 0;
+  r5.u64 = buffer;
+  r6.u64 = count;
+}
+#endif
 
 void FearMkbCommands(PPCRegister& r30) {
   if constexpr (fear::title::kFiles) return;

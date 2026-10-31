@@ -10,14 +10,16 @@
 // applies. Window mode and animation timing apply at once; the rest on the next start. Saving
 // keeps the file's lines for settings the panel doesn't write.
 //
-// With the keyboard and mouse on, its first row opens the Controls page (fear_controls.h): key
-// bindings and the mouse's settings, saved with the rest and applied at once.
+// Its first row (F.E.A.R.) is Input: the keyboard and mouse or a controller in play, applied at
+// once. Then the Controls page (fear_controls.h): key bindings and the mouse's settings, saved
+// with the rest and applied at once.
 //
 // The panels' look and input are fear_panel.h's; the restart is fear_process.h's.
 
 #pragma once
 
 #include <filesystem>
+#include <functional>
 
 #include "fear_panel.h"
 
@@ -32,5 +34,11 @@ using Host = fear::panel::Host;
 // On the UI thread. Each does nothing while a panel is already open.
 void OpenSettings(const Host& host);
 void OpenQuit(const Host& host);
+
+// First start on Windows (#117), F.E.A.R.: while nothing says whether the keyboard and mouse or
+// a controller plays (fear_mkb unset in settings.toml and on the command line), asks, saves the
+// answer (PC Settings > Input) and then runs `then`; true if it asked. False otherwise: the
+// caller goes on at once.
+bool AskInput(const Host& host, std::function<void()> then);
 
 }  // namespace fear::settings

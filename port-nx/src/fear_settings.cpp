@@ -83,6 +83,15 @@ std::string FrameRateLabel(double limit) {
 
 std::vector<Setting> BuildSettings() {
   std::vector<Setting> settings;
+  if (!fear::title::kFiles) {
+    // What plays (fear_mkb.h); the menus and the panels take both devices either way.
+    settings.push_back({"Input",
+                        "fear_mkb",
+                        {{"true", "Keyboard and mouse"}, {"false", "Controller"}},
+                        true,
+                        "One or the other in play: the keyboard and mouse (mouse look, the PC's "
+                        "keys), or your controllers. Both work in the menus and here."});
+  }
   settings.push_back({"Display",
                       "fullscreen",
                       {{"true", "Fullscreen"}, {"false", "Window"}},
@@ -519,6 +528,7 @@ class SettingsPanel final : public HostPanel {
     if (!live.empty() && host_.later) {
       host_.later([live] {
         for (const auto& [name, value] : live) rex::cvar::SetFlagByName(name, value);
+        fear::mkb::ModeChanged();  // the Input row's, when it changed (fear_mkb.h)
       });
     }
     return true;
@@ -616,9 +626,66 @@ class QuitPanel final : public HostPanel {
   bool closing_ = false;
 };
 
+// First start (#117): keyboard and mouse or a controller, saved as PC Settings' Input row
+// (fear_mkb), then `then` (the collection menu, or the game).
+class InputPanel final : public HostPanel {
+ public:
+  InputPanel(const fear::settings::Host& host, std::function<void()> then)
+      : HostPanel(host), then_(std::move(then)) {}
+
+ protected:
+  void OnDraw(ImGuiIO& io) override {
+    (void)io;
+    const uint32_t input = closing_ ? 0 : navigator_.Poll();
+    if (input & (kUp | kDown | kLeft | kRight)) selected_ = 1 - selected_;
+    if (input & kAccept) Act(selected_);
+    if (BeginPanel("##fear_input", 24.0f)) {
+      ImGui::TextUnformatted("HOW DO YOU WANT TO PLAY?");
+      ImGui::Separator();
+      if (Row("Keyboard and mouse", 0, selected_)) Act(0);
+      if (Row("Controller", 1, selected_)) Act(1);
+      ImGui::Separator();
+      Dim("In the menus both work either way. PC Settings > Input changes it later.");
+    }
+    EndPanel();
+  }
+
+ private:
+  void Act(int choice) {
+    if (closing_) return;
+    closing_ = true;
+    const std::string value = choice == 0 ? "true" : "false";
+    if (!WriteSettings({{"fear_mkb", value}})) {
+      REXLOG_ERROR("F.E.A.R. settings: couldn't save the input choice");
+    }
+    rex::cvar::SetFlagByName("fear_mkb", value);
+    REXLOG_INFO("F.E.A.R. settings: first start, {} chosen",
+                choice == 0 ? "the keyboard and mouse" : "a controller");
+    Close();
+    if (host_.later && then_) host_.later(then_);
+  }
+
+  std::function<void()> then_;
+  bool closing_ = false;
+};
+
 }  // namespace
 
 namespace fear::settings {
+
+bool AskInput(const Host& host, std::function<void()> then) {
+#if defined(_WIN32)
+  if (fear::title::kFiles || !host.drawer || fear::panel::AnyOpen()) return false;
+  // Asked once: until settings.toml (or the command line) says which.
+  if (rex::cvar::GetFlagSource("fear_mkb") != rex::cvar::Source::kDefault) return false;
+  new InputPanel(host, std::move(then));  // deletes itself when closed
+  return true;
+#else
+  (void)host;
+  (void)then;
+  return false;  // Linux and the Steam Deck start with a controller
+#endif
+}
 
 void Load(const std::filesystem::path& user_data_root) {
   fear::process::WaitForPreviousRun();

@@ -11,8 +11,10 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include <imgui.h>
 #include <rex/cvar.h>
@@ -44,8 +46,9 @@
 // one), the Xbox pad was player 2: not signed in, so the game played without a profile and never
 // saved. Single player wants every controller on player 1.
 REXCVAR_DEFINE_BOOL(fear_shared_controllers, true, "F.E.A.R.",
-                    "Every connected controller (and the keyboard) drives player 1, the "
-                    "signed-in profile that can save; off = one controller per player slot")
+                    "Every connected controller drives player 1, the signed-in profile that can "
+                    "save; off = one controller per player slot (the keyboard and mouse drive "
+                    "player 1 either way)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 class FearApp : public rex::ReXApp {
@@ -95,6 +98,14 @@ class FearApp : public rex::ReXApp {
   // no runtime yet. Picking this program's game resumes here.
   std::optional<rex::PathConfig> OnFinalizePaths(
       const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) override {
+    // First start on Windows: keyboard and mouse or a controller (fear_settings.h), then on.
+    if (fear::settings::AskInput(PanelHost(), [this, defaults, resume] {
+          if (fear::collection::StartNow(PanelHost(), [defaults, resume] { resume(defaults); })) {
+            resume(defaults);
+          }
+        })) {
+      return std::nullopt;
+    }
     if (fear::collection::StartNow(PanelHost(), [defaults, resume] { resume(defaults); })) {
       return defaults;
     }
@@ -104,12 +115,20 @@ class FearApp : public rex::ReXApp {
   void OnPreSetup(rex::RuntimeConfig& config) override {
     fear::crash_report::InstallCrashReporter();
 
-    if (REXCVAR_GET(fear_shared_controllers) && config.input_factory) {
+    if (config.input_factory) {
       config.input_factory = [base = config.input_factory](bool tool_mode) {
         auto input = base(tool_mode);
         if (auto* system = dynamic_cast<rex::input::InputSystem*>(input.get())) {
-          system->SetDeviceAssignment(std::make_unique<rex::input::SharedAssignment>());
-          REXLOG_INFO("F.E.A.R.: every controller drives player 1 (the profile that saves)");
+          // The controllers' assignment, under the keyboard and mouse's (fear_mkb.h: in play, one
+          // or the other).
+          std::unique_ptr<rex::input::DeviceAssignment> pads;
+          if (REXCVAR_GET(fear_shared_controllers)) {
+            pads = std::make_unique<rex::input::SharedAssignment>();
+            REXLOG_INFO("F.E.A.R.: every controller drives player 1 (the profile that saves)");
+          } else {
+            pads = std::make_unique<rex::input::SlotAssignment>();
+          }
+          system->SetDeviceAssignment(fear::mkb::Assign(std::move(pads)));
         }
         return input;
       };

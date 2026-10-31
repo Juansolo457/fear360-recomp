@@ -246,13 +246,35 @@ class CollectionMenu final : public Panel {
       const float bottom = size.y * 0.86f;
       draw->AddText(font, em * 0.8f, ImVec2(left + em * 0.05f, bottom), kSelected, help.c_str(),
                     nullptr, size.x * 0.6f);
-      // The A prompt, bottom right, and the version under the title's subtitle line.
-      const char* prompt = "A  Select";
-      const ImVec2 prompt_size = font->CalcTextSizeA(em * 0.9f, FLT_MAX, 0.0f, prompt);
-      const ImVec2 prompt_pos(size.x * 0.88f - prompt_size.x, size.y * 0.9f);
-      draw->AddCircleFilled(ImVec2(prompt_pos.x + em * 0.32f, prompt_pos.y + em * 0.48f),
-                            em * 0.42f, IM_COL32(90, 170, 60, 255));
-      text(0.9f, prompt_pos, kWhite, prompt);
+      // The A prompt, bottom right (with the keyboard and mouse playing, an Enter key cap, as the
+      // game's menus show then: texture_pack.h), and the version under the title's subtitle line.
+      bool keys = false;
+      try {
+        keys = !fear::title::kFiles && rex::cvar::Query<bool>("fear_mkb");
+      } catch (...) {
+      }
+      if (keys) {
+        const char* cap = "Enter";
+        const ImVec2 cap_size = font->CalcTextSizeA(em * 0.6f, FLT_MAX, 0.0f, cap);
+        const ImVec2 label_size = font->CalcTextSizeA(em * 0.9f, FLT_MAX, 0.0f, "Select");
+        const float cap_w = cap_size.x + em * 0.6f, cap_h = em * 1.0f;
+        const ImVec2 cap_min(size.x * 0.88f - label_size.x - cap_w - em * 0.4f, size.y * 0.9f);
+        const ImVec2 cap_max(cap_min.x + cap_w, cap_min.y + cap_h);
+        draw->AddRectFilled(ImVec2(cap_min.x, cap_min.y + em * 0.08f),
+                            ImVec2(cap_max.x, cap_max.y + em * 0.08f), IM_COL32(120, 120, 124, 255),
+                            em * 0.18f);
+        draw->AddRectFilled(cap_min, cap_max, IM_COL32(226, 226, 230, 255), em * 0.18f);
+        text(0.6f, ImVec2(cap_min.x + em * 0.3f, cap_min.y + (cap_h - cap_size.y) * 0.5f),
+             IM_COL32(24, 24, 28, 255), cap);
+        text(0.9f, ImVec2(cap_max.x + em * 0.4f, cap_min.y), kWhite, "Select");
+      } else {
+        const char* prompt = "A  Select";
+        const ImVec2 prompt_size = font->CalcTextSizeA(em * 0.9f, FLT_MAX, 0.0f, prompt);
+        const ImVec2 prompt_pos(size.x * 0.88f - prompt_size.x, size.y * 0.9f);
+        draw->AddCircleFilled(ImVec2(prompt_pos.x + em * 0.32f, prompt_pos.y + em * 0.48f),
+                              em * 0.42f, IM_COL32(90, 170, 60, 255));
+        text(0.9f, prompt_pos, kWhite, prompt);
+      }
       text(0.6f, ImVec2(left + em * 0.08f, size.y * 0.16f + em * 3.6f), kGrey,
            fear::version::Text());
     }

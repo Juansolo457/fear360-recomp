@@ -262,7 +262,7 @@ TextureCache::TextureCache(ID3D12Device* device, rex::memory::Memory* memory)
       uint64_t(std::max(REXCVAR_GET(fear_d3d12_texture_memory_soft_lifetime_s), 0)) * 1000;
   // Texture pack replacements are the PC's size, about four times the 360's in memory: the
   // budget grows with them, or evictions would read the same DDS files again and again.
-  if (fear::texture_pack::Enabled()) {
+  if (fear::texture_pack::PackLoaded()) {
     if (budget_.soft_bytes != ~0ull) budget_.soft_bytes *= 4;
     if (budget_.hard_bytes != ~0ull) budget_.hard_bytes *= 4;
     REXLOG_INFO("D3D12 textures: texture pack in use; memory budget {} MB soft, {} MB hard",

@@ -32,15 +32,20 @@
 // screens) and as its keystrokes (the XUI scenes, #110). The mouse points and clicks there through
 // the PC's own menu code (TakeMenuMouse, fear_menu.h). Which one applies follows the binding
 // manager's enabled flag (+0x40): on while the player is in control. The mouse is captured
-// (hidden, relative motion) only then and while no panel is open.
+// (hidden, relative motion) only then, with the keyboard and mouse what plays, and while no panel
+// is open.
 //
-// Both always work together with a controller; the Steam Deck build leaves this off
-// (fear_mkb), since there a trackpad can send mouse movement. F.E.A.R. only for now: F.E.A.R.
-// Files has its own addresses.
+// One or the other plays (fear_mkb, PC Settings > Input, applied at once): with the keyboard and
+// mouse, the controllers are left out of play (Assign: the game's player gets only this device
+// then); with the controllers, the mouse isn't captured and the keys aren't commands. In the menus
+// both always work, so the setting can be reached with whatever is in hand. The Steam Deck build
+// starts with the controllers, since there a trackpad can send mouse movement. F.E.A.R. only for
+// now: F.E.A.R. Files has its own addresses.
 
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,6 +54,7 @@
 #include <rex/ppc/context.h>
 
 namespace rex::input {
+class DeviceAssignment;
 class InputSystem;
 }
 namespace rex::ui {
@@ -61,8 +67,19 @@ namespace fear::mkb {
 // callback is set (it reaches only the drivers it already has).
 void Install(rex::input::InputSystem& input, rex::ui::Window* window);
 
-// Whether the keyboard and mouse are on in this run (F.E.A.R. with fear_mkb).
+// Whether the keyboard and mouse are there (F.E.A.R.; not F.E.A.R. Files yet). Whether they play
+// is fear_mkb.
 bool Enabled();
+
+// The game's devices (rex::input::DeviceAssignment), over `pads`, the SDK's assignment of the
+// controllers: in play with the keyboard and mouse what plays, only their device; otherwise what
+// `pads` gives. F.E.A.R. Files: `pads` as it is.
+std::unique_ptr<rex::input::DeviceAssignment> Assign(
+    std::unique_ptr<rex::input::DeviceAssignment> pads);
+
+// fear_mkb was set (PC Settings' Input row): logged, and with the controllers now what plays, the
+// mouse is let go.
+void ModeChanged();
 
 // For PC Settings' Controls page (fear_controls.h).
 
@@ -106,8 +123,16 @@ std::vector<MenuMouse> TakeMenuMouse();
 enum class MenuPad : uint8_t { kA, kB };
 void PressMenuPad(MenuPad pad);
 
+// The hint text's |Command| (the game's command name, "Reload", "FlashLight") as its bound keys'
+// names ("R"), with the keyboard and mouse playing; empty otherwise, and the game's button glyph
+// stays. The 360 put a controller glyph there (CXProfile method 138); the PC put the key's name.
+std::string HintKey(std::string_view command);
+
 }  // namespace fear::mkb
 
 // [[midasm_hook]] in CBindMgr's update, between building the frame's command states and sending
 // the changes (fear_manifest.toml).
 void FearMkbCommands(PPCRegister& r30);
+
+// [[midasm_hook]] at the insert call of each |Command| expander in the hint text (HintKey).
+void FearHintKey(PPCRegister& r1, PPCRegister& r5, PPCRegister& r6);

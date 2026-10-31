@@ -9,6 +9,7 @@
 #   ... -Files                    # F.E.A.R. Files (port-files, port-nx's host code)
 #   ... -Collection               # the collection menu: F.E.A.R. and F.E.A.R. Files
 #
+# -Collection lists F.E.A.R. Files as coming later, as the 1.0 releases do (-WithFiles to play it).
 # -Collection writes private/collection.toml with both games (each its own data, user and cache
 # folders, log, and texture pack when one is built: private/texture_pack, private/files/
 # texture_pack) and starts F.E.A.R. (or with -Files, F.E.A.R. Files) at the collection menu
@@ -33,6 +34,7 @@ param(
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
     [switch]$Files,       # run F.E.A.R. Files (port-files: the same host code as port-nx)
     [switch]$Collection,  # the collection menu over F.E.A.R. and F.E.A.R. Files (implies -Nx)
+    [switch]$WithFiles,   # -Collection: F.E.A.R. Files startable (otherwise "coming soon", as in 1.0)
     # The game presents every 2 vblanks: 30 fps at the console's 60 Hz.
     # port-nx follows the display's own vblank (port-nx/src/display_vblank.h): each frame is
     # shown for a whole number of refreshes, the fewest that keep it at or under FrameRate
@@ -168,6 +170,9 @@ if ($Collection) {
         $toml += '', '[[title]]', "id = '$($t.Id)'", "name = '$($t.Name)'", "subtitle = '$($t.Subtitle)'",
             "exe = '$($run.Executable)'", "working_dir = '$($run.Port)'",
             ('args = [' + (($run.Arguments | ForEach-Object { "'$_'" }) -join ', ') + ']')
+        # The Windows 1.0 release is F.E.A.R. alone, as Linux's: Files is listed as coming later
+        # (#118: its keyboard and mouse aren't done). -WithFiles or -Files to play it.
+        if ($t.Id -eq 'files' -and !$WithFiles -and !$Files) { $toml += 'later = true' }
     }
     $file = Join-Path $root 'private\collection.toml'
     New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null

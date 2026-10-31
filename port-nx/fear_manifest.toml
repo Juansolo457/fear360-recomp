@@ -535,3 +535,26 @@ registers = ["r1"]
 [entrypoint.rexcrt]
 memcpy = 0x8287D240
 memset = 0x8287B540
+
+# Keyboard and mouse (src/fear_mkb.h, HintKey): the hint text's |Command| expanders put the
+# command's button glyph into the text with one insert (sub_8236F290, the text at r5, r6
+# characters); the command's name is at r1+276. Four copies of the same code.
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x82367AC8
+registers = ["r1", "r5", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x8248CAE0
+registers = ["r1", "r5", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x824D8440
+registers = ["r1", "r5", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x82455D98
+registers = ["r1", "r5", "r6"]
