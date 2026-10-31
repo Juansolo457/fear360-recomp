@@ -34,7 +34,7 @@ python -I tools/texture_pack.py build   private/texwork "<PC F.E.A.R. install>" 
 pwsh -NoProfile -File tools/launch.ps1 -Nx -TexturePack private/texture_pack
 ```
 `launch.ps1 -Collection` passes each game's pack from `private/` when it is built. The game saves
-the folder in its `settings.toml`; PC Settings > PC textures turns the pack on or off (Windows: the
+the folder in its `settings.toml`; Recompilation Settings > PC textures turns the pack on or off (Windows: the
 Vulkan renderer, Linux's, has no pack yet).
 For *F.E.A.R. Files*, the same three steps over its own catalogue, with the PC expansions'
 archives first (`FEARXP2`, then `FEARXP`, then the base game's; Files is the Perseus Mandate

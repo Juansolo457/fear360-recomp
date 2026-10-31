@@ -1,5 +1,5 @@
-// F.E.A.R. 360 - PC Settings' Controls page: the keyboard and mouse (fear_mkb.h), with the
-// options PC F.E.A.R.'s Controls screens have.
+// F.E.A.R. 360 - Recompilation Settings' Controls page: the keyboard and mouse (fear_mkb.h), with
+// the options PC F.E.A.R.'s Controls screens have.
 //
 // The mouse: sensitivity (a slider, also dragged with the mouse), up and down speed, invert, and
 // smoothing. The keys: every action the keyboard drives, by the PC's groups (movement, weapons,

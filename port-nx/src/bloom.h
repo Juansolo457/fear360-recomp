@@ -11,7 +11,7 @@
 // It was the haze under lights (#38): a lit wall over the threshold spread a grey glow over the
 // dark sky beside it, weaker when bullet dust dimmed the wall, gone with the strength at 0. The
 // PC version has no bloom (no trace of it in the SDK's game code or in 1.08's GameClient.dll), so
-// it is off by default, matching the PC; PC Settings can turn the 360's back on.
+// it is off by default, matching the PC; Recompilation Settings can turn the 360's back on.
 //
 // FearBloomParams, at the point both have been read and before they go to the bloom material,
 // replaces them: fear_bloom_intensity (0 = off, the default; below 0 = the game's) and

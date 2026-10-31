@@ -1,4 +1,4 @@
-// F.E.A.R. 360 - the look and the input of the port's own panels: PC Settings, the quit
+// F.E.A.R. 360 - the look and the input of the port's own panels: Recompilation Settings, the quit
 // confirmation (fear_settings.h) and the collection menu (fear_collection.h).
 //
 // A panel is an ImGui dialog over the game, centered, in a large font (Bahnschrift from Windows),

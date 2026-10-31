@@ -1,5 +1,5 @@
-// F.E.A.R. 360 - the PC Settings panel and the quit confirmation, opened from the game's own main
-// menu (fear_menu.h).
+// F.E.A.R. 360 - the Recompilation Settings panel and the quit confirmation, opened from the game's
+// own main menu (fear_menu.h).
 //
 // The panel lists the port's own settings (resolution, window, frame-rate limit, texture
 // filtering, PC textures, right stick, aim assist, field of view, animation timing), each a cvar.
@@ -35,10 +35,10 @@ using Host = fear::panel::Host;
 void OpenSettings(const Host& host);
 void OpenQuit(const Host& host);
 
-// First start on Windows (#117), F.E.A.R.: while nothing says whether the keyboard and mouse or
-// a controller plays (fear_mkb unset in settings.toml and on the command line), asks, saves the
-// answer (PC Settings > Input) and then runs `then`; true if it asked. False otherwise: the
-// caller goes on at once.
+// First start on Windows (#117), F.E.A.R.: while nothing says whether the keyboard and mouse or a
+// controller plays (fear_mkb unset in settings.toml and on the command line), asks, saves the
+// answer (Recompilation Settings > Input) and then runs `then`; true if it asked. False otherwise:
+// the caller goes on at once.
 bool AskInput(const Host& host, std::function<void()> then);
 
 }  // namespace fear::settings

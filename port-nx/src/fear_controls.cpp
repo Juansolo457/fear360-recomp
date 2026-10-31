@@ -1,4 +1,4 @@
-// F.E.A.R. 360 - PC Settings' Controls page. See fear_controls.h.
+// F.E.A.R. 360 - Recompilation Settings' Controls page. See fear_controls.h.
 
 #include "fear_controls.h"
 
@@ -250,8 +250,11 @@ std::string Page::Note() const {
   }
   switch (selected_ - kMouseRows - actions) {
     case kResetButton: return "The PC's default keys and mouse settings.";
-    case kSaveButton: return "Saves all of PC Settings, these controls included, and closes.";
-    default: return "Back to PC Settings. Changes here are kept until you save or cancel there.";
+    case kSaveButton:
+      return "Saves all of Recompilation Settings, these controls included, and closes.";
+    default:
+      return "Back to Recompilation Settings. Changes here are kept until you save or cancel "
+             "there.";
   }
 }
 

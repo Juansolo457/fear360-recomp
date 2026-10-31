@@ -23,7 +23,7 @@ REXCVAR_DEFINE_STRING(fear_texture_pack, "", "F.E.A.R.",
                       "Folder of a replacement texture pack built by tools/texture_pack.py "
                       "(index.tsv + DDS files); empty = the 360's own textures")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-// PC Settings' on/off: the folder stays saved while the pack is off.
+// Recompilation Settings' on/off: the folder stays saved while the pack is off.
 REXCVAR_DEFINE_BOOL(fear_texture_pack_enabled, true, "F.E.A.R.",
                     "Use the texture pack in fear_texture_pack (off = the 360's own textures)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);

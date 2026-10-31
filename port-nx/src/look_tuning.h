@@ -44,10 +44,11 @@
 // FearHealthTestNotice skips that.
 //
 // fear_body_marks (#47, on by default) starts ModelDecalPerformanceLevel at 3, the PC's Maximum, so
-// bullet hits leave blood and armour marks on characters; the 360 starts it at 1, which allows none.
+// bullet hits leave blood and armour marks on characters; the 360 starts it at 1, which allows
+// none.
 //
-// More of EchoPatch's options (docs/ECHOPATCH-PUNCHLIST.md). Each is a PC Settings choice, off
-// (as shipped) by default:
+// More of EchoPatch's options (docs/ECHOPATCH-PUNCHLIST.md). Each is a Recompilation Settings
+// choice, off (as shipped) by default:
 //   fear_weapon_slots         Arsenal/Global/Global MaxWeaponCapacity (3)                  database
 //   fear_infinite_flashlight  Client/Flashlight/Player_Narrow MaxCharge 30 -> 0            database
 //   fear_intro_videos         Client/Shared/Shared SplashMovies: skipped ones made ""      database

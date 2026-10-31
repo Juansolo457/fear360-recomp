@@ -20,12 +20,12 @@
 //     are held are switched on. The game then raises the events and answers "is this command on"
 //     itself, exactly as for its own bindings. The mouse wheel turns its command on for one frame
 //     per notch.
-// The keys are the PC's defaults from that profile, each a setting (fear_key_*: key names,
-// comma separated, e.g. "W,Up"). The command numbers come from the game's tables (the 360
-// controller configurations' names at 0x830ABD40, the PC names and IDs registered in
-// sub_823F9910) and CInterfaceMgr::OnCommandOn's switch (sub_82364950: weapons 0x4C-0x4D, slots
-// from 0x5B). PC Settings' Controls page (fear_controls.h) rebinds them and sets the mouse's
-// speed, vertical speed, invert and smoothing, the options PC F.E.A.R.'s Controls screens have.
+// The keys are the PC's defaults from that profile, each a setting (fear_key_*: key names, comma
+// separated, e.g. "W,Up"). The command numbers come from the game's tables (the 360 controller
+// configurations' names at 0x830ABD40, the PC names and IDs registered in sub_823F9910) and
+// CInterfaceMgr::OnCommandOn's switch (sub_82364950: weapons 0x4C-0x4D, slots from 0x5B).
+// Recompilation Settings' Controls page (fear_controls.h) rebinds them and sets the mouse's speed,
+// vertical speed, invert and smoothing, the options PC F.E.A.R.'s Controls screens have.
 //
 // In the game's own menus, the keyboard is a pad instead: arrows and WASD the D-pad, Enter and
 // Space A, Escape and Backspace B, Q and E the shoulders, both as the pad's state (the PC's menu
@@ -35,12 +35,12 @@
 // (hidden, relative motion) only then, with the keyboard and mouse what plays, and while no panel
 // is open.
 //
-// One or the other plays (fear_mkb, PC Settings > Input, applied at once): with the keyboard and
-// mouse, the controllers are left out of play (Assign: the game's player gets only this device
-// then); with the controllers, the mouse isn't captured and the keys aren't commands. In the menus
-// both always work, so the setting can be reached with whatever is in hand. The Steam Deck build
-// starts with the controllers, since there a trackpad can send mouse movement. F.E.A.R. only for
-// now: F.E.A.R. Files has its own addresses.
+// One or the other plays (fear_mkb, Recompilation Settings > Input, applied at once): with the
+// keyboard and mouse, the controllers are left out of play (Assign: the game's player gets only
+// this device then); with the controllers, the mouse isn't captured and the keys aren't commands.
+// In the menus both always work, so the setting can be reached with whatever is in hand. The Steam
+// Deck build starts with the controllers, since there a trackpad can send mouse movement. F.E.A.R.
+// only for now: F.E.A.R. Files has its own addresses.
 
 #pragma once
 
@@ -77,11 +77,11 @@ bool Enabled();
 std::unique_ptr<rex::input::DeviceAssignment> Assign(
     std::unique_ptr<rex::input::DeviceAssignment> pads);
 
-// fear_mkb was set (PC Settings' Input row): logged, and with the controllers now what plays, the
-// mouse is let go.
+// fear_mkb was set (Recompilation Settings' Input row): logged, and with the controllers now what
+// plays, the mouse is let go.
 void ModeChanged();
 
-// For PC Settings' Controls page (fear_controls.h).
+// For Recompilation Settings' Controls page (fear_controls.h).
 
 // An action keys can be bound to, in the page's order.
 struct ActionInfo {

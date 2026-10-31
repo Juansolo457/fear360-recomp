@@ -62,7 +62,8 @@ class FearApp : public rex::ReXApp {
   }
 
  protected:
-  // PC Settings (fear_settings.h): saved in the user data folder, loaded below the command line.
+  // Recompilation Settings (fear_settings.h): saved in the user data folder, loaded below the
+  // command line.
   void OnConfigurePaths(rex::PathConfig& paths) override {
     fear::settings::Load(paths.user_data_root);
 #if defined(_WIN32)
@@ -182,7 +183,7 @@ class FearApp : public rex::ReXApp {
       });
     }
 
-    // PC Settings, Switch Game and Quit to Desktop in the main menu (fear_menu.h).
+    // Recompilation Settings, Switch Game and Quit to Desktop in the main menu (fear_menu.h).
     fear::menu::Actions actions;
     actions.settings = [this] { OpenPanel(&fear::settings::OpenSettings); };
     actions.quit = [this] { OpenPanel(&fear::settings::OpenQuit); };

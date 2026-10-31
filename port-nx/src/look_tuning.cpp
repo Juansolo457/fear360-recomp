@@ -69,6 +69,10 @@ REXCVAR_DEFINE_BOOL(fear_infinite_flashlight, false, "F.E.A.R.",
                     "The flashlight never runs down, and its battery bar goes (EchoPatch's infinite "
                     "flashlight, #20). F.E.A.R. only for now")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_john_wick, false, "F.E.A.R.",
+                    "John Wick mode (#61): infinite ammo, dual pistols from the start, 25% faster "
+                    "movement and a slow-mo meter that never runs out. F.E.A.R. only for now")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_STRING(fear_intro_videos, "all", "F.E.A.R.",
                       "Videos at startup: all (as shipped: ESRB, Sierra, Day 1, Monolith), "
                       "monolith (Monolith's logo only), none (#19). F.E.A.R. only for now")
@@ -153,7 +157,7 @@ std::vector<std::pair<std::string, float>> FovChanges() {
           {"CameraAttachedOffsetZ", GunOffset(fov)}};
 }
 
-// The rest of the PC Settings options that are console variables, in both games.
+// The rest of the Recompilation Settings options that are console variables, in both games.
 std::vector<std::pair<std::string, float>> OptionChanges() {
   std::vector<std::pair<std::string, float>> changes;
   // fear_bodies_stay (#22): the server fades the farthest bodies beyond BodyCapTotalCount (10 on
@@ -181,17 +185,22 @@ std::vector<std::pair<std::string, float>> OptionChanges() {
 
 // A change to every value of an attribute, in the records of a category ("*": all of them).
 struct DbChange {
-  enum class Kind { kFloat, kWord, kBlankStrings };
+  // kScale: a float times `number`. kReplaceWord: a value equal to `from` becomes `word`.
+  enum class Kind { kFloat, kWord, kBlankStrings, kScale, kReplaceWord };
   std::string category, record, attribute;
   Kind kind = Kind::kFloat;
-  float number = 0.0f;              // kFloat
-  uint32_t word = 0;                // kWord
+  float number = 0.0f;              // kFloat, kScale
+  uint32_t word = 0;                // kWord, kReplaceWord
   std::vector<std::string> blank;   // kBlankStrings: values containing one of these become ""
+  uint32_t from = 0;                // kReplaceWord
+  // Instead of category and record: every record whose "category/record" path starts with this.
+  std::string prefix;
+  int index = -1;  // only this value of the attribute (-1: every value)
   size_t applied = 0;
 };
 
-// The PC Settings options that are database values. F.E.A.R. only for now: F.E.A.R. Files keeps
-// its database inside uberCatalog.cat.
+// The Recompilation Settings options that are database values. F.E.A.R. only for now: F.E.A.R.
+// Files keeps its database inside uberCatalog.cat.
 std::vector<DbChange> DatabaseChanges() {
   std::vector<DbChange> changes;
   // fear_weapon_slots (#23): WeaponDB's GetMaxWeaponCapacity reads it, for the server and the
@@ -210,6 +219,42 @@ std::vector<DbChange> DatabaseChanges() {
   if (REXCVAR_GET(fear_infinite_flashlight)) {
     changes.push_back({.category = "Client/Flashlight", .record = "Player_Narrow",
                        .attribute = "MaxCharge", .kind = DbChange::Kind::kFloat, .number = 0.0f});
+  }
+  // fear_john_wick (#61), from the weapons' and slow-mo's own records:
+  //   - InfiniteAmmo on every weapon (the PC's flag, which the a2x4 already has): the reserve
+  //     never runs down; magazines still reload.
+  //   - MovementMultiplier, each weapon's pace (0.6 to 1), 25% higher.
+  //   - Arsenal/Global's AdditionalDefaultWeapons, which the player always gets (the Pistol, the
+  //     SMG and frag grenades: links to the weapon records, numbered as Arsenal/Loadout's lists
+  //     show), with Dual Pistols (record 8, the Pistol's own DualWeapon) for the Pistol (18).
+  //   - The slow-mo meter's records (Default, SlowMo): a period of 1e9 s and an instant recharge.
+  //     At 1e9 a frame's drain is below the float's precision, so the charge never moves. The HUD
+  //     bar (Interface/HUD/HUDSlowMo2) is as wide as the period times its first AdditionalFloat
+  //     (10 per second: 100 for the 10 s default), so that scale shrinks by the same factor.
+  if (REXCVAR_GET(fear_john_wick)) {
+    DbChange ammo{.attribute = "InfiniteAmmo", .kind = DbChange::Kind::kWord, .word = 1};
+    ammo.prefix = "Arsenal/Weapons/Default/";
+    changes.push_back(ammo);
+    DbChange pace{.attribute = "MovementMultiplier", .kind = DbChange::Kind::kScale,
+                  .number = 1.25f};
+    pace.prefix = "Arsenal/Weapons/Default/";
+    changes.push_back(pace);
+    DbChange dual{.category = "Arsenal/Global", .record = "Global",
+                  .attribute = "AdditionalDefaultWeapons", .kind = DbChange::Kind::kReplaceWord,
+                  .word = 0x290008};
+    dual.from = 0x290012;
+    changes.push_back(dual);
+    for (const char* record : {"Default", "SlowMo"}) {
+      changes.push_back({.category = "SlowMo", .record = record, .attribute = "Period",
+                         .kind = DbChange::Kind::kFloat, .number = 1.0e9f});
+      changes.push_back({.category = "SlowMo", .record = record, .attribute = "RechargeRate",
+                         .kind = DbChange::Kind::kFloat, .number = 1.0e10f});
+    }
+    DbChange bar{.category = "Interface/HUD", .record = "HUDSlowMo2",
+                 .attribute = "AdditionalFloat", .kind = DbChange::Kind::kScale,
+                 .number = 10.0f / 1.0e9f};
+    bar.index = 0;
+    changes.push_back(bar);
   }
   // fear_intro_videos (#19): the splash screen plays SplashMovies in turn and moves on from one
   // that doesn't open (CInterfaceMgr's next-movie loop, the same on the 360), so an empty name is
@@ -358,16 +403,27 @@ bool PatchAttributes(std::vector<uint8_t>& data, std::vector<DbChange>& changes)
           const uint32_t count = word();
           if (pos + size_t(count) * 4 > data.size()) return false;
           for (DbChange& change : changes) {
-            if (change.category != category ||
-                (change.record != "*" && change.record != record) ||
-                change.attribute != text(name)) {
-              continue;
-            }
+            const bool place = change.prefix.empty()
+                                   ? change.category == category &&
+                                         (change.record == "*" || change.record == record)
+                                   : (category + "/" + record).starts_with(change.prefix);
+            if (!place || change.attribute != text(name)) continue;
             for (uint32_t v = 0; v < count; ++v) {
+              if (change.index >= 0 && v != uint32_t(change.index)) continue;
               const size_t at = pos + size_t(v) * 4;
               if (change.kind == DbChange::Kind::kFloat && type == kTypeFloat) {
                 put(at, std::bit_cast<uint32_t>(change.number));
                 ++change.applied;
+              } else if (change.kind == DbChange::Kind::kScale && type == kTypeFloat) {
+                const float value = std::bit_cast<float>(ReadWord(data, at));
+                put(at, std::bit_cast<uint32_t>(value * change.number));
+                ++change.applied;
+              } else if (change.kind == DbChange::Kind::kReplaceWord && type != kTypeFloat &&
+                         type != kTypeString) {
+                if (ReadWord(data, at) == change.from) {
+                  put(at, change.word);
+                  ++change.applied;
+                }
               } else if (change.kind == DbChange::Kind::kWord && type != kTypeFloat &&
                          type != kTypeString) {
                 put(at, change.word);
@@ -442,9 +498,9 @@ void Apply(rex::Runtime& runtime) {
     REXLOG_INFO("F.E.A.R.: look tuning: stick edge boost '{}', soft lock {} (as the game sets "
                 "up its console variables)", ramp, softlock ? "on" : "off");
     if (!options.empty()) {
-      REXLOG_WARN("F.E.A.R.: PC Settings: weapon slots, infinite flashlight, intro videos and "
-                  "lasting glass change the game database, which F.E.A.R. Files keeps in its "
-                  "catalogue: not applied here yet");
+      REXLOG_WARN("F.E.A.R.: Recompilation Settings: weapon slots, infinite flashlight, intro "
+                  "videos and lasting glass change the game database, which F.E.A.R. Files keeps "
+                  "in its catalogue: not applied here yet");
     }
     return;
   }
@@ -462,17 +518,20 @@ void Apply(rex::Runtime& runtime) {
   }
   if (!options.empty()) {
     if (!PatchAttributes(data, options)) {
-      REXLOG_ERROR("F.E.A.R.: PC Settings: could not read {}; its options stay as shipped",
-                   source.string());
+      REXLOG_ERROR(
+          "F.E.A.R.: Recompilation Settings: could not read {}; its options stay as shipped",
+          source.string());
       return;
     }
     for (const DbChange& option : options) {
+      const std::string where = option.prefix.empty() ? option.category + "/" + option.record + "/"
+                                                      : option.prefix + "*/";
       if (option.applied) {
-        REXLOG_INFO("F.E.A.R.: PC Settings: {}/{}/{}: {} value(s) changed", option.category,
-                    option.record, option.attribute, option.applied);
+        REXLOG_INFO("F.E.A.R.: Recompilation Settings: {}{}: {} value(s) changed", where,
+                    option.attribute, option.applied);
       } else {
-        REXLOG_WARN("F.E.A.R.: PC Settings: {}/{}/{} not found in the database",
-                    option.category, option.record, option.attribute);
+        REXLOG_WARN("F.E.A.R.: Recompilation Settings: {}{} not found in the database", where,
+                    option.attribute);
       }
     }
   }

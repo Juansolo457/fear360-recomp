@@ -1,4 +1,4 @@
-// F.E.A.R. 360 - the PC Settings panel and the quit confirmation. See fear_settings.h.
+// F.E.A.R. 360 - the Recompilation Settings panel and the quit confirmation. See fear_settings.h.
 
 #include "fear_settings.h"
 
@@ -210,6 +210,12 @@ std::vector<Setting> BuildSettings() {
                         {{"3", "3 (as shipped)"}, {"4", "4"}, {"5", "5"}, {"10", "10 (every weapon)"}},
                         false,
                         "How many weapons you can carry at once."});
+    settings.push_back({"Enable John Wick mode",
+                        "fear_john_wick",
+                        {{"false", "False"}, {"true", "True"}},
+                        false,
+                        "Infinite ammo, dual pistols, 25% faster movement and a slow-mo meter "
+                        "that never runs out."});
     settings.push_back({"Flashlight",
                         "fear_infinite_flashlight",
                         {{"false", "Battery (as shipped)"}, {"true", "Never runs out"}},
@@ -342,7 +348,7 @@ bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& value
       REXLOG_ERROR("F.E.A.R. settings: can't write {}", temp.string());
       return false;
     }
-    out << "# F.E.A.R. PC Settings, written by the panel in the main menu.\n"
+    out << "# F.E.A.R. Recompilation Settings, written by the panel in the main menu.\n"
            "# Loaded at startup; a flag on the command line still wins for that run.\n";
     for (const std::string& line : kept) out << line << "\n";
     for (const auto& [name, value] : values) {
@@ -427,7 +433,7 @@ class SettingsPanel final : public HostPanel {
     if (input & kBack) Act(2);
 
     if (BeginPanel("##fear_settings", 30.0f)) {
-      ImGui::TextUnformatted("PC SETTINGS");
+      ImGui::TextUnformatted("RECOMPILATION SETTINGS");
       ImGui::SameLine();
       ImGui::TextDisabled("%s", fear::version::Text());
       ImGui::Separator();
@@ -626,8 +632,8 @@ class QuitPanel final : public HostPanel {
   bool closing_ = false;
 };
 
-// First start (#117): keyboard and mouse or a controller, saved as PC Settings' Input row
-// (fear_mkb), then `then` (the collection menu, or the game).
+// First start (#117): keyboard and mouse or a controller, saved as Recompilation Settings' Input
+// row (fear_mkb), then `then` (the collection menu, or the game).
 class InputPanel final : public HostPanel {
  public:
   InputPanel(const fear::settings::Host& host, std::function<void()> then)
@@ -645,7 +651,7 @@ class InputPanel final : public HostPanel {
       if (Row("Keyboard and mouse", 0, selected_)) Act(0);
       if (Row("Controller", 1, selected_)) Act(1);
       ImGui::Separator();
-      Dim("In the menus both work either way. PC Settings > Input changes it later.");
+      Dim("In the menus both work either way. Recompilation Settings > Input changes it later.");
     }
     EndPanel();
   }

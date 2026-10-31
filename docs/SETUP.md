@@ -101,7 +101,7 @@ once so it has focus. On Windows the games read controllers through XInput, so o
 (PlayStation, Switch) need Steam Input or another XInput wrapper, or the SDL setting under
 *When something goes wrong*.
 
-In each game's main menu, **PC Settings** sets the frame rate limit, anti-aliasing, texture
+In each game's main menu, **Recompilation Settings** sets the frame rate limit, anti-aliasing, texture
 filtering and sharpness, field of view, aim assist, right-stick feel, EchoPatch's options and
 more. Saves and settings stay in each
 game's `user` folder.

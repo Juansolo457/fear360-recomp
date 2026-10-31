@@ -1,5 +1,5 @@
-// F.E.A.R. 360 - Bonus Mission, PC Settings, Switch Game and Quit to Desktop in the main menu.
-// See fear_menu.h.
+// F.E.A.R. 360 - Bonus Mission, Recompilation Settings, Switch Game and Quit to Desktop in the main
+// menu. See fear_menu.h.
 
 #include "fear_menu.h"
 
@@ -131,8 +131,8 @@ struct Item {
 };
 constexpr Item kItems[] = {
     {u"Bonus Mission", kCommandBonus, nullptr, nullptr, kBonusText, kBonusHelp},
-    {u"PC Settings", kCommandSettings, "Fear360_Help_PCSettings",
-     u"Change the display, controls and gameplay options."},
+    {u"Recompilation Settings", kCommandSettings, "Fear360_Help_PCSettings",
+     u"Options the recompilation adds: display, controls and gameplay."},
     {u"Switch Game", kCommandSwitch, "Fear360_Help_SwitchGame",
      u"Play the other game in the collection."},
     {u"Quit to Desktop", kCommandQuit, "Fear360_Help_Quit", u"Quit the game."}};

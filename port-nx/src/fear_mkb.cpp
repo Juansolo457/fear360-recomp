@@ -42,9 +42,10 @@ inline constexpr bool kMkbDefault = false;  // the Steam Deck: a trackpad can se
 #endif
 
 REXCVAR_DEFINE_BOOL(fear_mkb, kMkbDefault, "F.E.A.R.",
-                    "What plays (#59, PC Settings > Input): true, the keyboard and mouse, PC style "
-                    "(mouse look and the PC's keys; controllers are left out of play); false, the "
-                    "controllers. In the menus the keyboard is a pad and the mouse points either way");
+                    "What plays (#59, Recompilation Settings > Input): true, the keyboard and "
+                    "mouse, PC style (mouse look and the PC's keys; controllers are left out of "
+                    "play); false, the controllers. In the menus the keyboard is a pad and the "
+                    "mouse points either way");
 REXCVAR_DEFINE_DOUBLE(fear_mouse_sensitivity, 1.0, "F.E.A.R.",
                       "Mouse look speed: 1 turns 0.022 degrees per mouse count, the usual PC "
                       "shooter default (at 800 dpi, 35 degrees an inch)");
@@ -210,17 +211,17 @@ std::vector<Action>& Table() {
       FEAR_MKB_ACTION(weapon_2, kWeapon1 + 1, "Weapon 2", kWeapons, nullptr),
       FEAR_MKB_ACTION(weapon_3, kWeapon1 + 2, "Weapon 3", kWeapons, nullptr),
       FEAR_MKB_ACTION(weapon_4, kWeapon1 + 3, "Weapon 4", kWeapons,
-                      "Slots past 3 need more weapon slots (PC Settings)."),
+                      "Slots past 3 need more weapon slots (Recompilation Settings)."),
       FEAR_MKB_ACTION(weapon_5, kWeapon1 + 4, "Weapon 5", kWeapons,
-                      "Slots past 3 need more weapon slots (PC Settings)."),
+                      "Slots past 3 need more weapon slots (Recompilation Settings)."),
       FEAR_MKB_ACTION(weapon_6, kWeapon1 + 5, "Weapon 6", kWeapons,
-                      "Slots past 5 need 10 weapon slots (PC Settings)."),
+                      "Slots past 5 need 10 weapon slots (Recompilation Settings)."),
       FEAR_MKB_ACTION(weapon_7, kWeapon1 + 6, "Weapon 7", kWeapons,
-                      "Slots past 5 need 10 weapon slots (PC Settings)."),
+                      "Slots past 5 need 10 weapon slots (Recompilation Settings)."),
       FEAR_MKB_ACTION(weapon_8, kWeapon1 + 7, "Weapon 8", kWeapons,
-                      "Slots past 5 need 10 weapon slots (PC Settings)."),
+                      "Slots past 5 need 10 weapon slots (Recompilation Settings)."),
       FEAR_MKB_ACTION(weapon_9, kWeapon1 + 8, "Weapon 9", kWeapons,
-                      "Slots past 5 need 10 weapon slots (PC Settings)."),
+                      "Slots past 5 need 10 weapon slots (Recompilation Settings)."),
       FEAR_MKB_ACTION(use, kActivate, "Use", kActions,
                       "Doors, switches; held, picks up a weapon. The 360's X, so it reloads too."),
       FEAR_MKB_ACTION(throw_grenade, kThrowGrenade, "Throw grenade", kActions, nullptr),
@@ -626,8 +627,8 @@ class Driver final : public rex::input::InputDriver,
     }
   }
 
-  // The controllers play now (PC Settings' Input row): the mouse is let go at once, since the
-  // game's polls no longer reach the capture's update.
+  // The controllers play now (Recompilation Settings' Input row): the mouse is let go at once,
+  // since the game's polls no longer reach the capture's update.
   void Release() { UpdateCapture(false); }
 
   // The mouse movement since the last call, in counts (guest thread).
@@ -908,11 +909,11 @@ bool InPlay() {
          recent(g_turn_ticks);
 }
 
-// Which devices the game reads, over the SDK's assignment of the controllers (one per player
-// slot, or every one to player 1 with fear_shared_controllers): in play with the keyboard and
-// mouse what plays (fear_mkb), only their device, so the controllers are left out; otherwise, in
-// the menus and with the controllers playing, everything, as before. Decided at each poll, so
-// PC Settings' Input row applies at once; the panels read the pads and the keys themselves.
+// Which devices the game reads, over the SDK's assignment of the controllers (one per player slot,
+// or every one to player 1 with fear_shared_controllers): in play with the keyboard and mouse what
+// plays (fear_mkb), only their device, so the controllers are left out; otherwise, in the menus and
+// with the controllers playing, everything, as before. Decided at each poll, so Recompilation
+// Settings' Input row applies at once; the panels read the pads and the keys themselves.
 class Assignment final : public rex::input::DeviceAssignment {
  public:
   explicit Assignment(std::unique_ptr<rex::input::DeviceAssignment> pads) : pads_(std::move(pads)) {}
