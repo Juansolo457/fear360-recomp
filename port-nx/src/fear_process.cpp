@@ -162,6 +162,9 @@ bool StartAfterThis(const std::filesystem::path& executable, std::vector<std::st
     REXLOG_ERROR("F.E.A.R.: couldn't start {} ({})", executable.string(), GetLastError());
     return false;
   }
+  // This run has the foreground and is about to close: the new one's window may take it, or
+  // Windows opens it behind the other windows once this one has gone, and the game looks closed.
+  AllowSetForegroundWindow(process.dwProcessId);
   CloseHandle(process.hThread);
   CloseHandle(process.hProcess);
   REXLOG_INFO("F.E.A.R.: started {}", executable.string());
