@@ -82,6 +82,11 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Files -or $Collection) { $Nx = $true }
 $given = $PSBoundParameters
+# Start-Process joins -ArgumentList with spaces: a value with a space (a texture pack in
+# "C:\Games\PC Textures") is quoted so the game gets it whole.
+function Quote-Arguments([string[]]$List) {
+    $List | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
+}
 $invariant = [System.Globalization.CultureInfo]::InvariantCulture
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
@@ -179,11 +184,11 @@ if ($Collection) {
     Set-Content -Path $file -Value $toml -Encoding utf8NoBOM
     $first = $runs[$(if ($Files) { 'files' } else { 'fear' })]
     $arguments = $first.Arguments + @('--fear_collection', $file)
-    $process = Start-Process -FilePath $first.Executable -WorkingDirectory $first.Port -ArgumentList $arguments -PassThru
+    $process = Start-Process -FilePath $first.Executable -WorkingDirectory $first.Port -ArgumentList (Quote-Arguments $arguments) -PassThru
     "collection $file; pid $($process.Id), log $($first.Log)"
     return
 }
 
 $run = Get-Run $(if ($Files) { 'files' } elseif ($Nx) { 'nx' } else { 'port' }) $TexturePack
-$process = Start-Process -FilePath $run.Executable -WorkingDirectory $run.Port -ArgumentList $run.Arguments -PassThru
+$process = Start-Process -FilePath $run.Executable -WorkingDirectory $run.Port -ArgumentList (Quote-Arguments $run.Arguments) -PassThru
 "pid $($process.Id), log $($run.Log)"

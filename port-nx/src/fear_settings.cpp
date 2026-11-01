@@ -564,7 +564,6 @@ class SettingsPanel final : public HostPanel {
     if (!live.empty() && host_.later) {
       host_.later([live] {
         for (const auto& [name, value] : live) rex::cvar::SetFlagByName(name, value);
-        fear::mkb::ModeChanged();  // the Input row's, when it changed (fear_mkb.h)
       });
     }
     return true;

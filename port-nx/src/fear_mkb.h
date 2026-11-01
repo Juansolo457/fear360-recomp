@@ -35,12 +35,12 @@
 // (hidden, relative motion) only then, with the keyboard and mouse what plays, and while no panel
 // is open.
 //
-// One or the other plays (fear_mkb, Recompilation Settings > Input, applied at once): with the
-// keyboard and mouse, the controllers are left out of play (Assign: the game's player gets only
-// this device then); with the controllers, the mouse isn't captured and the keys aren't commands.
-// In the menus both always work, so the setting can be reached with whatever is in hand. The Steam
-// Deck build starts with the controllers, since there a trackpad can send mouse movement. F.E.A.R.
-// only for now: F.E.A.R. Files has its own addresses.
+// One or the other plays (fear_mkb, Recompilation Settings > Input, which restarts the game):
+// with the keyboard and mouse, the controllers are left out of play (Assign: the game's player
+// gets only this device then); with the controllers, the mouse isn't captured and the keys aren't
+// commands. In the menus both always work, so the setting can be reached with whatever is in
+// hand. The Steam Deck build starts with the controllers, since there a trackpad can send mouse
+// movement. F.E.A.R. only for now: F.E.A.R. Files has its own addresses.
 
 #pragma once
 
@@ -76,10 +76,6 @@ bool Enabled();
 // `pads` gives. F.E.A.R. Files: `pads` as it is.
 std::unique_ptr<rex::input::DeviceAssignment> Assign(
     std::unique_ptr<rex::input::DeviceAssignment> pads);
-
-// fear_mkb was set (Recompilation Settings' Input row): logged, and with the controllers now what
-// plays, the mouse is let go.
-void ModeChanged();
 
 // For Recompilation Settings' Controls page (fear_controls.h).
 

@@ -409,7 +409,7 @@ double g_frame_yaw = 0.0, g_frame_pitch = 0.0;     // this turn update's mouse m
 
 constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x46454152);  // FEAR
 
-std::atomic<bool> g_plays{kMkbDefault};  // fear_mkb as last applied (Install, then ModeChanged)
+std::atomic<bool> g_plays{kMkbDefault};  // fear_mkb as Install applied it
 
 // The player is in control: the binding manager is enabled (it is in parts of the front end too,
 // the intro movies) and the player's turn update has run lately (only in a level). Below Driver.
@@ -918,8 +918,8 @@ bool InPlay() {
 // Which devices the game reads, over the SDK's assignment of the controllers (one per player slot,
 // or every one to player 1 with fear_shared_controllers): in play with the keyboard and mouse what
 // plays (fear_mkb), only their device, so the controllers are left out; otherwise, in the menus and
-// with the controllers playing, everything, as before. Decided at each poll, so Recompilation
-// Settings' Input row applies at once; the panels read the pads and the keys themselves.
+// with the controllers playing, everything, as before. Decided at each poll; the panels read the
+// pads and the keys themselves.
 class Assignment final : public rex::input::DeviceAssignment {
  public:
   explicit Assignment(std::unique_ptr<rex::input::DeviceAssignment> pads) : pads_(std::move(pads)) {}
@@ -961,13 +961,6 @@ std::unique_ptr<rex::input::DeviceAssignment> Assign(
     std::unique_ptr<rex::input::DeviceAssignment> pads) {
   if constexpr (fear::title::kFiles) return pads;  // no keyboard and mouse there yet
   return std::make_unique<Assignment>(std::move(pads));
-}
-
-void ModeChanged() {
-  const bool plays = REXCVAR_GET(fear_mkb);
-  if (g_plays.exchange(plays) == plays) return;
-  REXLOG_INFO("F.E.A.R. input: {} play now", plays ? "the keyboard and mouse" : "the controllers");
-  if (g_driver && !plays) g_driver->Release();
 }
 
 std::vector<ActionInfo> BindableActions() {

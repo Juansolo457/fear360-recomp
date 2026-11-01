@@ -10,9 +10,10 @@
 // applies. Window mode and animation timing apply at once; the rest on the next start. Saving
 // keeps the file's lines for settings the panel doesn't write.
 //
-// Its first row (F.E.A.R.) is Input: the keyboard and mouse or a controller in play, applied at
-// once. Then the Controls page (fear_controls.h): key bindings and the mouse's settings, saved
-// with the rest and applied at once.
+// Its first row (F.E.A.R.) is Input: the keyboard and mouse or a controller in play; saving a
+// change restarts the game, whose button prompts are chosen at startup. Then the Controls page
+// (fear_controls.h): key bindings and the mouse's settings, saved with the rest and applied at
+// once.
 //
 // The panels' look and input are fear_panel.h's; the restart is fear_process.h's.
 
