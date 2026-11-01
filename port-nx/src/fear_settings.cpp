@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -137,8 +138,7 @@ std::vector<Setting> BuildSettings() {
                       false,
                       "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
                       "sharpest setting can shimmer on fine patterns."});
-#if defined(_WIN32)
-  // The D3D12 renderer's texture pack (docs/TEXTURES.md; the Vulkan renderer has none yet).
+  // The texture pack (docs/TEXTURES.md), in both renderers.
   const std::string pack = CvarValue("fear_texture_pack");
   if (pack.empty()) {
     settings.push_back({"PC textures",
@@ -155,7 +155,6 @@ std::vector<Setting> BuildSettings() {
                         "The PC version's textures, from the pack built from your own copy: " +
                             pack});
   }
-#endif
   settings.push_back({"Right stick at its edge",
                       "fear_look_ramp",
                       {{"off", "No boost"},
@@ -683,6 +682,18 @@ class QuitPanel final : public HostPanel {
   bool closing_ = false;
 };
 
+// A Steam Deck: Steam sets SteamDeck=1 for its games, and the board is Valve's.
+bool OnSteamDeck() {
+#if defined(_WIN32)
+  return false;
+#else
+  if (const char* deck = std::getenv("SteamDeck"); deck && deck[0] == '1') return true;
+  std::ifstream vendor("/sys/devices/virtual/dmi/id/board_vendor");
+  std::string name;
+  return std::getline(vendor, name) && name.starts_with("Valve");
+#endif
+}
+
 // First start (#117): keyboard and mouse or a controller, saved as Recompilation Settings' Input
 // row (fear_mkb), then `then` (the collection menu, or the game).
 class InputPanel final : public HostPanel {
@@ -731,17 +742,14 @@ class InputPanel final : public HostPanel {
 namespace fear::settings {
 
 bool AskInput(const Host& host, std::function<void()> then) {
-#if defined(_WIN32)
   if (fear::title::kFiles || !host.drawer || fear::panel::AnyOpen()) return false;
+  // The Steam Deck starts with its controls, unasked (Recompilation Settings > Input still
+  // offers the keyboard and mouse); a Linux desktop is asked, as Windows is.
+  if (OnSteamDeck()) return false;
   // Asked once: until settings.toml (or the command line) says which.
   if (rex::cvar::GetFlagSource("fear_mkb") != rex::cvar::Source::kDefault) return false;
   new InputPanel(host, std::move(then));  // deletes itself when closed
   return true;
-#else
-  (void)host;
-  (void)then;
-  return false;  // Linux and the Steam Deck start with a controller
-#endif
 }
 
 void Load(const std::filesystem::path& user_data_root) {

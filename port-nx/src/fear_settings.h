@@ -35,8 +35,8 @@ using Host = fear::panel::Host;
 void OpenSettings(const Host& host);
 void OpenQuit(const Host& host);
 
-// First start on Windows (#117), F.E.A.R.: while nothing says whether the keyboard and mouse or a
-// controller plays (fear_mkb unset in settings.toml and on the command line), asks, saves the
+// First start (#117, #123), F.E.A.R., on Windows and a Linux desktop (not a Steam Deck): while
+// nothing says whether the keyboard and mouse or a controller plays (fear_mkb unset in settings.toml and on the command line), asks, saves the
 // answer (Recompilation Settings > Input) and then runs `then`; true if it asked. False otherwise:
 // the caller goes on at once.
 bool AskInput(const Host& host, std::function<void()> then);

@@ -99,7 +99,7 @@ class FearApp : public rex::ReXApp {
   // no runtime yet. Picking this program's game resumes here.
   std::optional<rex::PathConfig> OnFinalizePaths(
       const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) override {
-    // First start on Windows: keyboard and mouse or a controller (fear_settings.h), then on.
+    // First start (not on a Steam Deck): keyboard and mouse or a controller (fear_settings.h).
     if (fear::settings::AskInput(PanelHost(), [this, defaults, resume] {
           if (fear::collection::StartNow(PanelHost(), [defaults, resume] { resume(defaults); })) {
             resume(defaults);

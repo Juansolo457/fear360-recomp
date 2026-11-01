@@ -5,7 +5,9 @@
 // with views per signedness and swizzle as the SPIR-V translator's bindings want them (2D array,
 // cube, 3D). A texture whose base address is a resolve destination (vulkan_backend.cpp's images)
 // binds that image instead, when its format and size match.
-// Not yet: untiling on worker threads and upload lists ahead of the frame, the memory budget's
+// The texture pack (texture_pack.h) as textures.h has it: new 2D content with a replacement gets
+// an image of the replacement's size, format and mips, read from its DDS file in place of the
+// guest data. Not yet: untiling on worker threads and upload lists ahead of the frame, the memory budget's
 // eviction (textures unused for a while are dropped), capture order with the render thread.
 //
 // Threading: the recording thread, except Invalidate (any guest thread that writes a watched
@@ -24,6 +26,10 @@
 #include <vector>
 
 #include "texture_layout.h"
+
+namespace fear::texture_pack {
+struct Entry;
+}
 
 namespace rex::memory {
 class Memory;
@@ -46,7 +52,8 @@ using VulkanResolvedLookup = std::function<VulkanResolvedImage(uint32_t guest_ph
 struct VulkanTextureStats {
   uint64_t uploads = 0, upload_bytes = 0, created = 0, resolved_binds = 0;
   uint64_t unsupported = 0, failed = 0, resolved_mismatches = 0;
-  uint64_t with_mips = 0;  // created with more than one level
+  uint64_t with_mips = 0;     // created with more than one level
+  uint64_t pack_uploads = 0;  // texture pack replacements uploaded
 };
 
 // What a draw binds for one texture fetch constant.
@@ -93,6 +100,10 @@ class VulkanTextureCache {
     const HostFormat* host = nullptr;
     VkFormat format_unsigned = VK_FORMAT_UNDEFINED, format_signed = VK_FORMAT_UNDEFINED;
     VulkanMemory::Image image;
+    // The texture pack replacement the image holds (null: the guest's data), and the host
+    // channel order its views map the guest components from.
+    const fear::texture_pack::Entry* pack = nullptr;
+    uint32_t host_swizzle = 0;
     bool initialized = false;  // in SHADER_READ_ONLY_OPTIMAL (false: UNDEFINED)
     std::atomic<bool> dirty{true};
     // Views by (signed << 12 | host component swizzle).
@@ -106,6 +117,15 @@ class VulkanTextureCache {
   // Lists [start, start + length) of t in the watch buckets (watch_mutex_ held).
   void WatchRange(Texture* t, uint32_t start, uint32_t length);
   Texture* Create(const TextureKey& key, const HostFormat* host);
+  // (Re)creates t's image for the guest's data or a texture pack replacement; the old image and
+  // its views go once the GPU finished `frame`.
+  bool MakeImage(Texture& t, const fear::texture_pack::Entry* pack, uint64_t frame);
+  // The texture pack's replacement for t's current guest content (texture_pack.h), or null.
+  const fear::texture_pack::Entry* PackReplacement(const Texture& t, uint64_t* key);
+  bool UploadPack(Texture& t, VkCommandBuffer cmd, uint64_t frame);
+  // The copies from upload memory into every level of t's image, between layout transitions.
+  void RecordCopies(Texture& t, VkCommandBuffer cmd, VkBuffer buffer,
+                    const std::vector<VkBufferImageCopy>& regions);
   bool Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame);
   VkImageView View(Texture& t, bool is_signed, uint32_t swizzle);
 
@@ -144,11 +164,17 @@ class VulkanTextureCache {
     uint64_t fence;
   };
   std::vector<RetiredView> retired_views_;
+  struct RetiredImage {
+    VulkanMemory::Image image;
+    uint64_t fence;
+  };
+  std::vector<RetiredImage> retired_images_;  // swapped for or from a pack replacement
   VulkanUploadPool upload_{16u << 20, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
   std::vector<uint8_t> scratch_;
   std::vector<HostSubresource> subresources_;
   uint64_t unsupported_formats_logged_ = 0;  // bit per format
   uint32_t resolved_mismatches_logged_ = 0;
+  uint32_t keys_logged_ = 0;  // fear_texture_log_keys lines so far
   VulkanTextureStats stats_;
 };
 
