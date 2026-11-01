@@ -33,8 +33,8 @@ WINEDLLOVERRIDES="msvcp140,msvcp140_atomic_wait,vcruntime140,vcruntime140_1=n,b"
   4. Rename the entry (e.g. "F.E.A.R. Collection") and go back to Game Mode.
 
 It starts at the collection menu; pick a game. Switch Game in either game's main menu starts the
-other one. Settings are in each game's Recompilation Settings menu. The game draws at 1280x720
-(the D3D12 renderer has no render scale yet).
+other one. Settings are in each game's Recompilation Settings menu. This package draws at
+1280x720 (--resolution 720p); Recompilation Settings > Resolution offers up to 3840x2160 on a PC.
 
 Performance testing
   - The Deck's overlay: Quick Access (...) > Performance > Performance Overlay Level 3 or 4.

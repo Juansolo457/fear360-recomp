@@ -8,7 +8,8 @@ This package holds the game's program only. It contains no game data: you need y
 disc of F.E.A.R., and the game reads its files from it.
 
 What you need
-  - A Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU and a CPU with AVX2 and FMA
+  - A Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU and a CPU with AVX2 and FMA,
+    glibc 2.35 or newer and a libstdc++ with GLIBCXX_3.4.32 (GCC 13's; SteamOS has it)
   - Your own F.E.A.R. disc for Xbox 360, as a disc image (ISO). A PC drive can't read Xbox 360
     discs: https://github.com/Juansolo457/fear360-recomp/blob/master/docs/RIPPING.md
   - Python 3, to unpack the disc image (SteamOS has it)
@@ -35,8 +36,9 @@ Only this version of the disc is supported (default.xex SHA-256):
 
 PC textures and sharper text
   Recompilation Settings > PC textures uses the PC version's textures and redraws the game's text
-  sharply. They are built from your own copy of the PC game:
-  https://github.com/Juansolo457/fear360-recomp/blob/master/docs/TEXTURES.md
+  sharply. You build them from your own copy of the PC game with the builder in texture-pack/
+  (Python 3 with numpy and Pillow); the steps:
+  https://github.com/Juansolo457/fear360-recomp/blob/master/docs/TEXTURES.md#from-a-release-zip
 
 Launch options (Steam: Properties > Shortcut > LAUNCH OPTIONS):
   FEAR_FPS=60 %command%      this frame rate instead of Recompilation Settings'

@@ -12,8 +12,10 @@ works ([SETUP.md](SETUP.md)).
 
 ## New in 1.5
 
-**Windows.** The first Windows release: the Direct3D 12 renderer at your display's resolution, up
-to 4K, at up to 120 fps (Recompilation Settings > Resolution).
+**Windows.** The first Windows release: the Direct3D 12 renderer at 1280x720, 2560x1440 or
+3840x2160 (Recompilation Settings > Resolution; *Match display* picks the smallest at least as tall
+as your screen, so a 1080p screen gets 2560x1440, scaled down), at up to 120 fps. Linux and the
+Steam Deck draw at 1280x720.
 
 **Keyboard and mouse.** Play with the keyboard and mouse, PC style, or with a controller: the
 first start asks which (#115, #117, #118). Mouse look, the PC's default keys, separate left and
@@ -24,8 +26,9 @@ so its button prompts follow. On Linux the first start asks too, except on the S
 
 **PC textures and sharper text.** With your own copy of the PC game, a texture pack built on your
 PC swaps in the PC version's textures, and redraws the game's text from its own typefaces at four
-times the detail, so menus and the HUD stay crisp at 4K (#42; [TEXTURES.md](TEXTURES.md)). Both
-renderers use it: Windows and, new in 1.5, Linux and the Deck.
+times the detail, so menus and the HUD stay crisp at 4K (#42). Both renderers use it: Windows and,
+new in 1.5, Linux and the Deck. The release zips carry the pack builder: the steps are in
+[TEXTURES.md](TEXTURES.md#from-a-release-zip).
 
 **John Wick mode.** Recompilation Settings > John Wick mode: infinite ammo, dual pistols, faster
 movement and a SlowMo meter that never runs out (#61).
@@ -37,7 +40,9 @@ written the way the game's own options are.
 ## Requirements
 
 - **Windows:** Windows 10 or 11 64-bit, a CPU with AVX2, a Direct3D 12 GPU.
-- **Linux:** a Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU and a CPU with AVX2 and FMA.
+- **Linux:** a Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU, a CPU with AVX2 and FMA,
+  glibc 2.35 or newer and a libstdc++ with `GLIBCXX_3.4.32` (GCC 13's; Ubuntu 22.04 needs a newer
+  libstdc++6, SteamOS has it).
 - Your own F.E.A.R. disc (Xbox 360) as a disc image, and Python 3 to unpack it.
 
 ## Known issues

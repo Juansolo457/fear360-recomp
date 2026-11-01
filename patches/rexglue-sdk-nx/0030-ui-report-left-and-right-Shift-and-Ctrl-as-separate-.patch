@@ -1,4 +1,4 @@
-From 76e3c9589cf035fb22971fca2810790e6588154a Mon Sep 17 00:00:00 2001
+From 730975b42ce69ccc0e5d1468bdb30110f28cea16 Mon Sep 17 00:00:00 2001
 From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
 Date: Sat, 31 Oct 2026 15:38:52 -0700
 Subject: [PATCH] ui: report left and right Shift and Ctrl as separate keys
@@ -16,8 +16,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  include/rex/ui/imgui_drawer.h      |  3 +++
  src/input/mnk/mnk_input_driver.cpp | 18 ++++++++++++++++++
  src/ui/imgui_drawer.cpp            | 22 ++++++++++++++++++++--
+ src/ui/keybinds.cpp                |  9 ++++++++-
  src/ui/sdl_virtual_key.cpp         |  8 ++++++--
- 4 files changed, 47 insertions(+), 4 deletions(-)
+ 5 files changed, 55 insertions(+), 5 deletions(-)
 
 diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
 index a570fa0..ac8a63b 100644
@@ -116,6 +117,26 @@ index 25be1cd..6148c36 100644
        break;
      case VirtualKey::kMenu:
        // FIXME(Triang3l): Doesn't work in xenia-ui-window-demo.
+diff --git a/src/ui/keybinds.cpp b/src/ui/keybinds.cpp
+index 9822f3b..b0ba589 100644
+--- a/src/ui/keybinds.cpp
++++ b/src/ui/keybinds.cpp
+@@ -214,7 +214,14 @@ bool ProcessKeyEvent(KeyEvent& e) {
+     if (!entry.callback)
+       continue;
+     VirtualKey vk = ParseVirtualKey(entry.current_key);
+-    if (vk != VirtualKey::kNone && e.virtual_key() == vk) {
++    // Events name the side of Shift and Ctrl; a binding to the plain key takes either side.
++    VirtualKey key = e.virtual_key();
++    if (vk == VirtualKey::kShift && (key == VirtualKey::kLShift || key == VirtualKey::kRShift))
++      key = VirtualKey::kShift;
++    if (vk == VirtualKey::kControl &&
++        (key == VirtualKey::kLControl || key == VirtualKey::kRControl))
++      key = VirtualKey::kControl;
++    if (vk != VirtualKey::kNone && key == vk) {
+       entry.callback();
+       e.set_handled(true);
+       return true;
 diff --git a/src/ui/sdl_virtual_key.cpp b/src/ui/sdl_virtual_key.cpp
 index 3a152b8..1867614 100644
 --- a/src/ui/sdl_virtual_key.cpp

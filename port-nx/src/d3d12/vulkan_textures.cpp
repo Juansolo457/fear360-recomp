@@ -334,12 +334,14 @@ void VulkanTextureCache::RecordCopies(Texture& t, VkCommandBuffer cmd, VkBuffer 
   t.initialized = true;
 }
 
-bool VulkanTextureCache::UploadPack(Texture& t, VkCommandBuffer cmd, uint64_t frame) {
+VulkanTextureCache::PackUpload VulkanTextureCache::UploadPack(Texture& t, VkCommandBuffer cmd,
+                                                              uint64_t frame) {
   // The DDS mips, tight, level after level, each copied to an offset Vulkan takes (a multiple
   // of the block size and of 4).
   const fear::texture_pack::Entry& e = *t.pack;
   scratch_.resize(size_t(e.data_size));
-  if (!fear::texture_pack::ReadData(e, scratch_.data(), scratch_.size())) return false;
+  if (!fear::texture_pack::ReadData(e, scratch_.data(), scratch_.size()))
+    return PackUpload::kUnreadable;
   struct Level {
     uint64_t src, dst, bytes;
     uint32_t width, height;
@@ -356,7 +358,7 @@ bool VulkanTextureCache::UploadPack(Texture& t, VkCommandBuffer cmd, uint64_t fr
     total += bytes;
   }
   VulkanUploadPool::Alloc a;
-  if (!upload_.Allocate(total, 16, frame, &a)) return false;
+  if (!upload_.Allocate(total, 16, frame, &a)) return PackUpload::kRetry;
   std::vector<VkBufferImageCopy> regions;
   regions.reserve(levels.size());
   for (uint32_t level = 0; level < levels.size(); ++level) {
@@ -372,7 +374,7 @@ bool VulkanTextureCache::UploadPack(Texture& t, VkCommandBuffer cmd, uint64_t fr
   ++stats_.uploads;
   ++stats_.pack_uploads;
   stats_.upload_bytes += total;
-  return true;
+  return PackUpload::kOk;
 }
 
 bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame) {
@@ -407,7 +409,13 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
     }
   }
   if (pack) {
-    if (UploadPack(t, cmd, frame)) return true;
+    const PackUpload result = UploadPack(t, cmd, frame);
+    if (result == PackUpload::kOk) return true;
+    if (result == PackUpload::kRetry) {
+      // No upload memory this frame: still dirty, so a later Get tries again.
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
     // Unreadable: the 360's texture from now on.
     fear::texture_pack::MarkBad(pack_key);
     if (!MakeImage(t, nullptr, frame)) {

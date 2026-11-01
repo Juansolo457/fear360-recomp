@@ -46,7 +46,25 @@ python -I tools/texture_pack.py build   private/files/texwork "<PC F.E.A.R. inst
 pwsh -NoProfile -File tools/launch.ps1 -Files -TexturePack private/files/texture_pack
 ```
 
-About 6 minutes and 1.3 GB. `report.tsv` in the pack says what happened to every 360 texture;
+### From a release zip
+The release zips carry the builder: `texture-pack/` (its scripts) and `fear/fear_texindex`. You
+need Python 3 with numpy and Pillow (`python -m pip install numpy pillow`) and your own PC copy of
+F.E.A.R. (its install folder, with `FEAR.Arch00`). In the zip's top folder, after your disc is in
+`fear/assets`:
+```
+python -I texture-pack/texture_pack.py bundle fear/assets/Game/uberCatalog.cat texwork
+fear/fear_texindex texwork/x360.bundle texwork/x360.tsv texwork/x360_base.bin
+python -I texture-pack/texture_pack.py build texwork "<PC F.E.A.R. install>" fear/texture_pack
+```
+(On Windows, `fear\fear_texindex.exe` and backslashes; on Linux, `python3`.) Then add this line to
+`fear/user/settings.toml` (create the file if it isn't there yet) and start the game:
+```
+fear_texture_pack = "texture_pack"
+```
+Recompilation Settings > PC textures then turns the pack on or off. The `texwork` folder can be
+deleted afterwards.
+
+Either way, about 6 minutes and 1.3 GB. `report.tsv` in the pack says what happened to every 360 texture;
 `compare <work> <run.log> --pack <pack>` breaks down a run logged with
 `--fear_texture_log_keys true`.
 

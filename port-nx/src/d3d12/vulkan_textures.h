@@ -122,7 +122,9 @@ class VulkanTextureCache {
   bool MakeImage(Texture& t, const fear::texture_pack::Entry* pack, uint64_t frame);
   // The texture pack's replacement for t's current guest content (texture_pack.h), or null.
   const fear::texture_pack::Entry* PackReplacement(const Texture& t, uint64_t* key);
-  bool UploadPack(Texture& t, VkCommandBuffer cmd, uint64_t frame);
+  // kUnreadable: the replacement's file can't be read (for good); kRetry: no upload memory now.
+  enum class PackUpload { kOk, kUnreadable, kRetry };
+  PackUpload UploadPack(Texture& t, VkCommandBuffer cmd, uint64_t frame);
   // The copies from upload memory into every level of t's image, between layout transitions.
   void RecordCopies(Texture& t, VkCommandBuffer cmd, VkBuffer buffer,
                     const std::vector<VkBufferImageCopy>& regions);

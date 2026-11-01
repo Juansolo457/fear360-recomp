@@ -31,8 +31,9 @@ Only this version of the disc is supported (default.xex SHA-256):
 
 PC textures and sharper text
   Recompilation Settings > PC textures uses the PC version's textures and redraws the game's text
-  sharply. They are built on your PC from your own copy of the PC game:
-  https://github.com/Juansolo457/fear360-recomp/blob/master/docs/TEXTURES.md
+  sharply. You build them from your own copy of the PC game with the builder in texture-pack/
+  (Python 3 with numpy and Pillow); the steps:
+  https://github.com/Juansolo457/fear360-recomp/blob/master/docs/TEXTURES.md#from-a-release-zip
 
 The first start builds shaders as they first appear (brief hitches the first time an area or
 effect is seen); they are kept in fear\cache, so later starts are smooth.

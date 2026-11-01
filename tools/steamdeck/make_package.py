@@ -280,7 +280,8 @@ def main_release():
     system = 'Linux' if LINUX else 'Windows'
     out = ARGV[0] if ARGV else os.path.join(REPO, 'private', 'release',
                                             f'FEAR360-Recompiled-{number}-{system}.zip')
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if os.path.dirname(out):  # a bare file name goes in the current folder
+        os.makedirs(os.path.dirname(out), exist_ok=True)
     top = 'FEAR360'
     files = []  # (source path or None, path in the zip, text or None, executable)
     if LINUX:
@@ -307,6 +308,14 @@ def main_release():
                       encoding='utf-8').read()
         files.append((None, 'README.txt', readme.replace('\n', '\r\n'), False))
     files.append((os.path.join(REPO, 'tools', 'xdvdfs.py'), 'xdvdfs.py', None, False))
+    # The texture pack builder (docs/TEXTURES.md, "From a release zip"): its scripts and the
+    # offline indexer, built with the game.
+    for script in ('texture_pack.py', 'font_atlas.py'):
+        files.append((os.path.join(REPO, 'tools', script), f'texture-pack/{script}', None, False))
+    indexer = 'fear_texindex' if LINUX else 'fear_texindex.exe'
+    if not os.path.exists(os.path.join(build, indexer)):
+        raise SystemExit(f'{build}/{indexer} is missing: build the game first')
+    files.append((os.path.join(build, indexer), f'fear/{indexer}', None, LINUX))
     files.append((None, 'fear/assets/PUT YOUR DISC HERE.txt', RELEASE_ASSETS_NOTE, False))
     version = build_version(os.path.join(build, 'fear_version', 'fear_version_info.h'))
     files.append((None, 'VERSION.txt', f'F.E.A.R. 360 Recompiled {version} ({system})\n', False))
