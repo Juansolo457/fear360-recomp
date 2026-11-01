@@ -47,6 +47,10 @@ written the way the game's own options are.
 
 ## Known issues
 
+- Holiday (Bonus Mission): after a death, the game once stayed on a near-empty screen instead of
+  reloading. Seen once; it didn't happen again in three deaths on Extreme, slow-mo included.
+- No save anywhere: the game saves at its checkpoints only, as the Xbox 360 version did.
+- The right stick can stop responding when the game saves a checkpoint.
 - On a GTX 1650 laptop, holding 30 fps needs the Xbox 360's settings (no MSAA, 1280x720).
 - Interval 03's biggest water fight can dip into the 50s for a second or two on the Deck (#103).
 - Docked at 120 Hz, the Deck's TV output dropped out twice (#89). 60 Hz works.
