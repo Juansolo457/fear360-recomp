@@ -6,7 +6,6 @@
 # script writes. 1.0 is F.E.A.R. alone: the menu lists F.E.A.R. Files as coming later.
 #   FEAR_FPS=60       the frame rate for this start (default: Recompilation Settings' Frame rate
 #                     limit, 120 until changed there); a timer at twice it paces the game
-#   FEAR_GOD=1        the player can't die (fear_invulnerable: the smoke test, #55)
 # Development, with a fearfiles/ folder (make_package.py --linux --files):
 #   FEAR_FILES=1      list F.E.A.R. Files as a game to play; Switch Game goes between the two
 #   FEAR_START=files  skip the menu and start F.E.A.R. Files (fear: F.E.A.R.)
@@ -26,7 +25,6 @@ info="$here/fear/logs/system-$stamp.txt"
 args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user
       --cache_root cache --no-vulkan_allow_present_mode_immediate)
 [ -n "$fps" ] && args+=(--fear_frame_rate_limit "$fps")
-[ "$FEAR_GOD" = 1 ] && args+=(--fear_invulnerable true)
 # (Mailbox presentation, as the Proton package: frames beyond the screen's refresh are dropped,
 # no tearing. ReXGlue's presenter takes immediate first when it may.)
 # An unzip that dropped the executable bits.

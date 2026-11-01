@@ -6,8 +6,9 @@ after. The Build column says which build each row was played on: `0.9.0 cc266c5`
 candidate, the same game code as 1.0 (1.0 changes only the collection menu and the package). One
 row per level; file each failure as its own issue and put its number in Notes.
 
-**How to run it on the Deck (1.0):** `FEAR_GOD=1 ./fear-linux.sh` in the install's folder (or that
-variable in the Steam shortcut's launch options), otherwise the default settings. The player can't
+**How to run it on the Deck (1.0):** `./fear-linux.sh --fear_invulnerable true` in the install's
+folder (1.0's `FEAR_GOD=1` is gone since 1.5: releases don't offer it), otherwise the default
+settings. The player can't
 die: where a hit would have killed, health refills and play carries on, with no death effect (the
 PC's test variable `HealthTest`). The log confirms it with `console variable HealthTest = 1` once a
 level has loaded.
