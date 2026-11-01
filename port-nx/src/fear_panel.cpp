@@ -263,15 +263,18 @@ void PushFont(float scale) { ImGui::PushFont(g_font, FontSize() * scale); }
 
 void PopFont() { ImGui::PopFont(); }
 
-bool BeginPanel(const char* id, float width_em) {
+bool BeginPanel(const char* id, float width_em, float font_scale) {
   const ImGuiIO& io = ImGui::GetIO();
-  const float size = FontSize();
-  PushFont();
+  const float size = FontSize() * font_scale;
+  PushFont(font_scale);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(size * 1.0f, size * 0.8f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(size * 0.4f, size * 0.15f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.05f, 0.94f));
+  // Opaque, over a darkened screen: the menu behind doesn't show through.
+  ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize,
+                                                IM_COL32(0, 0, 0, 190));
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.05f, 1.0f));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.55f, 0.55f, 0.58f, 0.6f));
   ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.62f, 0.10f, 0.08f, 0.85f));
   ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.62f, 0.10f, 0.08f, 0.85f));
@@ -300,11 +303,15 @@ void Dim(const char* text) {
   ImGui::PopStyleColor();
 }
 
-bool Row(const char* label, int index, int& selected) {
+bool Row(const char* label, int index, int& selected, float width) {
   ImGui::PushID(index);
-  const bool clicked = ImGui::Selectable(label, selected == index,
-                                         ImGuiSelectableFlags_SpanAllColumns |
-                                             ImGuiSelectableFlags_AllowOverlap);
+  const bool clicked =
+      width > 0.0f
+          ? ImGui::Selectable(label, selected == index, ImGuiSelectableFlags_None,
+                              ImVec2(width, 0.0f))
+          : ImGui::Selectable(label, selected == index,
+                              ImGuiSelectableFlags_SpanAllColumns |
+                                  ImGuiSelectableFlags_AllowOverlap);
   const ImGuiIO& io = ImGui::GetIO();
   if (ImGui::IsItemHovered() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
     selected = index;
@@ -352,7 +359,17 @@ bool GameGetsInput() {
   if (AnyOpen()) return false;
   if (!g_wait_release) return true;
   const PadState pad = ReadPads();
-  if (pad.buttons || pad.triggers || PanelKeysHeld()) return false;
+  const bool keys = PanelKeysHeld();
+  // What the game waits for, logged as it changes (a button that never reads as let go would keep
+  // the game from its input for good).
+  static std::atomic<uint32_t> logged{0};
+  const uint32_t held = pad.buttons | (pad.triggers ? 0x10000u : 0u) | (keys ? 0x20000u : 0u);
+  if (held && logged.exchange(held) != held) {
+    REXLOG_INFO("F.E.A.R. panels: the game waits for buttons {:#06x}{}{} to be let go", pad.buttons,
+                pad.triggers ? ", a trigger" : "", keys ? ", a panel key" : "");
+  }
+  if (held) return false;
+  logged = 0;
   g_wait_release = false;
   return true;
 }

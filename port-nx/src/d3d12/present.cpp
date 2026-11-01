@@ -158,10 +158,12 @@ struct Extent {
 };
 
 // The texels a resolve wrote from (0, 0) (0: the whole texture), within its texture, which can
-// be larger than the image.
-Extent ImageExtent(const ResolvedImage& image, const D3D12_RESOURCE_DESC& desc) {
+// be larger than the image. scale: the texture's (ResolvedImage::texture_scaled: its scale).
+Extent ImageExtent(const ResolvedImage& image, const D3D12_RESOURCE_DESC& desc,
+                   uint32_t scale = 1) {
   const uint32_t w = uint32_t(desc.Width), h = desc.Height;
-  return {std::min(image.width ? image.width : w, w), std::min(image.height ? image.height : h, h)};
+  return {std::min(image.width ? image.width * scale : w, w),
+          std::min(image.height ? image.height * scale : h, h)};
 }
 
 // A completed front buffer copy as RGB rows.
@@ -471,15 +473,21 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
   front_buffer_found = found;
   const bool rgb10a2 = format == xenos::TextureFormat::k_2_10_10_10;
   const bool hdr = d.hdr();
-  ID3D12Resource* const linear = found && hdr ? image->linear : nullptr;
+  // The front buffer at the draw resolution, when the renderer draws above 1x
+  // (ResolvedImage::texture_scaled).
+  const bool scaled = found && image->texture_scaled;
+  ID3D12Resource* const front =
+      !found ? nullptr : scaled ? image->texture_scaled : image->texture;
+  ID3D12Resource* const linear =
+      !found || !hdr ? nullptr : scaled ? image->linear_scaled : image->linear;
 
   uint32_t mapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
   D3D12_RESOURCE_DESC desc = {};
   Extent extent;
   if (found) {
     mapping = GuestToHostComponentMapping((fetch[3] >> 1) & 0xFFF, host->host_swizzle);
-    desc = image->texture->GetDesc();
-    extent = ImageExtent(*image, desc);
+    desc = front->GetDesc();
+    extent = ImageExtent(*image, desc, scaled ? image->scale : 1);
   }
   // The output image is the front buffer's size, so the blit below copies it 1:1 (the presenter
   // scales it to the window); without a front buffer it keeps its size, 1280x720 at first.
@@ -507,7 +515,7 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
       cpu.ptr += size_t(slot) * heap_stride;
       D3D12_GPU_DESCRIPTOR_HANDLE gpu = heap->GetGPUDescriptorHandleForHeapStart();
       gpu.ptr += uint64_t(slot) * heap_stride;
-      device->CreateShaderResourceView(linear ? linear : image->texture, &sd, cpu);
+      device->CreateShaderResourceView(linear ? linear : front, &sd, cpu);
       ID3D12DescriptorHeap* heaps[] = {heap.Get()};
       list->SetDescriptorHeaps(1, heaps);
       list->SetGraphicsRootSignature(root_signature.Get());
@@ -560,8 +568,8 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
     std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
     list->ResourceBarrier(1, &b);
     if (found && REXCVAR_GET(fear_d3d12_luma_probe))
-      probe.Record(device, list, d.frame_slot(), image->texture, extent.width, extent.height,
-                   mapping, rgb10a2, r.frame_index());
+      probe.Record(device, list, d.frame_slot(), front, extent.width, extent.height, mapping,
+                   rgb10a2, r.frame_index());
   }
 
   // A request arms the capture of the next shown frame. With the Xenos copy, that frame's
@@ -587,8 +595,11 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
                   r.frame_index());
       return;
     }
+    // The guest-sized image, the size of the Xenos copy the capture tools compare it with.
+    const D3D12_RESOURCE_DESC guest_desc = image->texture->GetDesc();
+    const Extent guest_extent = ImageExtent(*image, guest_desc);
     UINT64 total = 0;
-    device->GetCopyableFootprints(&desc, 0, 1, 0, &c.footprint, nullptr, nullptr, &total);
+    device->GetCopyableFootprints(&guest_desc, 0, 1, 0, &c.footprint, nullptr, nullptr, &total);
     if (!CreateBuffer(device, D3D12_HEAP_TYPE_READBACK, total, D3D12_RESOURCE_STATE_COPY_DEST,
                       "capture readback", &c.readback)) {
       ReleaseCapture();
@@ -607,8 +618,8 @@ void Presenter::Impl::OnSwap(const SwapCall& swap, bool shown) {
     c.fence = r.frame_fence();
     std::memcpy(c.fetch, fetch, sizeof(fetch));
     c.base = fetch[1] & 0xFFFFF000u;
-    c.width = extent.width;
-    c.height = extent.height;
+    c.width = guest_extent.width;
+    c.height = guest_extent.height;
     c.mapping = mapping;
     c.rgb10a2 = rgb10a2;
   }

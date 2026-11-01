@@ -5,9 +5,9 @@
 // for the release itself (a source download), "0.1.5 af9770c" built from the tag, "0.1.5+3
 // 121a788" three commits later, "... modified" with uncommitted changes.
 //
-// It shows in the window title, at the top of the collection menu and PC Settings, in the first
-// line of each log, and in a corner badge over the game. fear_version_badge picks when the badge
-// shows: "launch" (the first 30 seconds), "always" or "off".
+// It shows in the window title, at the top of the collection menu and Recompilation Settings, in
+// the first line of each log, and in a corner badge over the game. fear_version_badge picks when
+// the badge shows: "launch" (the first 30 seconds), "always" or "off".
 
 #pragma once
 

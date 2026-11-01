@@ -39,8 +39,11 @@ namespace xenos = rex::graphics::xenos;
 namespace texture_util = rex::graphics::texture_util;
 
 constexpr uint32_t kViewsPerResolve = 4;  // t0 color/depth, t1 stencil, u0 texel bits, u1 floats
-constexpr uint32_t kHeapPerFrame = 128 * kViewsPerResolve;  // descriptors per frame slot
-constexpr uint32_t kHeapSlots = 4;                          // > frames in flight
+// Resolves a frame slot of the view heap holds at first. A frame with more grows the heap (Copy):
+// Interval 03's water fights copy the screen before each refracting piece, 350 or more a frame.
+constexpr uint32_t kFirstResolvesPerFrame = 128;
+constexpr uint32_t kMaxResolvesPerFrame = 16384;  // 256K descriptors in all; more are skipped
+constexpr uint32_t kHeapSlots = 4;                // > frames in flight
 static_assert(kHeapSlots > D3D12Device::kFramesInFlight);
 constexpr D3D12_RESOURCE_STATES kImageReadState = D3D12_RESOURCE_STATE_COPY_SOURCE |
                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
@@ -134,7 +137,8 @@ cbuffer Params : register(b0) {
                         // 15: also the converted color into dst_float
   int cb_exp_bias;
   uint cb_dest_layout;  // DestLayout of dst
-  uint pad;
+  uint src_step;        // source pixels per destination texel: 1, or the guest-sized copy of a
+                        // resolution-scaled target, its scale (src_origin then in the middle)
 };
 // A specialized variant has the parameters of one kind of resolve compiled in, so the compiler
 // drops the paths and conversions it does not take; the generic shader reads them above.
@@ -317,7 +321,7 @@ uint4 Unpack(uint4 v) {
 void main(uint3 id : SV_DispatchThreadID) {
   if (id.x >= size.x || id.y >= size.y) return;
   float4 floats;
-  uint4 v = PackPixel(src_origin + int2(id.xy), floats);
+  uint4 v = PackPixel(src_origin + int2(id.xy) * (int)src_step, floats);
   uint2 p = dest_origin + id.xy;
 #if DEPTH
   dst[p] = Unpack(v);
@@ -339,7 +343,7 @@ struct ShaderConstants {
   uint32_t dest_origin[2];
   uint32_t dest_format, src_format, flags;  // flags: kShader's cb_flags
   int32_t exp_bias;
-  uint32_t dest_layout, pad;
+  uint32_t dest_layout, src_step;
 };
 static_assert(sizeof(ShaderConstants) == 48);
 
@@ -369,6 +373,8 @@ struct PipelineSpec {
 
 struct Resolver::Image {
   ComPtr<ID3D12Resource> texture, depth_r32f, linear;
+  // Above 1x draw resolution: the same at the scale (ResolvedImage::texture_scaled).
+  ComPtr<ID3D12Resource> texture_scaled, depth_r32f_scaled, linear_scaled;
   const DestStorage* storage = nullptr;
   uint32_t width = 0, height = 0;
   D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;  // of all its resources
@@ -491,13 +497,8 @@ Resolver::~Resolver() = default;
 bool Resolver::Initialize(ID3D12Device* device, RenderTargets* targets, ID3D12CommandQueue* queue) {
   device_ = device;
   targets_ = targets;
-  D3D12_DESCRIPTOR_HEAP_DESC hd = {};
-  hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-  hd.NumDescriptors = kHeapPerFrame * kHeapSlots;
-  hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-  if (Failed(device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap_)),
-             "resolve CreateDescriptorHeap"))
-    return false;
+  views_per_resolve_ = kViewsPerResolve * (targets->scale() > 1 ? 2 : 1);
+  if (!CreateHeap(kFirstResolvesPerFrame)) return false;
   heap_stride_ = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
   D3D12_FEATURE_DATA_FORMAT_SUPPORT fs = {DXGI_FORMAT_B5G6R5_UNORM};
   b5g6r5_store_ =
@@ -601,15 +602,38 @@ Resolver::Image* Resolver::GetImage(const ResolveParams& p, Destination** dest_o
                "resolve depth_r32f texture"))
       return nullptr;
   }
+  const uint32_t scale = targets_->scale();
+  if (scale > 1) {
+    d.Width = uint64_t(p.dest_width) * scale;
+    d.Height = p.dest_height * scale;
+    d.Format = storage.resource;
+    if (Failed(device_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d,
+                                                D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                                IID_PPV_ARGS(&img->texture_scaled)),
+               "resolve destination texture (scaled)"))
+      return nullptr;
+    if (depth) {
+      d.Format = DXGI_FORMAT_R32_FLOAT;
+      if (Failed(device_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d,
+                                                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                                  IID_PPV_ARGS(&img->depth_r32f_scaled)),
+                 "resolve depth_r32f texture (scaled)"))
+        return nullptr;
+    }
+  }
   img->view.guest_base = p.dest_base;
   img->view.format = xenos::TextureFormat(p.dest_format);
   img->view.texture = img->texture.Get();
   img->view.depth_r32f = img->depth_r32f.Get();
+  img->view.texture_scaled = img->texture_scaled.Get();
+  img->view.depth_r32f_scaled = img->depth_r32f_scaled.Get();
+  img->view.scale = scale;
   // Creation stalls the frame-recording thread (the render thread by default); every one is
   // logged so frame-time spikes can be matched against it.
-  REXLOG_INFO("D3D12 resolve: image {} at {:08X}: format {} {}x{}{} ({} at this address)",
+  REXLOG_INFO("D3D12 resolve: image {} at {:08X}: format {} {}x{}{}{} ({} at this address)",
               ++image_count_, p.dest_base, p.dest_format, p.dest_width, p.dest_height,
-              depth ? " + depth float" : "", dest.images.size() + 1);
+              depth ? " + depth float" : "", scale > 1 ? " + scaled" : "",
+              dest.images.size() + 1);
   return dest.images.emplace_back(std::move(img)).get();
 }
 
@@ -619,10 +643,32 @@ const ResolvedImage* Resolver::Find(uint32_t guest_phys_base) const {
   return &it->second.current->view;
 }
 
+bool Resolver::CreateHeap(uint32_t resolves_per_frame) {
+  D3D12_DESCRIPTOR_HEAP_DESC hd = {};
+  hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+  hd.NumDescriptors = resolves_per_frame * views_per_resolve_ * kHeapSlots;
+  hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+  ComPtr<ID3D12DescriptorHeap> heap;
+  if (Failed(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap)),
+             "resolve CreateDescriptorHeap"))
+    return false;
+  // The lists in flight, this frame's earlier dispatches too, read the old heap's views when the
+  // GPU runs them: it's kept until they're done.
+  if (heap_) retired_heaps_.push_back({std::move(heap_), frame_fence_});
+  heap_ = std::move(heap);
+  heap_per_frame_ = resolves_per_frame * views_per_resolve_;
+  heap_next_ = 0;
+  return true;
+}
+
 void Resolver::BeginFrame(uint64_t frame, uint64_t frame_fence, uint64_t completed_fence) {
   frame_ = frame;
   frame_fence_ = frame_fence;
   heap_next_ = 0;
+  retired_heaps_.erase(
+      std::remove_if(retired_heaps_.begin(), retired_heaps_.end(),
+                     [&](const RetiredHeap& r) { return r.fence <= completed_fence; }),
+      retired_heaps_.end());
   if (dump_) DumpBeginFrame(completed_fence);
 }
 
@@ -685,36 +731,52 @@ bool Resolver::Copy(ID3D12GraphicsCommandList* list, const ResolveParams& p, Ren
     return false;
   }
 
+  // The draw resolution scale: the target holds `scale` host pixels per guest pixel each way,
+  // and the image has a scaled copy beside it (ResolvedImage::texture_scaled).
+  const uint32_t scale = targets_->scale();
+
   // A float target resolved into k_2_10_10_10 (PGR4's front buffer) loses everything above 1;
   // for HDR output the linear image keeps the converted color.
   const bool linear = linear_output_ && !depth &&
                       p.dest_format == uint32_t(xenos::TextureFormat::k_2_10_10_10) &&
                       IsFloatTarget(rt->guest_format);
   if (linear && !img->linear) {
-    D3D12_RESOURCE_DESC d = img->texture->GetDesc();
-    d.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     D3D12_HEAP_PROPERTIES hp = {};
     hp.Type = D3D12_HEAP_TYPE_DEFAULT;
-    if (Failed(device_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d, img->state, nullptr,
-                                                IID_PPV_ARGS(&img->linear)),
-               "resolve linear texture"))
+    auto make = [&](ID3D12Resource* like, ComPtr<ID3D12Resource>& out, const char* what) {
+      D3D12_RESOURCE_DESC d = like->GetDesc();
+      d.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+      return !Failed(device_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d, img->state,
+                                                      nullptr, IID_PPV_ARGS(&out)),
+                     what);
+    };
+    if (!make(img->texture.Get(), img->linear, "resolve linear texture") ||
+        (img->texture_scaled &&
+         !make(img->texture_scaled.Get(), img->linear_scaled, "resolve linear texture (scaled)")))
       return false;
     REXLOG_INFO("D3D12 resolve: linear image at {:08X} {}x{}", p.dest_base, img->width,
                 img->height);
   }
-  // The image's second resource, in the same state as its texture.
+  // Each copy's second resource, in the same state as its texture.
   ID3D12Resource* const extra = img->depth_r32f ? img->depth_r32f.Get() : img->linear.Get();
+  ID3D12Resource* const extra_scaled =
+      img->depth_r32f_scaled ? img->depth_r32f_scaled.Get() : img->linear_scaled.Get();
 
-  // Descriptors: t0 = color / depth plane, t1 = stencil plane, u0 = the image's UINT view,
-  // u1 = its float view (B5G6R5), the depth float image or the linear image; null where unused.
-  if (heap_next_ + kViewsPerResolve > kHeapPerFrame) {
-    // The frame's earlier dispatches read their descriptors when the GPU runs them.
-    D3D12_LOG_FIRST(4, WARN, "D3D12 resolve: more than {} resolves in a frame; skipped",
-                   kHeapPerFrame / kViewsPerResolve);
-    return false;
+  if (heap_next_ + views_per_resolve_ > heap_per_frame_) {
+    // The frame's earlier dispatches read their descriptors when the GPU runs them, so a full
+    // slot isn't reused: a heap twice the size takes over. A skipped resolve can be the frame's
+    // last copy to the front buffer, which froze the screen in Interval 03's water fights.
+    const uint32_t resolves = heap_per_frame_ / views_per_resolve_;
+    if (resolves >= kMaxResolvesPerFrame || !CreateHeap(resolves * 2)) {
+      D3D12_LOG_FIRST(4, WARN, "D3D12 resolve: more than {} resolves in a frame; skipped",
+                     resolves);
+      return false;
+    }
+    REXLOG_INFO("D3D12 resolve: more than {} resolves in a frame; room for {} now", resolves,
+                resolves * 2);
   }
-  const uint32_t slot = uint32_t(frame_ % kHeapSlots) * kHeapPerFrame + heap_next_;
-  heap_next_ += kViewsPerResolve;
+  const uint32_t slot = uint32_t(frame_ % kHeapSlots) * heap_per_frame_ + heap_next_;
+  heap_next_ += views_per_resolve_;
   D3D12_CPU_DESCRIPTOR_HANDLE cpu = heap_->GetCPUDescriptorHandleForHeapStart();
   cpu.ptr += size_t(slot) * heap_stride_;
   auto view = [&](uint32_t i) {
@@ -722,41 +784,53 @@ bool Resolver::Copy(ID3D12GraphicsCommandList* list, const ResolveParams& p, Ren
   };
   D3D12_GPU_DESCRIPTOR_HANDLE gpu = heap_->GetGPUDescriptorHandleForHeapStart();
   gpu.ptr += uint64_t(slot) * heap_stride_;
-  D3D12_SHADER_RESOURCE_VIEW_DESC sd = {};
-  sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  sd.ViewDimension =
-      rt->samples > 1 ? D3D12_SRV_DIMENSION_TEXTURE2DMS : D3D12_SRV_DIMENSION_TEXTURE2D;
-  if (rt->samples == 1) sd.Texture2D.MipLevels = 1;
-  sd.Format = rt->srv_format;
-  device_->CreateShaderResourceView(rt->resource.Get(), &sd, view(0));
-  if (depth) {
-    sd.Format = rt->stencil_srv_format;
-    if (rt->samples == 1) sd.Texture2D.PlaneSlice = 1;
-    device_->CreateShaderResourceView(rt->resource.Get(), &sd, view(1));
-  } else {
-    D3D12_SHADER_RESOURCE_VIEW_DESC nd = {};
-    nd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    nd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    nd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    nd.Texture2D.MipLevels = 1;
-    device_->CreateShaderResourceView(nullptr, &nd, view(1));
-  }
+  // One table per copy (kViewsPerResolve): t0 = color / depth plane, t1 = stencil plane, u0 = the
+  // image's UINT view, u1 = its float view (B5G6R5), the depth float image or the linear image;
+  // null where unused. Above 1x the scaled copy's table follows, with the same sources.
   const bool float_texels = storage->layout == kB5G6R5Unorm;
-  D3D12_UNORDERED_ACCESS_VIEW_DESC ud = {};
-  ud.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-  ud.Format = float_texels ? DXGI_FORMAT_R32_UINT : storage->uav;
-  device_->CreateUnorderedAccessView(float_texels ? nullptr : img->texture.Get(), nullptr, &ud,
-                                     view(2));
-  ud.Format = float_texels ? storage->uav
-              : linear     ? DXGI_FORMAT_R16G16B16A16_FLOAT
-                           : DXGI_FORMAT_R32_FLOAT;
-  device_->CreateUnorderedAccessView(float_texels ? img->texture.Get()
-                                     : linear     ? img->linear.Get()
-                                                  : img->depth_r32f.Get(),
-                                     nullptr, &ud, view(3));
+  auto write_table = [&](uint32_t first, ID3D12Resource* texture, ID3D12Resource* linear_image,
+                         ID3D12Resource* depth_float) {
+    D3D12_SHADER_RESOURCE_VIEW_DESC sd = {};
+    sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    sd.ViewDimension =
+        rt->samples > 1 ? D3D12_SRV_DIMENSION_TEXTURE2DMS : D3D12_SRV_DIMENSION_TEXTURE2D;
+    if (rt->samples == 1) sd.Texture2D.MipLevels = 1;
+    sd.Format = rt->srv_format;
+    device_->CreateShaderResourceView(rt->resource.Get(), &sd, view(first));
+    if (depth) {
+      sd.Format = rt->stencil_srv_format;
+      if (rt->samples == 1) sd.Texture2D.PlaneSlice = 1;
+      device_->CreateShaderResourceView(rt->resource.Get(), &sd, view(first + 1));
+    } else {
+      D3D12_SHADER_RESOURCE_VIEW_DESC nd = {};
+      nd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+      nd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      nd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      nd.Texture2D.MipLevels = 1;
+      device_->CreateShaderResourceView(nullptr, &nd, view(first + 1));
+    }
+    D3D12_UNORDERED_ACCESS_VIEW_DESC ud = {};
+    ud.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    ud.Format = float_texels ? DXGI_FORMAT_R32_UINT : storage->uav;
+    device_->CreateUnorderedAccessView(float_texels ? nullptr : texture, nullptr, &ud,
+                                       view(first + 2));
+    ud.Format = float_texels ? storage->uav
+                : linear     ? DXGI_FORMAT_R16G16B16A16_FLOAT
+                             : DXGI_FORMAT_R32_FLOAT;
+    device_->CreateUnorderedAccessView(float_texels ? texture
+                                       : linear     ? linear_image
+                                                    : depth_float,
+                                       nullptr, &ud, view(first + 3));
+  };
+  write_table(0, img->texture.Get(), img->linear.Get(), img->depth_r32f.Get());
+  if (scale > 1)
+    write_table(kViewsPerResolve, img->texture_scaled.Get(), img->linear_scaled.Get(),
+                img->depth_r32f_scaled.Get());
 
   // Source readable by the compute shader, the image(s) writable: one barrier batch.
-  D3D12_RESOURCE_BARRIER bs[3];
+  ID3D12Resource* const written[4] = {img->texture.Get(), extra, img->texture_scaled.Get(),
+                                      extra_scaled};
+  D3D12_RESOURCE_BARRIER bs[5];
   uint32_t nb = 0;
   constexpr D3D12_RESOURCE_STATES kSourceState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   if (rt->state != kSourceState) {
@@ -764,15 +838,15 @@ bool Resolver::Copy(ID3D12GraphicsCommandList* list, const ResolveParams& p, Ren
     rt->state = kSourceState;
   }
   if (img->state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
-    bs[nb++] =
-        TransitionBarrier(img->texture.Get(), img->state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    if (extra)
-      bs[nb++] = TransitionBarrier(extra, img->state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    for (ID3D12Resource* r : written)
+      if (r) bs[nb++] = TransitionBarrier(r, img->state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
   if (nb) list->ResourceBarrier(nb, bs);
+  // The guest-sized copy: above 1x, one host pixel from the middle of each guest pixel's block.
   ShaderConstants c = {};
-  c.src_origin[0] = src.left;
-  c.src_origin[1] = src.top;
+  c.src_origin[0] = src.left * int32_t(scale) + int32_t(scale / 2);
+  c.src_origin[1] = src.top * int32_t(scale) + int32_t(scale / 2);
+  c.src_step = scale;
   c.size[0] = w;
   c.size[1] = h;
   c.dest_origin[0] = uint32_t(dx);
@@ -791,16 +865,31 @@ bool Resolver::Copy(ID3D12GraphicsCommandList* list, const ResolveParams& p, Ren
   list->SetComputeRootDescriptorTable(1, gpu);
   if (timer_) timer_->Pass(list, GpuTimer::KeyResolve(p, GpuTimer::kResolveCopy));
   list->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
+  if (scale > 1) {
+    // The scaled copy, pixel for pixel (the same pipeline: only the rectangles differ).
+    ShaderConstants cs = c;
+    cs.src_origin[0] = src.left * int32_t(scale);
+    cs.src_origin[1] = src.top * int32_t(scale);
+    cs.src_step = 1;
+    cs.size[0] = w * scale;
+    cs.size[1] = h * scale;
+    cs.dest_origin[0] = uint32_t(dx) * scale;
+    cs.dest_origin[1] = uint32_t(dy) * scale;
+    list->SetComputeRoot32BitConstants(0, sizeof(cs) / 4, &cs, 0);
+    D3D12_GPU_DESCRIPTOR_HANDLE scaled_table = gpu;
+    scaled_table.ptr += uint64_t(kViewsPerResolve) * heap_stride_;
+    list->SetComputeRootDescriptorTable(1, scaled_table);
+    list->Dispatch((w * scale + 7) / 8, (h * scale + 7) / 8, 1);
+  }
 
   if (timer_) timer_->Pass(list, GpuTimer::KeyResolve(p, GpuTimer::kResolveRelease));
   nb = 0;
-  bs[nb++] =
-      TransitionBarrier(img->texture.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, kImageReadState);
-  if (extra)
-    bs[nb++] = TransitionBarrier(extra, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, kImageReadState);
+  for (ID3D12Resource* r : written)
+    if (r) bs[nb++] = TransitionBarrier(r, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, kImageReadState);
   list->ResourceBarrier(nb, bs);
   img->state = kImageReadState;
   img->view.linear = linear ? img->linear.Get() : nullptr;
+  img->view.linear_scaled = linear ? img->linear_scaled.Get() : nullptr;
   img->view.width = std::max(img->view.width, uint32_t(dx) + w);
   img->view.height = std::max(img->view.height, uint32_t(dy) + h);
   img->view.seq = ++seq_;

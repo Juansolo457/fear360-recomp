@@ -1,13 +1,16 @@
-// F.E.A.R. 360 - the PC Settings panel and the quit confirmation. See fear_settings.h.
+// F.E.A.R. 360 - the Recompilation Settings panel and the quit confirmation. See fear_settings.h.
 
 #include "fear_settings.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +23,8 @@
 #include <rex/ui/imgui_drawer.h>
 
 #include "display_vblank.h"
+#include "fear_controls.h"
+#include "fear_mkb.h"
 #include "fear_panel.h"
 #include "fear_process.h"
 #include "fear_title.h"
@@ -79,156 +84,196 @@ std::string FrameRateLabel(double limit) {
 
 std::vector<Setting> BuildSettings() {
   std::vector<Setting> settings;
-  settings.push_back({"Display",
+  if (!fear::title::kFiles) {
+    // What plays (fear_mkb.h); the menus and the panels take both devices either way.
+    settings.push_back({"Input",
+                        "fear_mkb",
+                        {{"true", "Keyboard and mouse"}, {"false", "Controller"}},
+                        false,
+                        "Set the controls used in the game. Both work in the menus. Changing "
+                        "this restarts the game."});
+  }
+  settings.push_back({"Display mode",
                       "fullscreen",
-                      {{"true", "Fullscreen"}, {"false", "Window"}},
+                      {{"true", "Fullscreen"}, {"false", "Windowed"}},
                       true,
-                      "Alt+Enter switches too."});
-  settings.push_back({"Frame rate",
+                      "Set fullscreen or windowed display. Alt+Enter also switches."});
+#if defined(_WIN32)
+  // The D3D12 renderer's (the Vulkan renderer, Linux's, draws at the 360's 1280x720).
+  settings.push_back({"Resolution",
+                      "fear_d3d12_resolution_scale",
+                      {{"0", "Match display"},
+                       {"1", "1280x720 (Xbox 360)"},
+                       {"2", "2560x1440"},
+                       {"3", "3840x2160"}},
+                      false,
+                      "Set the resolution the game is drawn at. Lower values can increase "
+                      "performance."});
+#endif
+  settings.push_back({"Frame rate limit",
                       "fear_frame_rate_limit",
-                      {{"30", FrameRateLabel(30) + " (the 360's)"},
+                      {{"30", FrameRateLabel(30) + " (Xbox 360)"},
                        {"60", FrameRateLabel(60)},
                        {"90", FrameRateLabel(90)},
                        {"120", FrameRateLabel(120)}},
                       false,
-                      "Each frame is shown for a whole number of your display's refreshes, the "
-                      "fewest that keep it at or under the limit."});
+                      "Set the maximum frame rate. Frames are paced to the display's refresh "
+                      "rate."});
   settings.push_back({"Anti-aliasing",
                       "fear_d3d12_msaa",
-                      {{"true", "The game's MSAA (as shipped)"}, {"false", "Off"}},
+                      {{"true", "On"}, {"false", "Off"}},
                       false,
-                      "The game's own 2x or 4x multisampling. Off costs the GPU much less: the "
-                      "Steam Deck runs faster without it."});
-  settings.push_back({"Texture filtering",
+                      "Toggle full screen anti-aliasing. Turning it off can increase "
+                      "performance, most of all on the Steam Deck."});
+  settings.push_back({"Anisotropic filtering",
                       "fear_d3d12_anisotropy",
                       {{"1", "Off"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}},
                       false,
-                      "Anisotropic filtering: sharper floors and walls at an angle."});
+                      "Set the level of anisotropic filtering. Higher values sharpen textures "
+                      "seen at an angle."});
   settings.push_back({"Texture sharpness",
                       "fear_mip_bias",
-                      {{"0", "As shipped"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
+                      {{"0", "Normal"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
                       false,
-                      "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
-                      "sharpest setting can shimmer on fine patterns."});
-  settings.push_back({"Right stick at its edge",
+                      "Set the sharpness of distant textures. Sharpest can shimmer on fine "
+                      "patterns."});
+  // The texture pack (docs/TEXTURES.md), in both renderers.
+  const std::string pack = CvarValue("fear_texture_pack");
+  if (pack.empty()) {
+    settings.push_back({"PC textures",
+                        "fear_texture_pack_enabled",
+                        {{"true", "Not installed"}},
+                        false,
+                        "Use the PC version's textures and sharper text. Build them from your own "
+                        "copy of the PC game with tools/texture_pack.py."});
+  } else {
+    settings.push_back({"PC textures",
+                        "fear_texture_pack_enabled",
+                        {{"true", "On"}, {"false", "Off"}},
+                        false,
+                        "Toggle the PC version's textures and sharper text, built from your own "
+                        "copy: " +
+                            pack});
+  }
+  settings.push_back({"Look acceleration",
                       "fear_look_ramp",
-                      {{"off", "No boost"},
-                       {"console", "As on the 360"},
-                       {"nodelay", "Boost at once, ramping"},
-                       {"instant", "Full boost at once"}},
+                      {{"off", "Off"},
+                       {"console", "Xbox 360"},
+                       {"nodelay", "Immediate"},
+                       {"instant", "Full speed"}},
                       false,
-                      "On the 360, holding the stick at its edge speeds turning up after 0.3 s, "
-                      "ramping to 360 degrees a second; no boost keeps turning in step with the "
-                      "stick."});
+                      "Set how turning speeds up with the right stick held at its edge. Off "
+                      "keeps turning in step with the stick."});
   settings.push_back({"Aim assist",
                       "fear_aim_softlock",
                       {{"true", "On"}, {"false", "Off"}},
                       false,
-                      "Turning slows when your aim crosses an enemy (the 360's soft lock)."});
+                      "Toggle aim assist. Turning slows when your aim crosses an enemy."});
   settings.push_back({"Field of view",
                       "fear_fov",
                       {{"65", "65"},
-                       {"70", "70 (the 360's and the PC's)"},
+                       {"70", "70 (default)"},
                        {"75", "75"},
                        {"80", "80"},
                        {"85", "85"},
                        {"90", "90"},
-                       {"95", "95"}},
+                       {"95", "95"},
+                       {"100", "100"}},
                       false,
-                      "Vertical, in degrees. Above 70 the gun moves forward to keep its place on "
-                      "screen, as EchoPatch does on PC."});
+                      "Set the vertical field of view. Above 70 the weapon moves forward to "
+                      "stay in view."});
   settings.push_back({"Bloom",
                       "fear_bloom_intensity",
-                      {{"0", "Off (the PC's)"}, {"-1", "On (the 360's)"}},
+                      {{"0", "Off (PC)"}, {"-1", "On (Xbox 360)"}},
                       false,
-                      "The 360 version adds a screen bloom the PC version doesn't have. Near "
-                      "bright lights it spreads a grey haze over the scene."});
+                      "Toggle the Xbox 360 version's bloom. Bright lights spread a haze over the "
+                      "scene."});
   settings.push_back({"Enemy AI",
                       "fear_ai",
-                      {{"sharp", "Sharp"}, {"pc", "As on PC"}, {"360", "As on 360"}},
+                      {{"sharp", "Sharp"}, {"pc", "PC"}, {"360", "Xbox 360"}},
                       false,
-                      "Sharp: enemies fight like Very Hard's at every difficulty (aim, grenades, "
-                      "dodging); how hard they hit still follows the difficulty. As on PC: the "
-                      "PC's difficulties. As on 360: its easier Normal."});
-  settings.push_back({"Blood and armour marks",
+                      "Set enemy tactics. Sharp uses Very Hard tactics at every difficulty; "
+                      "damage still follows the difficulty."});
+  settings.push_back({"Blood and armor marks",
                       "fear_body_marks",
-                      {{"true", "On (as on PC)"}, {"false", "Off (as on 360)"}},
+                      {{"true", "On (PC)"}, {"false", "Off (Xbox 360)"}},
                       false,
-                      "Bullet hits leave blood and armour marks on enemies. The 360 version "
-                      "starts with them off."});
+                      "Toggle blood and armor marks from bullet hits on enemies."});
   // The database options (look_tuning.h): F.E.A.R. only until F.E.A.R. Files' database, inside its
   // catalogue, can be changed too.
   if (!fear::title::kFiles) {
     settings.push_back({"Weapon slots",
                         "fear_weapon_slots",
-                        {{"3", "3 (as shipped)"}, {"4", "4"}, {"5", "5"}, {"10", "10 (every weapon)"}},
+                        {{"3", "3 (default)"}, {"4", "4"}, {"5", "5"}, {"10", "10 (all weapons)"}},
                         false,
-                        "How many weapons you can carry at once."});
-    settings.push_back({"Flashlight",
+                        "Set the maximum number of weapons you may carry."});
+    settings.push_back({"John Wick mode",
+                        "fear_john_wick",
+                        {{"false", "Off"}, {"true", "On"}},
+                        false,
+                        "Toggle infinite ammo, dual pistols, faster movement and a SlowMo meter "
+                        "that never runs out."});
+    settings.push_back({"Flashlight battery",
                         "fear_infinite_flashlight",
-                        {{"false", "Battery (as shipped)"}, {"true", "Never runs out"}},
+                        {{"false", "Normal"}, {"true", "Unlimited"}},
                         false,
-                        "Never runs out also removes the battery bar from the HUD."});
+                        "Set the flashlight's battery life. Unlimited also hides the battery "
+                        "meter."});
     settings.push_back({"Intro videos",
                         "fear_intro_videos",
-                        {{"all", "All (as shipped)"},
-                         {"monolith", "Monolith logo only"},
-                         {"none", "Skip"}},
+                        {{"all", "All"}, {"monolith", "Monolith only"}, {"none", "Skip"}},
                         false,
-                        "The rating card and the Sierra, Day 1 and Monolith logos at startup."});
+                        "Set which logo videos play at startup."});
   }
-  settings.push_back({"Cutscene black bars",
+  settings.push_back({"Letterbox",
                       "fear_letterbox",
-                      {{"true", "On (as shipped)"}, {"false", "Off"}},
+                      {{"true", "On"}, {"false", "Off"}},
                       false,
-                      "The letterbox bars at the top and bottom of the screen in cutscenes."});
+                      "Toggle the black bars at the top and bottom of the screen during "
+                      "cutscenes."});
   settings.push_back({"Model detail",
                       "fear_full_detail_models",
-                      {{"false", "As shipped"}, {"true", "Full at any distance"}},
+                      {{"false", "Normal"}, {"true", "Maximum"}},
                       false,
-                      "Full: characters and objects keep their most detailed models far away, "
-                      "like EchoPatch's no model LOD bias. Costs some GPU."});
+                      "Set the detail of distant characters and objects. Lower values can "
+                      "increase performance."});
   settings.push_back({"Bodies and debris",
                       "fear_bodies_stay",
-                      {{"false", "Fade (as shipped)"}, {"true", "Stay"}},
+                      {{"false", "Fade"}, {"true", "Stay"}},
                       false,
                       fear::title::kFiles
-                          ? "Stay: bodies no longer fade away once there are more than 10, and "
-                            "bullet holes, blood splats, debris and shell casings stay."
-                          : "Stay: bodies no longer fade away once there are more than 10, and "
-                            "bullet holes, blood splats, debris, shell casings and broken glass "
-                            "stay. A long fight leaves a lot behind."});
+                          ? "Toggle whether bodies, bullet holes, blood, debris and shell "
+                            "casings stay instead of fading away."
+                          : "Toggle whether bodies, bullet holes, blood, debris, shell casings "
+                            "and broken glass stay instead of fading away."});
   settings.push_back({"Interval select",
                       "fear_all_intervals",
-                      {{"false", "Reached (as shipped)"}, {"true", "Every interval"}},
+                      {{"false", "Reached"}, {"true", "All intervals"}},
                       true,
-                      "Campaign > Interval: every interval, not just the ones this profile has "
-                      "reached (the 360 version's own unlock)."});
+                      "Set which intervals can be chosen from Campaign > Interval."});
   settings.push_back({"Checkpoint saves",
                       "fear_fast_checkpoints",
-                      {{"true", "Fast"}, {"false", "As shipped"}},
+                      {{"true", "Fast"}, {"false", "Normal"}},
                       false,
-                      "Fast skips the video memory clean-up the game does at each checkpoint, as "
-                      "EchoPatch's faster saves do on PC."});
+                      "Set checkpoint save speed. Fast skips the video memory cleanup at each "
+                      "checkpoint."});
   settings.push_back({"High frame rate fixes",
                       "fear_high_fps_fixes",
-                      {{"true", "On (EchoPatch's)"}, {"false", "Off (as shipped)"}},
+                      {{"true", "On"}, {"false", "Off"}},
                       true,
-                      "Above 30 fps the game slides on slopes, misses jump kicks, loses speed on "
-                      "landing and leaving water, and its water and slow-mo meter misbehave. On "
-                      "fixes them as EchoPatch does on PC."});
-  settings.push_back({"Version badge",
+                      "Toggle fixes for play above 30 fps: sliding on slopes, jump kicks, "
+                      "landing speed, water and the SlowMo meter."});
+  settings.push_back({"Version display",
                       "fear_version_badge",
-                      {{"launch", "At launch"}, {"always", "Always"}, {"off", "Off"}},
+                      {{"launch", "At startup"}, {"always", "Always"}, {"off", "Off"}},
                       false,
-                      "This build's version in the bottom right corner: for the first 30 seconds, "
-                      "all the time (for test runs and recordings), or never."});
+                      "Set when the build version is shown in the corner of the screen."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
-                      {{"true", "Exact"}, {"false", "As shipped"}},
+                      {{"true", "Exact"}, {"false", "Normal"}},
                       true,
-                      "The engine drops a fraction of a millisecond from every animation step; "
-                      "exact keeps it, so effects play at the right speed at any frame rate."});
+                      "Set animation timing. Exact keeps effects at the right speed at any "
+                      "frame rate."});
 
   // A value set some other way (a launcher flag, the settings file) that no option has.
   for (Setting& setting : settings) {
@@ -257,22 +302,66 @@ std::string TomlString(const std::string& text) {
   return out + "\"";
 }
 
+// The setting a settings.toml line sets ("name = value"), or empty.
+std::string SettingName(std::string_view line) {
+  while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+  size_t end = 0;
+  while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_')) {
+    ++end;
+  }
+  std::string_view rest = line.substr(end);
+  while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) rest.remove_prefix(1);
+  return end && !rest.empty() && rest.front() == '=' ? std::string(line.substr(0, end)) : std::string();
+}
+
+// Writes these settings, keeping the file's lines for any others (the Controls page's while it
+// wasn't opened, a line added by hand).
 bool WriteSettings(const std::vector<std::pair<std::string, std::string>>& values) {
+  std::vector<std::string> kept;
+  {
+    std::ifstream in(g_path);
+    for (std::string line; std::getline(in, line);) {
+      if (!line.empty() && line.back() == '\r') line.pop_back();
+      const std::string name = SettingName(line);
+      if (name.empty()) continue;  // comments and blanks: the header is written again
+      const bool written = std::any_of(values.begin(), values.end(),
+                                       [&](const auto& value) { return value.first == name; });
+      if (!written) kept.push_back(line);
+    }
+  }
   std::error_code error;
   fs::create_directories(g_path.parent_path(), error);
-  std::ofstream out(g_path, std::ios::trunc);
-  if (!out) {
-    REXLOG_ERROR("F.E.A.R. settings: can't write {}", g_path.string());
+  // Written whole to a file beside it, then renamed over it: a crash mid-write leaves the old
+  // file, not a truncated one (docs/REVIEW.md).
+  fs::path temp = g_path;
+  temp += ".tmp";
+  {
+    std::ofstream out(temp, std::ios::trunc);
+    if (!out) {
+      REXLOG_ERROR("F.E.A.R. settings: can't write {}", temp.string());
+      return false;
+    }
+    out << "# F.E.A.R. Recompilation Settings, written by the panel in the main menu.\n"
+           "# Loaded at startup; a flag on the command line still wins for that run.\n";
+    for (const std::string& line : kept) out << line << "\n";
+    for (const auto& [name, value] : values) {
+      const auto* info = rex::cvar::GetFlagInfo(name);
+      const bool text = info && info->type == rex::cvar::FlagType::String;
+      out << name << " = " << (text ? TomlString(value) : value) << "\n";
+    }
+    out.close();
+    if (!out) {
+      REXLOG_ERROR("F.E.A.R. settings: couldn't finish writing {}", temp.string());
+      return false;
+    }
+  }
+  fs::rename(temp, g_path, error);
+  if (error) {
+    REXLOG_ERROR("F.E.A.R. settings: can't replace {} ({})", g_path.string(), error.message());
+    fs::remove(temp, error);
     return false;
   }
-  out << "# F.E.A.R. PC Settings, written by the panel in the main menu.\n"
-         "# Loaded at startup; a flag on the command line still wins for that run.\n";
-  for (const auto& [name, value] : values) {
-    const auto* info = rex::cvar::GetFlagInfo(name);
-    const bool text = info && info->type == rex::cvar::FlagType::String;
-    out << name << " = " << (text ? TomlString(value) : value) << "\n";
-  }
-  return bool(out);
+  return true;
 }
 
 // Starts the game again with this run's arguments, minus the flags for the settings (so the
@@ -313,70 +402,130 @@ class SettingsPanel final : public HostPanel {
  protected:
   void OnDraw(ImGuiIO& io) override {
     (void)io;
-    const int rows = int(settings_.size());
-    const int actions = 3;  // Save, Save and restart, Cancel
-    const uint32_t input = closing_ ? 0 : navigator_.Poll();
-    if (input & kUp) selected_ = (selected_ + rows + actions - 1) % (rows + actions);
-    if (input & kDown) selected_ = (selected_ + 1) % (rows + actions);
-    if (selected_ < rows) {
-      if (input & kLeft) Step(selected_, -1);
-      if (input & (kRight | kAccept)) Step(selected_, +1);
-    } else if (input & kAccept) {
-      Act(selected_ - rows);
+    const uint32_t polled = closing_ ? 0 : navigator_.Poll();
+    if (controls_open_) {
+      DrawControls(polled);
+      return;
     }
-    if (input & kBack) Act(2);
+    // The Controls page's row first when it's offered, then the settings, then the actions. The
+    // rows fill two columns (#124), left then right, in that order: Up and Down walk them all,
+    // Left and Right change the selected value. The actions sit side by side under them.
+    const int first = controls_offered_ ? 1 : 0;
+    const int rows = int(settings_.size());
+    const int items = first + rows;
+    const int left = (items + 1) / 2;
+    const int actions = 3;  // Save, Save and restart, Cancel
+    const int total = items + actions;
+    const uint32_t input = polled;
+    if (selected_ >= items) {
+      // On the actions: Left and Right move along them, Up goes back to the right column's end.
+      if (input & kLeft) selected_ = items + (selected_ - items + actions - 1) % actions;
+      if (input & kRight) selected_ = items + (selected_ - items + 1) % actions;
+      if (input & kUp) selected_ = items - 1;
+      if (input & kDown) selected_ = 0;
+      if (input & kAccept) Act(selected_ - items);
+    } else {
+      if (input & kUp) selected_ = (selected_ + total - 1) % total;
+      if (input & kDown) selected_ = (selected_ + 1) % total;
+      if (selected_ < first) {
+        if (input & (kRight | kAccept)) OpenControls();
+      } else if (selected_ < items) {
+        if (input & kLeft) Step(selected_ - first, -1);
+        if (input & (kRight | kAccept)) Step(selected_ - first, +1);
+      }
+    }
+    if (input & kBack) Act(0);  // leaving saves; Cancel is the way out without
 
-    if (BeginPanel("##fear_settings", 30.0f)) {
-      ImGui::TextUnformatted("PC SETTINGS");
+    if (BeginPanel("##fear_settings", 56.0f, fit_scale_)) {
+      ImGui::TextUnformatted("RECOMPILATION SETTINGS");
       ImGui::SameLine();
       ImGui::TextDisabled("%s", fear::version::Text());
       ImGui::Separator();
-      if (ImGui::BeginTable("##settings", 2, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_WidthStretch, 0.85f);
-        ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 1.15f);
-        for (int i = 0; i < rows; ++i) {
-          const Setting& setting = settings_[i];
-          ImGui::TableNextRow();
+      // One row of the list: the Controls page's, or a setting's.
+      auto item = [&](int index) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        if (index < first) {
+          if (Row("Controls", 0, selected_)) OpenControls();
           ImGui::TableNextColumn();
-          if (Row(setting.label.c_str(), i, selected_)) {
-            Step(i, ImGui::GetIO().KeyShift ? -1 : +1);
-          }
-          ImGui::TableNextColumn();
-          std::string value = setting.options[chosen_[i]].label;
-          if (selected_ == i && setting.options.size() > 1) value = "<  " + value + "  >";
+          std::string value = controls_ && controls_->Changed() ? "Changed (not saved)"
+                                                                : "Keyboard and mouse";
+          if (selected_ == 0) value += "  >";
           ImGui::TextUnformatted(value.c_str());
-          if (chosen_[i] != running_[i] && !setting.live) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(on restart)");
+          return;
+        }
+        const int i = index - first;
+        const Setting& setting = settings_[i];
+        if (Row(setting.label.c_str(), index, selected_)) {
+          Step(i, ImGui::GetIO().KeyShift ? -1 : +1);
+        }
+        ImGui::TableNextColumn();
+        std::string value = setting.options[chosen_[i]].label;
+        if (selected_ == index && setting.options.size() > 1) value = "<  " + value + "  >";
+        ImGui::TextUnformatted(value.c_str());
+        if (chosen_[i] != running_[i] && !setting.live) {
+          ImGui::SameLine();
+          ImGui::TextDisabled("(restart)");
+        }
+      };
+      if (ImGui::BeginTable("##columns", 2, ImGuiTableFlags_SizingStretchSame)) {
+        for (int column = 0; column < 2; ++column) {
+          ImGui::TableNextColumn();
+          if (ImGui::BeginTable(column ? "##right" : "##left", 2,
+                                ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_WidthStretch, 0.85f);
+            ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 1.15f);
+            for (int index = column ? left : 0; index < (column ? items : left); ++index) {
+              item(index);
+            }
+            ImGui::EndTable();
           }
         }
         ImGui::EndTable();
       }
       ImGui::Separator();
       const char* labels[] = {"Save", "Save and restart", "Cancel"};
+      const float width = (ImGui::GetContentRegionAvail().x -
+                           ImGui::GetStyle().ItemSpacing.x * float(actions - 1)) /
+                          float(actions);
       for (int a = 0; a < actions; ++a) {
-        if (Row(labels[a], rows + a, selected_)) Act(a);
+        if (a) ImGui::SameLine();
+        if (Row(labels[a], items + a, selected_, width)) Act(a);
       }
       ImGui::Separator();
+      // The note gets a fixed five lines, so the panel keeps its size from row to row (and
+      // covers the menu behind it whatever the note's length).
+      ImGui::BeginChild("##note", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 5.0f),
+                        ImGuiChildFlags_None,
+                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
       if (!message_.empty()) {
         ImGui::TextWrapped("%s", message_.c_str());
-      } else if (selected_ < rows) {
-        const Setting& setting = settings_[selected_];
+      } else if (selected_ < first) {
+        Dim("Set keyboard and mouse configuration options.");
+      } else if (selected_ < items) {
+        const Setting& setting = settings_[selected_ - first];
         std::string note = setting.note;
         if (rex::cvar::GetFlagSource(setting.cvar) == rex::cvar::Source::kCommandLine) {
-          note += " This run: set by a command-line flag, which wins over the saved value; "
-                  "Save and restart leaves it out.";
+          note += " Currently set by a command-line option, which overrides the saved value.";
         }
         if (setting.cvar == "fear_frame_rate_limit" && TimerPaced()) {
-          note += " This run is paced by a timer (a launch flag), not by this setting. Save and "
-                  "restart with another frame rate goes back to the display's pacing.";
+          note += " Currently paced by a timer (a launch option). Save and restart to pace to "
+                  "the display.";
         }
         Dim(note.c_str());
       } else {
-        Dim(selected_ == rows + 1
-                ? "Saves, closes the game and starts it again with these settings."
-                : "Changes marked (on restart) apply the next time the game starts. "
-                  "Saved in your user data folder (settings.toml).");
+        Dim(selected_ == items + 1 ? "Save changes and restart the game."
+            : selected_ == items + 2
+                ? "Return to the main menu without saving. Back also saves changes."
+                : "Save changes. Settings marked (restart) apply the next time the game "
+                  "starts.");
+      }
+      ImGui::EndChild();
+      // Still taller than the screen (a long note, a small display): a smaller font next frame.
+      const float limit = ImGui::GetIO().DisplaySize.y * 0.96f;
+      const float height = ImGui::GetWindowHeight();
+      if (height > limit) {
+        fit_scale_ = std::max(0.5f, fit_scale_ * limit / height);
       }
     }
     EndPanel();
@@ -396,11 +545,17 @@ class SettingsPanel final : public HostPanel {
     }
     const std::string pack = CvarValue("fear_texture_pack");
     if (!pack.empty()) values.emplace_back("fear_texture_pack", pack);
+    // The Controls page's, when it was opened (its settings are left as they are otherwise).
+    const auto controls = controls_ ? controls_->Values()
+                                    : std::vector<std::pair<std::string, std::string>>();
+    values.insert(values.end(), controls.begin(), controls.end());
     if (!WriteSettings(values)) {
-      message_ = "Couldn't write " + g_path.string() + ".";
+      message_ = "Unable to save settings to " + g_path.string() + ".";
       return false;
     }
     REXLOG_INFO("F.E.A.R. settings: saved to {}", g_path.string());
+    // The keys and the mouse now: the game reads them live.
+    if (!controls.empty()) fear::mkb::SetFlags(controls);
     // Window mode and animation timing now, on the UI thread after this frame.
     std::vector<std::pair<std::string, std::string>> live;
     for (size_t i = 0; i < settings_.size(); ++i) {
@@ -416,6 +571,8 @@ class SettingsPanel final : public HostPanel {
 
   void Act(int action) {
     if (closing_) return;
+    // A new Input restarts the game: the game picks its button pictures when it starts.
+    if (action == 0 && InputChanged()) action = 1;
     if (action == 0 && Save()) {
       Finish();
     } else if (action == 1 && Save()) {
@@ -423,7 +580,7 @@ class SettingsPanel final : public HostPanel {
         Finish();
         if (host_.later && host_.quit) host_.later(host_.quit);
       } else {
-        message_ = "Saved, but the game couldn't restart itself: quit and start it again.";
+        message_ = "Settings saved. The game could not restart: quit and start it again.";
       }
     } else if (action == 2) {
       Finish();
@@ -442,13 +599,45 @@ class SettingsPanel final : public HostPanel {
     return false;
   }
 
+  bool InputChanged() const {
+    for (size_t i = 0; i < settings_.size(); ++i) {
+      if (settings_[i].cvar == "fear_mkb") return chosen_[i] != running_[i];
+    }
+    return false;
+  }
+
   static bool TimerPaced() { return CvarValue("fear_vblank_source") == "timer"; }
+
+  void OpenControls() {
+    if (!controls_) controls_ = std::make_unique<fear::controls::Page>();
+    controls_open_ = true;
+    message_.clear();
+  }
+
+  // The Controls page (fear_controls.h) in this panel, a little wider for its two key columns.
+  void DrawControls(uint32_t input) {
+    using Result = fear::controls::Page::Result;
+    Result result = Result::kStay;
+    if (BeginPanel("##fear_settings", 34.0f)) result = controls_->Draw(input);
+    EndPanel();
+    if (result == Result::kBack) {
+      controls_open_ = false;
+      selected_ = 0;
+    } else if (result == Result::kSave) {
+      Act(0);
+      if (!closing_) controls_open_ = false;  // couldn't save: the message is on the main page
+    }
+  }
 
   std::vector<Setting> settings_;
   std::vector<size_t> running_;  // the option in effect, by row
   std::vector<size_t> chosen_;
   std::string message_;
   bool closing_ = false;
+  const bool controls_offered_ = fear::controls::Available();
+  std::unique_ptr<fear::controls::Page> controls_;  // made when first opened
+  bool controls_open_ = false;
+  float fit_scale_ = 1.0f;  // the font's, shrunk when the panel came out taller than the screen
 };
 
 class QuitPanel final : public HostPanel {
@@ -482,15 +671,80 @@ class QuitPanel final : public HostPanel {
   bool closing_ = false;
 };
 
+// A Steam Deck: Steam sets SteamDeck=1 for its games, and the board is Valve's.
+bool OnSteamDeck() {
+#if defined(_WIN32)
+  return false;
+#else
+  if (const char* deck = std::getenv("SteamDeck"); deck && deck[0] == '1') return true;
+  std::ifstream vendor("/sys/devices/virtual/dmi/id/board_vendor");
+  std::string name;
+  return std::getline(vendor, name) && name.starts_with("Valve");
+#endif
+}
+
+// First start (#117): keyboard and mouse or a controller, saved as Recompilation Settings' Input
+// row (fear_mkb), then `then` (the collection menu, or the game).
+class InputPanel final : public HostPanel {
+ public:
+  InputPanel(const fear::settings::Host& host, std::function<void()> then)
+      : HostPanel(host), then_(std::move(then)) {}
+
+ protected:
+  void OnDraw(ImGuiIO& io) override {
+    (void)io;
+    const uint32_t input = closing_ ? 0 : navigator_.Poll();
+    if (input & (kUp | kDown | kLeft | kRight)) selected_ = 1 - selected_;
+    if (input & kAccept) Act(selected_);
+    if (BeginPanel("##fear_input", 24.0f)) {
+      ImGui::TextUnformatted("SELECT CONTROLS");
+      ImGui::Separator();
+      if (Row("Keyboard and mouse", 0, selected_)) Act(0);
+      if (Row("Controller", 1, selected_)) Act(1);
+      ImGui::Separator();
+      Dim("Both work in the menus. Change this later in Recompilation Settings.");
+    }
+    EndPanel();
+  }
+
+ private:
+  void Act(int choice) {
+    if (closing_) return;
+    closing_ = true;
+    const std::string value = choice == 0 ? "true" : "false";
+    if (!WriteSettings({{"fear_mkb", value}})) {
+      REXLOG_ERROR("F.E.A.R. settings: couldn't save the input choice");
+    }
+    rex::cvar::SetFlagByName("fear_mkb", value);
+    REXLOG_INFO("F.E.A.R. settings: first start, {} chosen",
+                choice == 0 ? "the keyboard and mouse" : "a controller");
+    Close();
+    if (host_.later && then_) host_.later(then_);
+  }
+
+  std::function<void()> then_;
+  bool closing_ = false;
+};
+
 }  // namespace
 
 namespace fear::settings {
 
+bool AskInput(const Host& host, std::function<void()> then) {
+  if (fear::title::kFiles || !host.drawer || fear::panel::AnyOpen()) return false;
+  // The Steam Deck starts with its controls, unasked (Recompilation Settings > Input still
+  // offers the keyboard and mouse); a Linux desktop is asked, as Windows is.
+  if (OnSteamDeck()) return false;
+  // Asked once: until settings.toml (or the command line) says which.
+  if (rex::cvar::GetFlagSource("fear_mkb") != rex::cvar::Source::kDefault) return false;
+  new InputPanel(host, std::move(then));  // deletes itself when closed
+  return true;
+}
+
 void Load(const std::filesystem::path& user_data_root) {
   fear::process::WaitForPreviousRun();
   g_path = user_data_root / "settings.toml";
-  // (fear-nx's renderer started a first run at the display's multiple of 720p; the D3D12
-  // renderer has no resolution scale yet: docs/NATIVE_RENDERER.md.)
+  // (The D3D12 renderer's resolution, fear_d3d12_resolution_scale, defaults to the display's.)
   rex::cvar::LoadConfig(g_path);
 }
 

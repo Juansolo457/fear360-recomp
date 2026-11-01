@@ -40,13 +40,14 @@ void DumpFile(const char* name, const void* data, size_t size) {
 }  // namespace
 
 // The fear-nx renderer's settings (bindless on, host render targets, gamma as unorm16, 2x MSAA
-// supported, no resolution scale) and adapter vendor, so a translation here is byte-identical to
-// the plugin's for the same modification. The vendor only changes code for Intel (no switch
-// statements).
-ShaderCache::ShaderCache(uint32_t vendor_id)
+// supported) and adapter vendor, so at 1x a translation here is byte-identical to the plugin's
+// for the same modification. The vendor only changes code for Intel (no switch statements).
+// The draw resolution scale (DrawResolutionScale) changes the pixel position the shaders see
+// (back to guest pixels) and their fetches from resolution-scaled images.
+ShaderCache::ShaderCache(uint32_t vendor_id, uint32_t resolution_scale)
     : translator_(rex::ui::GraphicsProvider::GpuVendorID(vendor_id), /*bindless=*/true,
                   /*edram_rov_used=*/false, /*gamma_render_target_as_unorm8=*/false,
-                  /*msaa_2x_supported=*/true) {}
+                  /*msaa_2x_supported=*/true, resolution_scale, resolution_scale) {}
 
 ShaderCache::~ShaderCache() = default;
 

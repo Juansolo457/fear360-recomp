@@ -171,8 +171,8 @@ N texture uploads"). In that 6-minute session: 12 of 37 ten-second windows had a
 - **GPU ring waits** spin-yield up to 64 times before sleeping 50 us (`native_system.cpp`,
   WAIT_REG_MEM): keeps a core busy while the GPU idles. Upstream design (fear-nx).
 - **Settings file written in place** (`fear_settings.cpp`, `WriteSettings`): a crash mid-write
-  leaves a truncated `settings.toml`. Write to a temp file and rename. (That file is being
-  refactored for the collection launcher; fix it there.)
+  leaves a truncated `settings.toml`. **Changed** (2026-10-31): written whole to `settings.toml.tmp`
+  beside it, then renamed over it.
 - **XInput on empty slots is slow** (milliseconds per call on some systems): the settings
   panels poll connected slots every frame and empty ones once a second, only while a panel is
   open or its buttons are being released. Fine; keep it out of per-frame game paths.

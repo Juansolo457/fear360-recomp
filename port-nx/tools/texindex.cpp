@@ -12,6 +12,7 @@
 //
 //   fear_texindex <bundle> <out.tsv> <out_base.bin>
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -119,6 +120,40 @@ int main(int argc, char** argv) {
     if (base_size && kHeaderBytes + base_size <= data_len) {
       key = fear::texture_pack::ReplacementKey(base, base_size, uint32_t(format), width, height,
                                                fetch.tiled, fetch.pitch);
+    }
+    // The font atlases (interface\fonts\*.xpr) are linear in the file, but the game tiles them
+    // when it loads them: the key is the tiled copy's, as the renderer sees it.
+    std::string extension = name.size() > 4 ? name.substr(name.size() - 4) : "";
+    for (char& c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
+    const bool font = extension == ".xpr";
+    if (font && !fetch.tiled && !std::strcmp(status, "ok")) {
+      const texture_util::TextureGuestLayout tiled_layout = texture_util::GetGuestTextureLayout(
+          fetch.dimension, fetch.pitch, width, height, layers, true, format, fetch.packed_mips,
+          true, mip_max_level);
+      const uint32_t bpb = info->bytes_per_block();
+      const uint32_t bpb_log2 = rex::log2_floor(bpb);
+      const uint32_t blocks_x = (width + info->block_width - 1) / info->block_width;
+      const uint32_t blocks_y = (height + info->block_height - 1) / info->block_height;
+      const uint32_t pitch_blocks = tiled_layout.base.row_pitch_bytes / bpb;
+      std::vector<uint8_t> tiled(tiled_layout.base.level_data_extent_bytes, 0);
+      bool in_range = true;
+      for (uint32_t by = 0; by < blocks_y && in_range; ++by) {
+        for (uint32_t bx = 0; bx < blocks_x; ++bx) {
+          const uint64_t src = uint64_t(by) * layout.base.row_pitch_bytes + uint64_t(bx) * bpb;
+          const uint64_t dst = uint64_t(
+              texture_util::GetTiledOffset2D(int32_t(bx), int32_t(by), pitch_blocks, bpb_log2));
+          if (src + bpb > base_size || dst + bpb > tiled.size()) {
+            in_range = false;
+            break;
+          }
+          std::memcpy(tiled.data() + dst, base + src, bpb);
+        }
+      }
+      if (in_range) {
+        key = fear::texture_pack::ReplacementKey(tiled.data(), uint32_t(tiled.size()),
+                                                 uint32_t(format), width, height, true,
+                                                 fetch.pitch);
+      }
     }
 
     // The base level as the renderer uploads it: blocks in row order, endian-swapped.

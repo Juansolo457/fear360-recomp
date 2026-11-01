@@ -1,12 +1,12 @@
 # F.E.A.R. 360 Recompiled
 
-The Xbox 360 F.E.A.R., running natively on Linux and the Steam Deck. A native Vulkan renderer, evenly paced high frame rates, a controller in your hands. *F.E.A.R. Files* and the Windows build come in later releases.
+The Xbox 360 F.E.A.R., running natively on Windows, Linux and the Steam Deck. Up to 120 fps (and up to 4K on Windows), keyboard and mouse or a controller, and the PC version's textures if you own it. *F.E.A.R. Files* comes in a later release.
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v1.0.2](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only (1.0.2 adds the 360's bonus level, Holiday, to the main menu): **F.E.A.R. on native Linux and the Steam Deck** (no Proton). On the Deck it runs at 120 fps most of the time and holds 60 fps or more in 99.8% of frames. You need only your F.E.A.R. disc. **Next:** the Windows build (1.5) and *F.E.A.R. Files* ([After 1.0](#after-10)).
+**Latest release: [v1.5.0](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, ready to play on **Windows** and **Linux / the Steam Deck**: download the zip for your system, unpack your own F.E.A.R. disc into it and play ([docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)). 1.5 adds the Windows build with keyboard and mouse, 4K, the PC texture pack with sharper text, and John Wick mode. **Next:** *F.E.A.R. Files* ([After 1.0](#after-10)).
 
 ## Why
 
@@ -26,20 +26,20 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 |---|---|
 | ✅ Boots, menus, intro videos, campaign, Instant Action | `port-nx`, with the Direct3D 12 renderer (`port-nx/src/d3d12/`, [docs/NATIVE_RENDERER.md](docs/NATIVE_RENDERER.md)) |
 | ✅ No flicker on the briefing TVs, no black bands, bullet sparks show | fixed by the Direct3D 12 renderer (#66) |
-| ⏳ 4K | the Direct3D 12 renderer draws at the 360's 1280×720 for now, scaled to your screen; resolution scaling comes back next ([NATIVE_RENDERER](docs/NATIVE_RENDERER.md#native-punch-list)), FSR 1 upscaling in [#72](https://github.com/Juansolo457/fear360-recomp/issues/72) |
-| ✅ The game's own 2×/4× MSAA (or off), up to 16× anisotropic filtering, sharper textures | PC Settings |
+| ✅ Up to 4K (Windows) | *Recompilation Settings → Resolution*: 1280×720, 2560×1440 or 3840×2160 (*Match display* picks the smallest at least as tall as your screen). Linux and the Steam Deck draw at 1280×720, scaled to the screen; FSR 1 upscaling in [#72](https://github.com/Juansolo457/fear360-recomp/issues/72) |
+| ✅ The game's own 2×/4× MSAA (or off), up to 16× anisotropic filtering, sharper textures | Recompilation Settings |
 | ✅ Frame pacing locked to the display, up to 120 fps | the game's vblank follows the display's real one (DXGI, any GPU vendor), each frame held to the fewest refreshes that keep it at or under 120 fps (120 on 240 Hz, 72 on 144 Hz, 60 on 60 Hz); `-FrameRate <n>` sets the limit ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
 | ✅ The console code's high-frame-rate bugs fixed so far | enemies update every frame above 100 fps (#3); EchoPatch's fixes for sliding on slopes, the jump kick, speed on landing and out of water, water waves and splashes, and the slow-mo meter (#5, #6, #8, #9, #11-#13); bullet tracers no longer stick in mid-air (#27); animations at exactly the time that passed |
 | ✅ Logic, gunplay, physics intact | play-tests so far; the full play-through is the 1.0 smoke test ([#56](https://github.com/Juansolo457/fear360-recomp/issues/56), [#57](https://github.com/Juansolo457/fear360-recomp/issues/57)) |
 | ✅ Impact smoke and bullet holes at 80 fps | the dust thins out as it should, and model animations run at exactly the time that passed (the engine dropped a fraction of a millisecond every frame); the big "rock" craters are the game's own bullet-hole decals, the same size at 30 fps ([PROGRESS](docs/PROGRESS.md#play-test-4-2026-10-22-display-locked-pacing)) |
-| ✅ No haze near bright lights | it was the 360 version's screen bloom, which the PC version doesn't have: off by default, *PC Settings → Bloom* turns it back on (#38) |
+| ✅ No haze near bright lights | it was the 360 version's screen bloom, which the PC version doesn't have: off by default, *Recompilation Settings → Bloom* turns it back on (#38) |
 | ✅ Right stick without the 360's turn ramp (default) | "feels significantly better": the 360's stick tuning patched on the fly from your own data; `-LookRamp console` restores it ([PROGRESS](docs/PROGRESS.md#play-test-2-2026-10-22)) |
 | ✅ Saving and *Continue game* | checkpoints save and *Continue game* picks them up: "was able to jump into a saved game no issues"; every controller drives player 1, the local profile that saves (a second XInput device used to make the pad player 2, who can't save) |
 | ⏳ Movement may feel bouncier than PC | compare game-database tuning and 30 vs 120 fps |
-| ⏳ PC textures in place of the 360's low-res ones | a local pack built from your PC copy (4,710 textures at 4× the pixels, [docs/TEXTURES.md](docs/TEXTURES.md)); the Direct3D 12 renderer can't use it yet |
-| ✅ *PC Settings* and *Quit to Desktop* in the main menu | "looks awesome": entries added to the game's own menu (in their own column, with help lines like the game's, #80) open a settings panel (window, frame rate, anti-aliasing, texture filtering and sharpness, field of view, right stick, aim assist, enemy AI, EchoPatch's options, the interval select, animation timing, bloom; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
+| ✅ PC textures and sharper text in place of the 360's low-res ones | a local pack built from your PC copy (4,710 textures at 4× the pixels, and the game's fonts redrawn; [docs/TEXTURES.md](docs/TEXTURES.md)), used by both renderers |
+| ✅ *Recompilation Settings* and *Quit to Desktop* in the main menu | "looks awesome": entries added to the game's own menu (in their own column, with help lines like the game's, #80) open a settings panel (window, frame rate, anti-aliasing, texture filtering and sharpness, field of view, right stick, aim assist, enemy AI, EchoPatch's options, the interval select, animation timing, bloom; saved in your user folder) and a quit confirmation ([PROGRESS](docs/PROGRESS.md#main-menu-pc-settings-and-quit-to-desktop)) |
 | ✅ Shaders built before play | every start builds the pipelines earlier runs stored before the game's first frame, on all cores ("PREPARING SHADERS" when it takes a moment), so a scene seen before doesn't stutter (`port-nx/src/pipeline_warmup.h`) |
-| ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu in the game's style before either game loads (#43), *Switch Game* in both games' main menus, *PC Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection`) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
+| ✅ One collection: F.E.A.R. and *F.E.A.R. Files* from one menu | "switcher works with controller and switch is fine between games": a menu in the game's style before either game loads (#43), *Switch Game* in both games' main menus, *Recompilation Settings* and *Quit* in Files' too (`tools/launch.ps1 -Collection -WithFiles`; `-Collection` alone lists Files as coming later) ([FILES](docs/FILES.md#the-collection-launcher-2026-10-22)) |
 | ⏳ *F.E.A.R. Files* (Extraction Point + Perseus Mandate) | plays on the same Direct3D 12 renderer (its Direct3D mapped on its own) with F.E.A.R.'s fixes; still to do: the smoke plumes, its own effects ([#51](https://github.com/Juansolo457/fear360-recomp/issues/51)), an optimisation pass and the full play-through ([#57](https://github.com/Juansolo457/fear360-recomp/issues/57)). The collection: [docs/FILES.md](docs/FILES.md) |
 | ✅ Steam Deck, native Linux (0.9) | no Proton: Vulkan straight on the Deck's driver, ThinLTO and optional PGO. With the 360's settings at 90 Hz, under 1% of frames below 60 fps in the heaviest fights (F.E.A.R. Files' Sprint, F.E.A.R.'s Rooftop); `tools/steamdeck/README-SteamDeck-Linux.txt`, [docs/LINUX_NATIVE.md](docs/LINUX_NATIVE.md) |
 | ✅ Linux | the same native build (`tools/build-linux.sh`), Vulkan 1.3 ([docs/SETUP.md](docs/SETUP.md#linux-and-steam-deck)) |
@@ -72,7 +72,7 @@ tools/build-deck.sh                                   # F.E.A.R.
 python3 -I tools/steamdeck/make_package.py --linux    # private/steamdeck/FEAR360-SteamDeck-linux.zip
 ```
 
-**Windows** (builds, not tested for 1.0; supported from 1.5): releases are source only: you build the game from your own discs ([the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest)). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
+**Windows** (supported from 1.5): [the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest) has a ready-built zip; to build it yourself instead, **step by step: [docs/SETUP.md](docs/SETUP.md)**. In short, with the toolchain in `.tools/` and your discs extracted:
 
 ```powershell
 pwsh -NoProfile -File tools/setup-sdk.ps1                      # the patched ReXGlue SDK
@@ -81,9 +81,9 @@ pwsh -NoProfile -File tools/build-nx.ps1 -Project port-files   # F.E.A.R. Files
 pwsh -NoProfile -File tools/launch.ps1 -Collection             # the collection menu
 ```
 
-Launcher defaults: fullscreen, `-FrameRate auto` (locked to your display's refresh, at most 120 fps). Options: `-FrameRate auto|<20-240>` (the limit), `-Anisotropic 1..5` (2× to 16×), `-Timer` (the old software vblank timer instead), `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Invulnerable` (for testing), `-Extra '<more flags>'`. Most of these are in PC Settings too.
+Launcher defaults: fullscreen, `-FrameRate auto` (locked to your display's refresh, at most 120 fps). Options: `-FrameRate auto|<20-240>` (the limit), `-Anisotropic 1..5` (2× to 16×), `-Timer` (the old software vblank timer instead), `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Invulnerable` (for testing), `-Extra '<more flags>'`. Most of these are in Recompilation Settings too.
 
-**PC textures (needs the PC version):** the pack builder still works ([docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack)), but the Direct3D 12 renderer can't use a pack yet.
+**PC textures and sharper text (needs the PC version):** build the pack from your own PC copy ([docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack)); both renderers use it.
 
 Your own `default.xex` and `Game/` folder go in `port-nx/assets/` (F.E.A.R., title `565507D9`) and `port-files/assets/` (F.E.A.R. Files, `565507E8`); [docs/SETUP.md](docs/SETUP.md) has the supported hashes and the ISO extraction step.
 
@@ -101,7 +101,7 @@ docs/             progress, handoff, findings, plan, ripping
 ## Legal
 
 - Changes reach `master` only through reviewed pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
-- No assets, executables, generated code or proprietary code are distributed. Releases are source only: never attach builds, game files or the private test packages `tools/steamdeck/make_package.py` makes. Before pushing, run `python -I tools/audit_repo.py` (CI runs it too).
+- No game data is distributed, and none is in this repository. From 1.5 on, releases attach the built program (`make_package.py --release`), never game files or the private test packages the script's other modes make; players bring their own disc ([CONTRIBUTING.md](CONTRIBUTING.md#releases)). The source of every release is its tag here. Before pushing, run `python -I tools/audit_repo.py` (CI runs it too).
 - Three sets of terms, file by file in [NOTICE](NOTICE), full texts in [LICENSES/](LICENSES/):
   - **MIT** ([LICENSE](LICENSE)): our own tools, docs and glue.
   - **GPL-3.0-or-later** ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)): `port-nx/src/native/` (what's left of fear-nx ← Project8Recomp ← nfsmw-nx: the GPU ring and display pacing), the manifests and SDK patch 0000. Builds that link it are GPL.

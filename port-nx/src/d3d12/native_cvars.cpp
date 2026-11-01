@@ -56,6 +56,11 @@ REXCVAR_DEFINE_BOOL(fear_d3d12_msaa, true, "F.E.A.R. D3D12",
                     "one sample per pixel, which costs the GPU much less (the Steam Deck's "
                     "baseline)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_INT32(fear_d3d12_resolution_scale, 0, "F.E.A.R. D3D12",
+                     "Draw resolution on Windows (D3D12): 1 = the 360's 1280x720, 2 = 2560x1440, "
+                     "3 = 3840x2160; 0 = the display's: the smallest of them at least as tall as "
+                     "the screen. The Vulkan renderer (Linux, the Steam Deck) draws at 1280x720")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_INT32(fear_d3d12_anisotropy, 1, "F.E.A.R. D3D12",
                      "Anisotropic filtering of the game's linearly filtered textures with mips, "
                      "at least this many samples per pixel (2, 4, 8 or 16; 1: the game's own)");

@@ -23,7 +23,7 @@ REXCVAR_DEFINE_STRING(fear_texture_pack, "", "F.E.A.R.",
                       "Folder of a replacement texture pack built by tools/texture_pack.py "
                       "(index.tsv + DDS files); empty = the 360's own textures")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-// PC Settings' on/off: the folder stays saved while the pack is off.
+// Recompilation Settings' on/off: the folder stays saved while the pack is off.
 REXCVAR_DEFINE_BOOL(fear_texture_pack_enabled, true, "F.E.A.R.",
                     "Use the texture pack in fear_texture_pack (off = the 360's own textures)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -35,8 +35,14 @@ REXCVAR_DEFINE_BOOL(fear_texture_log_keys, false, "F.E.A.R.",
 namespace fear::texture_pack {
 namespace {
 
+#if !defined(FEAR_TITLE_FILES) && !defined(FEAR_D3D12_TEXTURES_OFFLINE)
+#include "keycaps.inc"
+#define FEAR_KEYCAPS 1
+#endif
+
 std::once_flag load_once;
 bool loaded = false;
+bool pack_loaded = false;
 std::unordered_map<uint64_t, Entry> entries;
 std::filesystem::path root;
 std::mutex bad_mutex;
@@ -84,7 +90,44 @@ uint64_t MipChainBytes(const Entry& e) {
 
 // index.tsv: key (16 hex digits), VkFormat number, width, height, mips, data offset, file,
 // and optionally (after a tab) a host swizzle override in hex.
+void LoadPack();
+
+// The menus' A and B button prompts as key caps, with the keyboard and mouse playing at startup
+// (texture_pack.h). Keys: the 360 textures' (private/texwork/x360.tsv), 32x32 k_8_8_8_8.
+void LoadBuiltIn() {
+#if defined(FEAR_KEYCAPS)
+  bool plays = false;
+  try {
+    plays = rex::cvar::Query<bool>("fear_mkb");
+  } catch (...) {
+  }
+  if (!plays) return;
+  struct Cap {
+    uint64_t key;
+    const uint8_t* data;
+  };
+  for (const Cap& cap : {Cap{0x56C7F81C4E4D021Cull, kEnter}, Cap{0xEB475D7D1E7C2DFCull, kEsc}}) {
+    Entry e;
+    e.format = VK_FORMAT_R8G8B8A8_UNORM;  // the 360's own layout (B, G, R, A): kSameSwizzle
+    e.width = e.height = 64;
+    e.mip_count = 1;
+    BlockInfo(e.format, e.block_bytes, e.block_width, e.block_height);
+    e.file = "(key cap)";
+    e.data_size = MipChainBytes(e);
+    e.embedded = cap.data;
+    entries.emplace(cap.key, std::move(e));
+  }
+  REXLOG_INFO("F.E.A.R.: the menus' A and B prompts show the keyboard's Enter and Esc");
+#endif
+}
+
 void Load() {
+  LoadPack();
+  LoadBuiltIn();
+  loaded = !entries.empty();
+}
+
+void LoadPack() {
   const std::string configured = REXCVAR_GET(fear_texture_pack);
   if (configured.empty() || !REXCVAR_GET(fear_texture_pack_enabled)) return;
   root = std::filesystem::path(configured);
@@ -128,7 +171,7 @@ void Load() {
     e.data_size = MipChainBytes(e);
     entries.emplace(key, std::move(e));
   }
-  loaded = !entries.empty();
+  pack_loaded = !entries.empty();
   REXLOG_INFO("F.E.A.R.: texture pack {}: {} replacements{}", root.string(), entries.size(),
               bad ? fmt::format(", {} unreadable index lines", bad) : std::string());
 }
@@ -146,6 +189,11 @@ uint64_t ReplacementKey(const uint8_t* base_data, uint32_t base_size, uint32_t f
 bool Enabled() {
   std::call_once(load_once, Load);
   return loaded;
+}
+
+bool PackLoaded() {
+  std::call_once(load_once, Load);
+  return pack_loaded;
 }
 
 bool LogKeys() { return REXCVAR_GET(fear_texture_log_keys); }
@@ -171,6 +219,10 @@ void MarkBad(uint64_t key) {
 
 bool ReadData(const Entry& entry, uint8_t* out, uint64_t size) {
   if (size < entry.data_size) return false;
+  if (entry.embedded) {
+    std::memcpy(out, entry.embedded, entry.data_size);
+    return true;
+  }
   std::ifstream file(root / entry.file, std::ios::binary);
   if (!file) return false;
   file.seekg(entry.data_offset);

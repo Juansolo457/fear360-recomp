@@ -21,6 +21,11 @@
         data, saves and settings untouched
     --linux --files (development): F.E.A.R. Files too, from tools/build-deck.sh --project
         port-files and port-files/assets; FEAR_FILES=1 ./fear-linux.sh lists it to play
+    python -I tools/steamdeck/make_package.py --release [out.zip]
+    python3 -I tools/steamdeck/make_package.py --release --linux [out.zip]     (on Linux: WSL)
+        the public release zip (default private/release/FEAR360-Recompiled-<VERSION>-<system>.zip):
+        F.E.A.R.'s program and libraries, the launcher, tools/release's README and
+        tools/xdvdfs.py. No game data: the player unpacks their own disc into fear/assets
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -36,7 +41,8 @@ them relative to the game's folder (Steam's Start In). No shader cache: it is pe
 builds its own over the first runs. Stored (not compressed) and Zip64: the data is ~13 GB and
 mostly compressed already. The game data is the user's own disc's: the package stays in private/.
 These packages contain game data and programs built from the game's code: never upload one, share
-it or attach it to a release. Releases are source only.
+it or attach it to a release. Only --release's zip, which holds no game data, goes on a release
+(CONTRIBUTING.md).
 """
 import glob
 import os
@@ -46,7 +52,10 @@ import zipfile
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 ARGV = [a for a in sys.argv[1:]
         if a not in ('--programs', '--settings', '--windows', '--linux', '--nolto', '--pgogen',
-                     '--files')]
+                     '--files', '--release')]
+# --release: the public release zip (main_release): F.E.A.R.'s program, its libraries, the
+# launcher, the README and the disc unpacker, and no game data.
+RELEASE = '--release' in sys.argv[1:]
 PROGRAMS_ONLY = '--programs' in sys.argv[1:]
 SETTINGS_ONLY = '--settings' in sys.argv[1:]
 # --windows: the same package for another Windows PC (a private test copy): a Play F.E.A.R..cmd
@@ -79,7 +88,7 @@ ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root
 SHIP_TEXTURE_PACKS = False
 if SHIP_TEXTURE_PACKS:
     ARGS += ['--fear_texture_pack', 'texture_pack']
-DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
+DECK_SETTINGS = ('# F.E.A.R. Recompilation Settings, written by the panel in the main menu.\n'
                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
                  '# Uncapped to 120 fps (#28): the vblank from a timer at 240 Hz instead of the\n'
                  '# display (the game presents every second one), mailbox presentation (no\n'
@@ -90,9 +99,9 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  'video_mode_refresh_rate = 240\n'
                  "# Deck baseline (#28): SDL's HIDAPI drivers off (the controls come through Steam\n"
                  "# Input's pad, the usual Proton path; #29) and the profiler on for the logs\n"
-                 '# (about 6% of a core). Saving PC Settings in the game rewrites this file\n'
-                 '# without them. No MSAA (the game\'s 2x/4x costs the Deck\'s GPU; PC Settings >\n'
-                 '# Anti-aliasing).\n'
+                 '# (about 6% of a core). Saving Recompilation Settings in the game rewrites this\n'
+                 '# file without them. No MSAA (the game\'s 2x/4x costs the Deck\'s GPU;\n'
+                 '# Recompilation Settings > Anti-aliasing).\n'
                  'fear_d3d12_msaa = false\n'
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
@@ -100,8 +109,8 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
 # The native Linux package's (--linux): the Deck baseline, the 360's settings at up to 120 fps
 # with MSAA off (the rest are the defaults: field of view 70, no bloom). No timer or SDL lines:
 # Linux paces from a timer at twice the frame rate on its own (docs/LINUX_NATIVE.md), and SDL
-# reads the pads natively. Everything here is a PC Settings choice, so Save keeps it.
-LINUX_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
+# reads the pads natively. Everything here is a Recompilation Settings choice, so Save keeps it.
+LINUX_SETTINGS = ('# F.E.A.R. Recompilation Settings, written by the panel in the main menu.\n'
                   '# Loaded at startup; a flag on the command line still wins for that run.\n'
                   '# The Steam Deck baseline: the 360\'s settings at up to 120 fps, MSAA off.\n'
                   'fullscreen = true\n'
@@ -238,7 +247,97 @@ def main_linux():
     print(f'{OUT}: {count} files, {total / 2**20:.0f} MB before compression')
 
 
+RELEASE_LAUNCHER = ('@echo off\r\n'
+                    'rem F.E.A.R. 360 Recompiled: starts the game from this folder.\r\n'
+                    'cd /d "%~dp0fear"\r\n'
+                    'if not exist "assets\\default.xex" (\r\n'
+                    '  echo Your game files are missing: unpack your F.E.A.R. disc into the'
+                    ' fear\\assets folder.\r\n'
+                    '  echo See README.txt.\r\n'
+                    '  pause\r\n'
+                    '  exit /b 1\r\n'
+                    ')\r\n'
+                    'start "" fear.exe --game_data_root assets --user_data_root user'
+                    ' --cache_root cache\r\n')
+RELEASE_ASSETS_NOTE = ('Unpack your F.E.A.R. disc image here, so that this folder holds default.xex'
+                       ' and a Game folder. See the README one folder up.\n')
+
+
+def build_version(header):
+    """The build's version as the game shows it (port-nx/src/fear_version.h)."""
+    if os.path.exists(header):
+        for line in open(header, encoding='utf-8'):
+            if line.startswith('#define FEAR_VERSION_TEXT '):
+                return line.split('"')[1]
+    return 'unknown'
+
+
+def main_release():
+    """The public release zip, Windows or (--linux) Linux: F.E.A.R.'s program and its libraries,
+    the launcher, the README, tools/xdvdfs.py to unpack the player's disc, and on Linux the Deck
+    baseline settings. No game data: the player unpacks their own disc into fear/assets."""
+    number = open(os.path.join(REPO, 'VERSION'), encoding='utf-8').read().strip()
+    system = 'Linux' if LINUX else 'Windows'
+    out = ARGV[0] if ARGV else os.path.join(REPO, 'private', 'release',
+                                            f'FEAR360-Recompiled-{number}-{system}.zip')
+    if os.path.dirname(out):  # a bare file name goes in the current folder
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+    top = 'FEAR360'
+    files = []  # (source path or None, path in the zip, text or None, executable)
+    if LINUX:
+        build = os.path.join(REPO, 'port-nx', 'out', 'build', 'deck-amd64-release')
+        if not os.path.exists(os.path.join(build, 'fear')):
+            raise SystemExit(f'{build}/fear is missing: run tools/build-deck.sh')
+        files.append((os.path.join(build, 'fear'), 'fear/fear', None, True))
+        for lib in sorted(glob.glob(os.path.join(build, '*.so*'))):
+            files.append((lib, f'fear/{os.path.basename(lib)}', None, True))
+        steamdeck = os.path.join(REPO, 'tools', 'steamdeck')
+        files.append((os.path.join(steamdeck, 'fear-linux.sh'), 'fear-linux.sh', None, True))
+        files.append((os.path.join(REPO, 'tools', 'release', 'README-Linux.txt'), 'README.txt',
+                      None, False))
+        files.append((None, 'fear/user/settings.toml', LINUX_SETTINGS, False))
+    else:
+        build = os.path.join(REPO, 'port-nx', 'out', 'build', 'win-amd64-relwithdebinfo')
+        crt = crt_folder()
+        for f in ('fear.exe', 'rexruntimerd.dll', 'TracyClientrd.dll'):
+            files.append((os.path.join(build, f), f'fear/{f}', None, False))
+        for f in CRT_DLLS:
+            files.append((os.path.join(crt, f), f'fear/{f}', None, False))
+        files.append((None, 'Play F.E.A.R..cmd', RELEASE_LAUNCHER, False))
+        readme = open(os.path.join(REPO, 'tools', 'release', 'README-Windows.txt'),
+                      encoding='utf-8').read()
+        files.append((None, 'README.txt', readme.replace('\n', '\r\n'), False))
+    files.append((os.path.join(REPO, 'tools', 'xdvdfs.py'), 'xdvdfs.py', None, False))
+    # The texture pack builder (docs/TEXTURES.md, "From a release zip"): its scripts and the
+    # offline indexer, built with the game.
+    for script in ('texture_pack.py', 'font_atlas.py'):
+        files.append((os.path.join(REPO, 'tools', script), f'texture-pack/{script}', None, False))
+    indexer = 'fear_texindex' if LINUX else 'fear_texindex.exe'
+    if not os.path.exists(os.path.join(build, indexer)):
+        raise SystemExit(f'{build}/{indexer} is missing: build the game first')
+    files.append((os.path.join(build, indexer), f'fear/{indexer}', None, LINUX))
+    files.append((None, 'fear/assets/PUT YOUR DISC HERE.txt', RELEASE_ASSETS_NOTE, False))
+    version = build_version(os.path.join(build, 'fear_version', 'fear_version_info.h'))
+    files.append((None, 'VERSION.txt', f'F.E.A.R. 360 Recompiled {version} ({system})\n', False))
+    with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+        for src, arc, text, executable in files:
+            if src:
+                info = zipfile.ZipInfo.from_file(src, f'{top}/{arc}')
+                data = open(src, 'rb').read()
+            else:
+                info = zipfile.ZipInfo(f'{top}/{arc}')
+                data = text.encode('utf-8')
+            info.external_attr = (0o100755 if executable else 0o100644) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, data)
+    print(f'version: {version}')
+    print(f'{out}: {len(files)} files, {os.path.getsize(out) / 2**20:.0f} MB')
+
+
 def main():
+    if RELEASE:
+        main_release()
+        return
     if LINUX:
         main_linux()
         return

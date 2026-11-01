@@ -1,5 +1,5 @@
-// F.E.A.R. 360 - starting the game again, or the other game of the collection: PC Settings' Save
-// and restart, Switch Game, picking a title in the collection menu.
+// F.E.A.R. 360 - starting the game again, or the other game of the collection: Recompilation
+// Settings' Save and restart, Switch Game, picking a title in the collection menu.
 //
 // A new run is told the old one's process id (fear_restart_wait_pid) and waits for it to exit
 // before it starts (WaitForPreviousRun, from ReXApp::OnConfigurePaths), so the two never hold the

@@ -47,6 +47,9 @@
 namespace rex::memory {
 class Memory;
 }
+namespace fear::texture_pack {
+struct Entry;
+}
 
 namespace fear::d3d12 {
 
@@ -73,6 +76,9 @@ struct TextureBinding {
   TextureKey key;
   TextureHandle entry;   // the cache's texture, for TextureCache::Unchanged and Touch
   bool aliased = false;  // `resource` is a resolved image bound in place of the texture's own
+  // ... at the draw resolution scale (ResolvedImage::texture_scaled): the shaders must treat the
+  // fetch as resolution-scaled (DxbcShaderTranslator's textures_resolution_scaled).
+  bool scaled = false;
   // The game wrote the texture's memory after it queued the draw. With capture order on, bound
   // with the data from before that write, which is still to be uploaded for later draws (not
   // memoizable).
@@ -199,8 +205,10 @@ class TextureCache {
   Texture* NewTexture(const TextureKey& key);
   Texture* Create(const TextureKey& key, const HostFormat& host);
   static bool Clean(const Texture& t);
-  // Binds `alias` (a resolved image, or null for the texture's own resource) for t.
-  void SetAlias(Texture& t, ID3D12Resource* alias);
+  // Binds `alias` (a resolved image, or null for the texture's own resource) for t. A scaled
+  // image (ResolvedImage::texture_scaled) comes with `guest_sized`, its guest-sized twin, which
+  // holds the texels at t's own size when t leaves the alias.
+  void SetAlias(Texture& t, ID3D12Resource* alias, ID3D12Resource* guest_sized = nullptr);
   // Clears t's dirty flag and re-arms the watches of its guest pages, before their data is read.
   void ClearDirty(Texture& t);
   // t's resource holds guest-memory data in every subresource: the next Get runs CopyResolved.
@@ -249,6 +257,14 @@ class TextureCache {
   // would never be read.
   bool ResolvesCoverAll(const Texture& t) const;
   void Transition(Texture& t, ID3D12GraphicsCommandList* list, D3D12_RESOURCE_STATES to);
+  // The texture pack's replacement for t's base level as guest memory holds it now
+  // (texture_pack.h), or null: no pack, no hit, or a texture the pack can't stand for (not 2D
+  // with one slice, a resolve destination). *key: its pack key.
+  const fear::texture_pack::Entry* PackReplacement(const Texture& t, uint64_t* key);
+  // t's resource for `pack` (a replacement, at its size, format and mips) or, null, for the
+  // guest data again: a new resource, the old one kept with its views until the GPU is done with
+  // the frame completing at frame_fence (Retire). False if the resource can't be created.
+  bool SwapResource(Texture& t, const fear::texture_pack::Entry* pack, uint64_t frame_fence);
   void WatchRange(Texture& t, uint32_t start, uint32_t length);
   // Arms the watches on the guest pages of a texture's base and mips: after its dirty flag is
   // cleared, before its data is read.
@@ -275,6 +291,10 @@ class TextureCache {
     bool deferred = false;
     D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COPY_DEST;
     uint64_t frame_fence = 0;
+    // A texture pack replacement: its DDS file is read into the footprints instead of untiling
+    // guest memory (whose pages are still watched, so a change uploads again).
+    const fear::texture_pack::Entry* pack = nullptr;
+    uint64_t pack_key = 0;
   };
   // An untiling thread's upload list: the deferred uploads it untiled since the last
   // CloseUploadLists. Its command allocators are pooled by the frame fence of the lists recorded
@@ -337,6 +357,13 @@ class TextureCache {
   static constexpr size_t kMaxEvictionsPerFrame = 128;
   std::vector<Texture*> evict_batch_;             // scratch
   std::vector<ID3D12Resource*> evict_resources_;  // scratch
+  // Resources textures stopped using (SwapResource), until the GPU passes `fence`: then their
+  // views go (evict_callback_) and their memory is freed.
+  struct Swapped {
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    uint64_t placed = 0, bytes = 0, fence = 0;
+  };
+  std::vector<Swapped> swapped_;
   // The watched ranges of every texture, listed in each 64 KB bucket of guest physical memory
   // they touch (Destroy removes a texture's).
   static constexpr uint32_t kWatchBucketShift = 16;

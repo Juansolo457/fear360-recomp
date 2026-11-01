@@ -27,6 +27,10 @@ pushes, and the branch can't be deleted.
 1. A pull request sets the release number in `VERSION`; the games show it with the build's commit
    (`port-nx/src/fear_version.h`).
 2. Once it's merged, the release is tagged on `master` (`vX.Y.Z`) and published on GitHub.
-3. **Releases are source only:** never attach builds, game files or the private test packages
-   `tools/steamdeck/make_package.py` makes. Players build from their own discs
-   ([docs/SETUP.md](docs/SETUP.md)).
+3. **Releases carry the built program, never game data.** From 1.5 on, a release attaches the
+   zips `python -I tools/steamdeck/make_package.py --release` (Windows) and `--release --linux`
+   (Linux, from `tools/build-deck.sh`) make from the tagged commit: F.E.A.R.'s program and its
+   libraries, the launcher, a README and `tools/xdvdfs.py`. Players unpack their own disc into it
+   ([tools/release](tools/release)). Never attach game files or the private test packages the
+   script's other modes make (they hold game data). Building from source stays documented in
+   [docs/SETUP.md](docs/SETUP.md).

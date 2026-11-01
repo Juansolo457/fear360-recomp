@@ -267,6 +267,13 @@ address = 0x82CCDA48
 registers = ["r3", "r4"]
 return_on_true = true
 
+# CScreenMgr::UpdateInterfaceSFX (sub_82454C28), once a frame while a menu screen is up: the
+# mouse's moves, clicks and wheel go to the PC's own menu handlers (src/fear_menu.cpp, #109).
+[[entrypoint.midasm_hook]]
+name = "FearMenuMouse"
+address = 0x82454C28
+registers = ["r1", "r3"]
+
 # High-FPS fixes (src/high_fps.h): the AI's update delay (0.01 s) made shorter than a frame, so
 # enemies update every frame above 100 fps (a severed body keeps it). SetNextServerUpdate, at its
 # fmr f31,f1: the character in r3, the delay in f1.

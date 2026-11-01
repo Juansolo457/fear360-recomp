@@ -39,6 +39,8 @@ struct Entry {
   std::string file;
   uint32_t data_offset = 0;
   uint64_t data_size = 0;
+  // A built-in replacement's data (no file): the key caps (keycaps.inc).
+  const uint8_t* embedded = nullptr;
 };
 
 // The 360 texture's identity: base level bytes as they sit in guest memory, and the fetch
@@ -46,8 +48,13 @@ struct Entry {
 uint64_t ReplacementKey(const uint8_t* base_data, uint32_t base_size, uint32_t format,
                         uint32_t width, uint32_t height, bool tiled, uint32_t pitch);
 
-// Whether a pack is configured and loaded (loads it on the first call).
+// Whether there are replacements (loads them on the first call): a pack configured and loaded,
+// or the built-in ones. F.E.A.R. with the keyboard and mouse playing at startup (fear_mkb) has
+// two built in: key caps, Enter and Esc, for the menus' A and B button prompts (main menu, pause
+// menu, message boxes: Interface\menu\buttons\x360_button_A/B.tex, tools/keycaps.py).
 bool Enabled();
+// Whether a pack folder is loaded (the PC's textures, for the memory budget).
+bool PackLoaded();
 // Whether new texture keys should be logged (fear_texture_log_keys).
 bool LogKeys();
 const Entry* Find(uint64_t key);

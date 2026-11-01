@@ -24,24 +24,24 @@ Setup (Desktop Mode)
   3. In the library, right-click the new entry > Properties:
        - Compatibility: leave "Force the use of a specific Steam Play compatibility tool"
          UNTICKED. This is a Linux program; Proton can't run it.
-       - Shortcut > LAUNCH OPTIONS: leave empty (the frame rate is in PC Settings).
+       - Shortcut > LAUNCH OPTIONS: leave empty (the frame rate is in Recompilation Settings).
   4. Rename it (e.g. "F.E.A.R.") and go back to Game Mode.
 
 It starts at the collection menu; pick F.E.A.R. The controller comes through Steam Input, as for
 any non-Steam game.
 
-Settings: PC Settings in the game's main menu. It starts at the Deck baseline: the 360's settings
-(field of view 70, no bloom) at up to 120 fps, with MSAA off.
+Settings: Recompilation Settings in the game's main menu. It starts at the Deck baseline: the
+360's settings (field of view 70, no bloom) at up to 120 fps, with MSAA off.
 
-The frame rate: PC Settings > Frame rate, 120 fps until changed there (Save and restart applies
-it). Mailbox presentation: no tearing; frames beyond the screen's refresh are dropped. The Deck's
+The frame rate: Recompilation Settings > Frame rate limit, 120 fps until changed there (Save and
+restart applies it). Mailbox presentation: no tearing; frames beyond the screen's refresh are dropped. The Deck's
 own screen shows up to 90. Docked, a TV at 60 Hz shows 60 even with 120 set; for 120, put the TV
 in its 120 Hz mode (a "game" or "PC" input on most TVs) and pick 120 Hz in Steam's display
 settings. 120 Hz over the dock needs a cable and TV port for HDMI 2.1; if the picture drops out
 at 120 Hz, try 60 Hz.
 
 Launch options (Properties > Shortcut > LAUNCH OPTIONS):
-  FEAR_FPS=60 %command%      this frame rate instead of PC Settings'
+  FEAR_FPS=60 %command%      this frame rate instead of Recompilation Settings'
   FEAR_GOD=1 %command%       the player can't die (for testing)
 
 The first run builds shaders and pipelines as they appear (brief hitches the first time an area

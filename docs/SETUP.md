@@ -1,14 +1,13 @@
 # Build and play from your own disc
 
-**1.0 is F.E.A.R. on Linux and the Steam Deck:** see [Linux and Steam Deck](#linux-and-steam-deck).
-It needs only your F.E.A.R. disc. *F.E.A.R. Files* (Extraction Point + Perseus Mandate) and the
-Windows build come in later releases: the steps for them below still build, but they aren't
-tested or supported in 1.0.
+**To just play:** 1.5's release has ready-built zips for Windows and for Linux and the Steam
+Deck; unpack your disc into one and play (its README.txt says how). This page is for building the
+game yourself. *F.E.A.R. Files* (Extraction Point + Perseus Mandate) comes in a later release: its
+steps below still build, but it isn't tested or supported yet.
 
-This project ships **source only**. There is no download that contains the game: the game's
-code is translated from your copy of the Xbox 360 disc on your own PC, and the game data comes
-from the same disc. You need your own disc of **F.E.A.R.** (and, once it's supported, of
-**F.E.A.R. Files**).
+No download contains game data: it comes from your own disc of **F.E.A.R.** (and, once it's
+supported, of **F.E.A.R. Files**). Building translates the game's code from that disc on your
+own PC.
 
 The first build takes 20–40 minutes. After that, rebuilds take a minute or two.
 
@@ -94,24 +93,25 @@ contain code translated from your disc: keep them to yourself.
 pwsh -NoProfile -File tools/launch.ps1 -Collection
 ```
 
-This opens the collection menu: pick **F.E.A.R.** or **F.E.A.R. Files**; *Switch Game* in either
+This opens the collection menu (add `-WithFiles` to make *F.E.A.R. Files* playable there; without it, Files is listed as coming later): pick **F.E.A.R.** or **F.E.A.R. Files**; *Switch Game* in either
 game's main menu comes back to it. Play with an Xbox controller, as on the console; plug it in
 before you start. If the controller doesn't react in the collection menu, click the game window
 once so it has focus. On Windows the games read controllers through XInput, so other pads
 (PlayStation, Switch) need Steam Input or another XInput wrapper, or the SDL setting under
 *When something goes wrong*.
 
-In each game's main menu, **PC Settings** sets the frame rate limit, anti-aliasing, texture
+In each game's main menu, **Recompilation Settings** sets the frame rate limit, anti-aliasing, texture
 filtering and sharpness, field of view, aim assist, right-stick feel, EchoPatch's options and
 more. Saves and settings stay in each
 game's `user` folder.
 
-Useful launcher options: `-FrameRate <n>` (a frame rate limit), `-Windowed`. The game draws at
-the 360's 1280×720 for now and is scaled to your screen; resolution scaling comes back to the
-Direct3D 12 renderer later. All of them are described at the top of `tools/launch.ps1`.
+Useful launcher options: `-FrameRate <n>` (a frame rate limit), `-Windowed`. All of them are
+described at the top of `tools/launch.ps1`. *Recompilation Settings → Resolution* draws the game
+at 1280×720, 2560×1440 or 3840×2160 (*Match display*: the smallest at least as tall as your
+screen).
 
-**PC textures.** If you also own the PC version, you can build a pack of its higher-resolution
-textures ([TEXTURES.md](TEXTURES.md)), but the Direct3D 12 renderer can't use it yet.
+**PC textures and sharper text.** If you also own the PC version, build a pack of its
+higher-resolution textures and the redrawn fonts ([TEXTURES.md](TEXTURES.md)); both renderers use it.
 
 **Steam Deck:** use the native Linux build below.
 

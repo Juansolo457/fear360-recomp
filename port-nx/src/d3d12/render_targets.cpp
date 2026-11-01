@@ -77,9 +77,22 @@ bool Intersects(const D3D12_RECT& a, const D3D12_RECT& b) {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-// One clear call of `v` over `rects` (none: the whole target).
+// Guest-pixel rectangles in a target's host pixels (DrawResolutionScale).
+const D3D12_RECT* Scaled(const D3D12_RECT* rects, UINT n, uint32_t scale,
+                         std::vector<D3D12_RECT>& storage) {
+  if (scale == 1 || !n) return rects;
+  storage.resize(n);
+  for (UINT i = 0; i < n; ++i)
+    storage[i] = {LONG(rects[i].left * LONG(scale)), LONG(rects[i].top * LONG(scale)),
+                  LONG(rects[i].right * LONG(scale)), LONG(rects[i].bottom * LONG(scale))};
+  return storage.data();
+}
+
+// One clear call of `v` over `rects` (none: the whole target), in guest pixels.
 void Record(ID3D12GraphicsCommandList* list, RenderTarget* rt, const ClearValue& v,
-            const D3D12_RECT* rects, UINT n) {
+            const D3D12_RECT* rects, UINT n, uint32_t scale) {
+  std::vector<D3D12_RECT> storage;
+  rects = Scaled(rects, n, scale, storage);
   if (rt->depth) {
     RenderTargets::Transition(list, rt, D3D12_RESOURCE_STATE_DEPTH_WRITE);
     list->ClearDepthStencilView(rt->view, D3D12_CLEAR_FLAGS(v.flags), v.depth, v.stencil, n,
@@ -97,6 +110,7 @@ RenderTargets::~RenderTargets() = default;
 
 bool RenderTargets::Initialize(ID3D12Device* device) {
   device_ = device;
+  scale_ = DrawResolutionScale();
   D3D12_DESCRIPTOR_HEAP_DESC hd = {};
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
   hd.NumDescriptors = kMaxViews + kNullRtvs;
@@ -141,10 +155,12 @@ void RenderTargets::Retire(ComPtr<ID3D12Resource> resource) {
 }
 
 bool RenderTargets::Create(RenderTarget* rt, uint32_t width, uint32_t height) {
+  // The resource holds the target at the draw resolution scale; rt's size stays in guest pixels.
+  width = std::max({1u, rt->pitch, width});
   D3D12_RESOURCE_DESC d = {};
   d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  d.Width = std::max({1u, rt->pitch, width});
-  d.Height = height;
+  d.Width = uint64_t(width) * scale_;
+  d.Height = height * scale_;
   d.DepthOrArraySize = 1;
   d.MipLevels = 1;
   d.Format = rt->resource_format;
@@ -167,11 +183,11 @@ bool RenderTargets::Create(RenderTarget* rt, uint32_t width, uint32_t height) {
   if (log_)
     std::fprintf(log_, "rt created %s base %u pitch %u x%u format %d %ux%u%s\n",
                  rt->depth ? "depth" : "color", rt->edram_base, rt->pitch, rt->samples,
-                 int(rt->view_format), uint32_t(d.Width), height, rt->resource ? " (grown)" : "");
+                 int(rt->view_format), width, height, rt->resource ? " (grown)" : "");
   Retire(std::move(rt->resource));
   rt->resource = std::move(res);
   rt->state = initial;
-  rt->width = uint32_t(d.Width);
+  rt->width = width;
   rt->height = height;
   rt->pending_count = 0;  // a grown target loses the old one's content
   if (rt->view_index == UINT32_MAX) {
@@ -242,7 +258,8 @@ RenderTarget* RenderTargets::Get(bool depth, uint32_t surface_info, uint32_t inf
   // and the host target, which holds all the tiles at once, is as wide as the untiled draws reach
   // (the scissor, which the tracker sets untiled). GRAW's and PGR4's tiles are full-width bands:
   // there the pitch is the width already, and only the height grows.
-  width = std::min(width, kMaxWidth);
+  // D3D12's largest texture is 16384 pixels across.
+  width = std::min(width, std::min(kMaxWidth, 16384 / scale_));
   if (memo.rt && memo.key == key && std::min(height, kMaxHeight) <= memo.rt->height &&
       width <= memo.rt->width) {
     memo.rt->guest_format = guest_format;
@@ -402,7 +419,7 @@ void RenderTargets::Defer(ID3D12GraphicsCommandList* list, RenderTarget* rt, con
   const size_t n = std::max<size_t>(rects.size(), 1);
   if (rt->pending_count + n > kMaxPendingClears) Flush(list, rt);
   if (n > kMaxPendingClears) {
-    Record(list, rt, v, rects.data(), UINT(rects.size()));
+    Record(list, rt, v, rects.data(), UINT(rects.size()), scale_);
     return;
   }
   if (rects.empty()) {
@@ -446,7 +463,7 @@ void RenderTargets::Flush(ID3D12GraphicsCommandList* list, RenderTarget* rt) {
            ++i)
         rects[n++] = rt->pending[i].rect;
     }
-    Record(list, rt, first.value, rects, n);
+    Record(list, rt, first.value, rects, n, scale_);
   }
   if (log_)
     std::fprintf(log_, "rt pending clears of %s base %u pitch %u x%u: %u recorded in %u calls\n",
@@ -484,7 +501,8 @@ void RenderTargets::SyncEdram(ID3D12GraphicsCommandList* list, RenderTarget* rt)
       if (rt->pending_count) Flush(list, rt);
     }
     Transition(list, rt, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    list->ClearRenderTargetView(rt->view, f.color, nr, rects);
+    std::vector<D3D12_RECT> scaled;
+    list->ClearRenderTargetView(rt->view, f.color, nr, Scaled(rects, nr, scale_, scaled));
     if (log_)
       std::fprintf(log_,
                    "edram fill seq %llu at tile %u pitch %u color %g,%g,%g,%g applied to base %u "

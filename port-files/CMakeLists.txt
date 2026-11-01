@@ -55,7 +55,9 @@ set(FEAR_SOURCES
     ${HOST}/crash_report.cpp
     ${HOST}/display_vblank.cpp
     ${HOST}/fear_collection.cpp
+    ${HOST}/fear_controls.cpp
     ${HOST}/fear_menu.cpp
+    ${HOST}/fear_mkb.cpp
     ${HOST}/fear_panel.cpp
     ${HOST}/fear_process.cpp
     ${HOST}/fear_settings.cpp

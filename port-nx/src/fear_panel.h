@@ -1,4 +1,4 @@
-// F.E.A.R. 360 - the look and the input of the port's own panels: PC Settings, the quit
+// F.E.A.R. 360 - the look and the input of the port's own panels: Recompilation Settings, the quit
 // confirmation (fear_settings.h) and the collection menu (fear_collection.h).
 //
 // A panel is an ImGui dialog over the game, centered, in a large font (Bahnschrift from Windows),
@@ -63,8 +63,9 @@ class Panel : public rex::ui::ImGuiDialog {
 bool AnyOpen();
 
 // A centered, untitled panel in the panel font, width_em font sizes wide; draw it between the two
-// (EndPanel always, whatever BeginPanel returned).
-bool BeginPanel(const char* id, float width_em);
+// (EndPanel always, whatever BeginPanel returned). font_scale shrinks the font (and so the panel)
+// for one that would otherwise be taller than the screen.
+bool BeginPanel(const char* id, float width_em, float font_scale = 1.0f);
 void EndPanel();
 // The panel font at a size for the display.
 float FontSize();
@@ -73,8 +74,9 @@ void PopFont();
 
 // Grey wrapped text, for notes.
 void Dim(const char* text);
-// A full-width selectable row; true when clicked. Hovering with a moving mouse selects it.
-bool Row(const char* label, int index, int& selected);
+// A selectable row, across the table's columns (or the window); true when clicked. Hovering with
+// a moving mouse selects it. With a width, that wide instead (buttons side by side).
+bool Row(const char* label, int index, int& selected, float width = 0.0f);
 
 // In ReXApp::OnConfigureFonts.
 void AddFonts(ImFontAtlas* atlas);

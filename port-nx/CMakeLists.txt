@@ -67,7 +67,9 @@ set(FEAR_SOURCES
     src/crash_report.cpp
     src/display_vblank.cpp
     src/fear_collection.cpp
+    src/fear_controls.cpp
     src/fear_menu.cpp
+    src/fear_mkb.cpp
     src/fear_panel.cpp
     src/fear_process.cpp
     src/fear_settings.cpp
@@ -122,4 +124,9 @@ target_include_directories(fear PRIVATE
 add_executable(fear_texindex tools/texindex.cpp src/texture_pack.cpp)
 target_include_directories(fear_texindex PRIVATE src "${REXSDK_DIR}/src/graphics")
 target_link_libraries(fear_texindex PRIVATE rexgpu-xenos rex::runtime xxHash::xxhash)
+# Linux: the SDK's libraries next to it too (the release zip puts it beside the game's), besides
+# the build tree's path CMake gives it (a standalone build of the indexer).
+if(UNIX AND NOT APPLE)
+    set_target_properties(fear_texindex PROPERTIES BUILD_RPATH "\$ORIGIN")
+endif()
 add_dependencies(fear fear_texindex)

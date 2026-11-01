@@ -41,6 +41,14 @@ inline uint32_t SurfaceSamples(uint32_t surface_info) {
 // sizes the EDRAM layout (RenderTarget::guest_samples).
 uint32_t HostSamples(uint32_t surface_info);
 
+// The D3D12 renderer's draw resolution scale (--fear_d3d12_resolution_scale, read once): host
+// pixels per guest pixel across and down, 1 (the 360's 1280x720) to kMaxDrawResolutionScale
+// (3840x2160). Its render targets are this much larger than the guest's surfaces, and each
+// resolve keeps a scaled image beside the guest-sized one (resolve.h). Every size and rectangle
+// stays in guest pixels until it reaches the GPU. The Vulkan renderer draws at 1.
+constexpr uint32_t kMaxDrawResolutionScale = 3;
+uint32_t DrawResolutionScale();
+
 // The guest D3D device fields this module reads (fear_d3d.h). The register shadow blocks are
 // the ones the draws' inline flush sends; the surfaces are what SetRenderTarget /
 // SetDepthStencilSurface bind and Resolve (sub_82984718) reads.

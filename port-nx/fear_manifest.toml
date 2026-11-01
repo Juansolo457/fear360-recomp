@@ -286,6 +286,13 @@ address = 0x828797D0
 registers = ["r3", "r4"]
 return_on_true = true
 
+# CScreenMgr::UpdateInterfaceSFX (sub_8245FF30), once a frame while a menu screen is up: the
+# mouse's moves, clicks and wheel go to the PC's own menu handlers (src/fear_menu.cpp, #109).
+[[entrypoint.midasm_hook]]
+name = "FearMenuMouse"
+address = 0x8245FF30
+registers = ["r1", "r3"]
+
 # Debugging (src/fx_debug.cpp, fear_debug_weapon_fire): CClientWeapon::HandleFireKey's check that
 # the weapon is still firing (state 2) before a fire key becomes a shot, and each impact's
 # CWeaponFX::CreateObject. For the pistol's missing impacts.
@@ -505,6 +512,21 @@ name = "FearD3DWaitEnd"
 address = 0x82973A80
 registers = []
 
+# Keyboard and mouse (src/fear_mkb.h, #59): CBindMgr's update (sub_82336FA8, the manager in r30),
+# after its loop has built the frame's command states and before it compares them with the last
+# frame's to send the command on and off events. The commands whose keys are held go on here.
+[[entrypoint.midasm_hook]]
+name = "FearMkbCommands"
+address = 0x82337300
+registers = ["r30"]
+
+# The same update at its entry, once a frame whatever the interface is doing: the mouse goes to
+# the menus over play, the pause menu among them (src/fear_menu.cpp, #109).
+[[entrypoint.midasm_hook]]
+name = "FearMenuMouseInGame"
+address = 0x82336FA8
+registers = ["r1"]
+
 # Native C runtime (#31, docs/ARCHITECTURE.md): these guest functions are replaced by the SDK's
 # host versions (third_party/rexglue-sdk-nx/src/kernel/crt/memory.cpp), which take the same guest
 # pointers. memcpy alone was 1-4% of the game thread on the Steam Deck. Identified by disassembly:
@@ -513,3 +535,26 @@ registers = []
 [entrypoint.rexcrt]
 memcpy = 0x8287D240
 memset = 0x8287B540
+
+# Keyboard and mouse (src/fear_mkb.h, HintKey): the hint text's |Command| expanders put the
+# command's button glyph into the text with one insert (sub_8236F290, the text at r5, r6
+# characters); the command's name is at r1+276. Four copies of the same code.
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x82367AC8
+registers = ["r1", "r5", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x8248CAE0
+registers = ["r1", "r5", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x824D8440
+registers = ["r1", "r5", "r6"]
+
+[[entrypoint.midasm_hook]]
+name = "FearHintKey"
+address = 0x82455D98
+registers = ["r1", "r5", "r6"]

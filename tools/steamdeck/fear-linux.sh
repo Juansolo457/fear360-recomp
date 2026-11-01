@@ -4,8 +4,8 @@
 # program, assets/ and user/).
 # Starts the collection menu in F.E.A.R. (fear/fear), through collection-linux.toml, which this
 # script writes. 1.0 is F.E.A.R. alone: the menu lists F.E.A.R. Files as coming later.
-#   FEAR_FPS=60       the frame rate for this start (default: PC Settings' Frame rate, 120 until
-#                     changed there); a timer at twice it paces the game
+#   FEAR_FPS=60       the frame rate for this start (default: Recompilation Settings' Frame rate
+#                     limit, 120 until changed there); a timer at twice it paces the game
 #   FEAR_GOD=1        the player can't die (fear_invulnerable: the smoke test, #55)
 # Development, with a fearfiles/ folder (make_package.py --linux --files):
 #   FEAR_FILES=1      list F.E.A.R. Files as a game to play; Switch Game goes between the two
@@ -20,8 +20,9 @@ info="$here/fear/logs/system-$stamp.txt"
 
 # The settings each game starts with; the collection passes them on when it switches games.
 # A command-line flag beats user/settings.toml. No timer flags: with no display vblank to wait
-# on (Linux), the game runs its timer at twice PC Settings' frame rate, so changing it there works
-# (pinned to 240 Hz here, every other choice came back at 30 fps after Save and restart).
+# on (Linux), the game runs its timer at twice Recompilation Settings' frame rate, so changing it
+# there works (pinned to 240 Hz here, every other choice came back at 30 fps after Save and
+# restart).
 args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_data_root user
       --cache_root cache --no-vulkan_allow_present_mode_immediate)
 [ -n "$fps" ] && args+=(--fear_frame_rate_limit "$fps")
@@ -65,7 +66,7 @@ fi
     echo "libstdc++: $libstdcxx LACKS GLIBCXX_3.4.32 (needed): the game can't start"
   fi
   echo "display: DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
-  echo "fps: ${fps:-PC Settings}"
+  echo "fps: ${fps:-Recompilation Settings}"
   # The controllers: what Steam Input tells SDL, and the input devices the game can open.
   echo "--- controller environment"
   env | grep -E '^(SDL_|SteamVirtualGamepadInfo|SteamAppId|SteamGameId|SteamDeck)' | cut -c1-300
@@ -87,7 +88,8 @@ elif [ -n "$FEAR_START" ]; then
   start=(--fear_collection_start fear)
 fi
 if [ ! -f assets/default.xex ]; then
-  echo "No $program/assets/default.xex: unpack this over the FEAR360-SteamDeck folder" | tee -a "$info" >&2
+  echo "No $program/assets/default.xex: unpack your disc there (see the README)" \
+    | tee -a "$info" >&2
   exit 1
 fi
 "./$program" "${args[@]}" --fear_collection ../collection-linux.toml "${start[@]}" "$@" \

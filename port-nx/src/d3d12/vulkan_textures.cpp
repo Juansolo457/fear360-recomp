@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "../texture_pack.h"
+
 namespace fear::d3d12 {
 
 namespace xenos = rex::graphics::xenos;
@@ -134,6 +136,7 @@ VulkanTextureCache::~VulkanTextureCache() {
   VkDevice d = device_.device();
   for (auto& [key, view] : resolved_views_) device_.fn().vkDestroyImageView(d, view, nullptr);
   for (const RetiredView& r : retired_views_) device_.fn().vkDestroyImageView(d, r.view, nullptr);
+  for (RetiredImage& r : retired_images_) memory_.Destroy(r.image);
   for (auto& [key, t] : textures_) {
     for (auto& [vk, view] : t->views) device_.fn().vkDestroyImageView(d, view, nullptr);
     memory_.Destroy(t->image);
@@ -200,32 +203,66 @@ void VulkanTextureCache::ForgetResolvedImage(VkImage image, uint64_t frame) {
   }
 }
 
-VulkanTextureCache::Texture* VulkanTextureCache::Create(const TextureKey& key,
-                                                        const HostFormat* host) {
-  auto t = std::make_unique<Texture>();
-  t->key = key;
-  t->host = host;
-  t->format_unsigned = VulkanFormatOf(host->unorm);
-  t->format_signed = host->snorm == DXGI_FORMAT_UNKNOWN ? VK_FORMAT_UNDEFINED
-                                                        : VulkanFormatOf(host->snorm);
-  if (t->format_unsigned == VK_FORMAT_UNDEFINED) return nullptr;
-  const bool cube = key.dimension == xenos::DataDimension::kCube;
+bool VulkanTextureCache::MakeImage(Texture& t, const fear::texture_pack::Entry* pack,
+                                   uint64_t frame) {
+  const TextureKey& key = t.key;
+  const VkFormat guest_unsigned = VulkanFormatOf(t.host->unorm);
+  const VkFormat guest_signed = t.host->snorm == DXGI_FORMAT_UNKNOWN ? VK_FORMAT_UNDEFINED
+                                                                     : VulkanFormatOf(t.host->snorm);
   VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-  ii.flags = (cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0) |
-             (t->format_signed != VK_FORMAT_UNDEFINED && t->format_signed != t->format_unsigned
-                  ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT
-                  : 0);
-  ii.imageType = key.is_3d() ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-  ii.format = t->format_unsigned;
-  ii.extent = {key.width, key.height, key.depth()};
-  ii.mipLevels = key.mip_levels();
-  ii.arrayLayers = key.array_size();
+  VkFormat format_signed = guest_signed;
+  if (pack) {
+    // In the 360 texture's own host format when that is the replacement's, its signed view
+    // included (textures.cpp's PackHostFormat); otherwise the replacement's, unsigned only.
+    ii.format = pack->format;
+    if (pack->format != guest_unsigned) format_signed = VK_FORMAT_UNDEFINED;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.extent = {pack->width, pack->height, 1};
+    ii.mipLevels = pack->mip_count;
+    ii.arrayLayers = 1;
+  } else {
+    ii.format = guest_unsigned;
+    if (key.dimension == xenos::DataDimension::kCube)
+      ii.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    ii.imageType = key.is_3d() ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    ii.extent = {key.width, key.height, key.depth()};
+    ii.mipLevels = key.mip_levels();
+    ii.arrayLayers = key.array_size();
+  }
+  if (ii.format == VK_FORMAT_UNDEFINED) return false;
+  if (format_signed != VK_FORMAT_UNDEFINED && format_signed != ii.format)
+    ii.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
   ii.samples = VK_SAMPLE_COUNT_1_BIT;
   ii.tiling = VK_IMAGE_TILING_OPTIMAL;
   ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  if (!memory_.CreateImage(ii, &t->image, "texture")) return nullptr;
+  VulkanMemory::Image image;
+  if (!memory_.CreateImage(ii, &image, pack ? "texture pack image" : "texture")) return false;
+  // The frames up to this one may still read the old image through its views.
+  if (t.image.image) {
+    for (auto& [vk, view] : t.views)
+      if (view) retired_views_.push_back({view, frame});
+    t.views.clear();
+    retired_images_.push_back({t.image, frame});
+  }
+  t.image = image;
+  t.format_unsigned = ii.format;
+  t.format_signed = format_signed;
+  t.pack = pack;
+  t.host_swizzle = pack && pack->swizzle != fear::texture_pack::kSameSwizzle
+                       ? pack->swizzle
+                       : t.host->host_swizzle;
+  t.initialized = false;
+  return true;
+}
+
+VulkanTextureCache::Texture* VulkanTextureCache::Create(const TextureKey& key,
+                                                        const HostFormat* host) {
+  auto t = std::make_unique<Texture>();
+  t->key = key;
+  t->host = host;
+  if (!MakeImage(*t, nullptr, 0)) return nullptr;
   // The guest memory it is read from, watched from its first upload on.
   uint32_t base_bytes = 0, mips_bytes = 0;
   GetGuestExtents(key, &base_bytes, &mips_bytes);
@@ -241,17 +278,108 @@ VulkanTextureCache::Texture* VulkanTextureCache::Create(const TextureKey& key,
   return raw;
 }
 
+const fear::texture_pack::Entry* VulkanTextureCache::PackReplacement(const Texture& t,
+                                                                     uint64_t* key) {
+  namespace pack = fear::texture_pack;
+  const bool log_keys = pack::LogKeys();
+  if (!pack::Enabled() && !log_keys) return nullptr;
+  const TextureKey& k = t.key;
+  if (k.dimension != xenos::DataDimension::k2DOrStacked || k.array_size() != 1 || !k.base_page)
+    return nullptr;
+  // The base level's guest bytes, as the offline indexer (tools/texindex.cpp) hashes them.
+  uint32_t base_bytes = 0, mips_bytes = 0;
+  GetGuestExtents(k, &base_bytes, &mips_bytes);
+  const uint32_t base = k.base_page << 12;
+  if (!base_bytes || base >= kMemorySize || base_bytes > kMemorySize - base) return nullptr;
+  // A resolve destination holds what the GPU drew, not a file's texels.
+  if (resolved_ && resolved_(base).image) return nullptr;
+  *key = pack::ReplacementKey(membase_ + base, base_bytes, uint32_t(k.format), k.width, k.height,
+                              k.tiled, k.pitch);
+  if (log_keys && keys_logged_ < 65536) {
+    ++keys_logged_;
+    REXLOG_INFO("[texpack] key={:016X} format={} size={}x{} tiled={} pitch={} base={} mips={} "
+                "address={:08X}",
+                *key, uint32_t(k.format), k.width, k.height, uint32_t(k.tiled), k.pitch,
+                base_bytes, k.mip_levels(), base);
+  }
+  const pack::Entry* e = pack::Find(*key);
+  if (pack::Enabled()) pack::CountLookup(e != nullptr);
+  return e;
+}
+
+void VulkanTextureCache::RecordCopies(Texture& t, VkCommandBuffer cmd, VkBuffer buffer,
+                                      const std::vector<VkBufferImageCopy>& regions) {
+  const VulkanDevice::Functions& fn = device_.fn();
+  VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b.image = t.image.image;
+  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0,
+                        VK_REMAINING_ARRAY_LAYERS};
+  b.oldLayout = t.initialized ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
+  b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  constexpr VkPipelineStageFlags kShaders =
+      VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  fn.vkCmdPipelineBarrier(cmd, kShaders, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
+                          1, &b);
+  fn.vkCmdCopyBufferToImage(cmd, buffer, t.image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            uint32_t(regions.size()), regions.data());
+  b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, kShaders, 0, 0, nullptr, 0, nullptr,
+                          1, &b);
+  t.initialized = true;
+}
+
+VulkanTextureCache::PackUpload VulkanTextureCache::UploadPack(Texture& t, VkCommandBuffer cmd,
+                                                              uint64_t frame) {
+  // The DDS mips, tight, level after level, each copied to an offset Vulkan takes (a multiple
+  // of the block size and of 4).
+  const fear::texture_pack::Entry& e = *t.pack;
+  scratch_.resize(size_t(e.data_size));
+  if (!fear::texture_pack::ReadData(e, scratch_.data(), scratch_.size()))
+    return PackUpload::kUnreadable;
+  struct Level {
+    uint64_t src, dst, bytes;
+    uint32_t width, height;
+  };
+  std::vector<Level> levels;
+  uint64_t src = 0, total = 0;
+  for (uint32_t level = 0; level < e.mip_count; ++level) {
+    const uint32_t w = std::max(e.width >> level, 1u), h = std::max(e.height >> level, 1u);
+    const uint64_t bytes = uint64_t((w + e.block_width - 1) / e.block_width) *
+                           ((h + e.block_height - 1) / e.block_height) * e.block_bytes;
+    total = (total + 15) & ~uint64_t(15);
+    levels.push_back({src, total, bytes, w, h});
+    src += bytes;
+    total += bytes;
+  }
+  VulkanUploadPool::Alloc a;
+  if (!upload_.Allocate(total, 16, frame, &a)) return PackUpload::kRetry;
+  std::vector<VkBufferImageCopy> regions;
+  regions.reserve(levels.size());
+  for (uint32_t level = 0; level < levels.size(); ++level) {
+    const Level& l = levels[level];
+    std::memcpy(a.cpu + l.dst, scratch_.data() + l.src, size_t(l.bytes));
+    VkBufferImageCopy r{};
+    r.bufferOffset = a.offset + l.dst;
+    r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+    r.imageExtent = {l.width, l.height, 1};
+    regions.push_back(r);
+  }
+  RecordCopies(t, cmd, a.buffer, regions);
+  ++stats_.uploads;
+  ++stats_.pack_uploads;
+  stats_.upload_bytes += total;
+  return PackUpload::kOk;
+}
+
 bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame) {
   const TextureKey& key = t.key;
   const texture_util::TextureGuestLayout layout = GetGuestLayout(key);
-  if (!GetHostFootprints(key, false, &subresources_)) return false;
-  // Vulkan buffer copies: offsets aligned to the block size and 4 (16 covers both).
-  uint64_t total = 0;
-  for (HostSubresource& s : subresources_) {
-    total = (total + 15) & ~uint64_t(15);
-    s.offset = total;
-    total += s.size();
-  }
   uint32_t base_bytes = 0, mips_bytes = 0;
   GetGuestExtents(key, layout, &base_bytes, &mips_bytes);
   const uint32_t base = key.base_page << 12, mips = key.mip_page << 12;
@@ -263,6 +391,54 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
   } else {
     if (base_bytes) guest_->EnablePhysicalMemoryAccessCallbacks(base, base_bytes, true, false);
     if (mips_bytes) guest_->EnablePhysicalMemoryAccessCallbacks(mips, mips_bytes, true, false);
+  }
+  // The texture pack (texture_pack.h): the new content may have the PC's copy, in an image of its
+  // own size, format and mips; content without one goes back to an image for the guest's data.
+  uint64_t pack_key = 0;
+  const fear::texture_pack::Entry* pack = PackReplacement(t, &pack_key);
+  if (pack != t.pack && !MakeImage(t, pack, frame)) {
+    if (!pack) {
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
+    fear::texture_pack::MarkBad(pack_key);
+    pack = nullptr;
+    if (t.pack && !MakeImage(t, nullptr, frame)) {
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
+  }
+  if (pack) {
+    // No upload memory earlier this frame: wait for the next (no second read of the file now).
+    if (t.pack_retry_frame == frame) {
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
+    const PackUpload result = UploadPack(t, cmd, frame);
+    if (result == PackUpload::kOk) return true;
+    if (result == PackUpload::kRetry) {
+      // Still dirty, so a Get in a later frame tries again.
+      t.pack_retry_frame = frame;
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
+    // Unreadable: the 360's texture from now on.
+    fear::texture_pack::MarkBad(pack_key);
+    if (!MakeImage(t, nullptr, frame)) {
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
+  }
+  if (!GetHostFootprints(key, false, &subresources_)) {
+    t.dirty.store(true, std::memory_order_release);
+    return false;
+  }
+  // Vulkan buffer copies: offsets aligned to the block size and 4 (16 covers both).
+  uint64_t total = 0;
+  for (HostSubresource& s : subresources_) {
+    total = (total + 15) & ~uint64_t(15);
+    s.offset = total;
+    total += s.size();
   }
   VulkanUploadPool::Alloc a;
   // A failed upload leaves it dirty, so the next Get tries again instead of keeping the old
@@ -285,20 +461,6 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
     return false;
   }
 
-  const VulkanDevice::Functions& fn = device_.fn();
-  VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-  b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  b.image = t.image.image;
-  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0,
-                        VK_REMAINING_ARRAY_LAYERS};
-  b.oldLayout = t.initialized ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
-  b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  constexpr VkPipelineStageFlags kShaders =
-      VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-  fn.vkCmdPipelineBarrier(cmd, kShaders, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                          1, &b);
   const FormatInfo* info = FormatInfo::Get(key.format);
   const uint32_t bw = t.host->block_compressed ? info->block_width : 1;
   const uint32_t bh = t.host->block_compressed ? info->block_height : 1;
@@ -313,15 +475,7 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
     r.imageExtent = {s.width, s.height, s.depth};
     regions.push_back(r);
   }
-  fn.vkCmdCopyBufferToImage(cmd, a.buffer, t.image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            uint32_t(regions.size()), regions.data());
-  b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  fn.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, kShaders, 0, 0, nullptr, 0, nullptr,
-                          1, &b);
-  t.initialized = true;
+  RecordCopies(t, cmd, a.buffer, regions);
   ++stats_.uploads;
   stats_.upload_bytes += total;
   return true;
@@ -440,8 +594,10 @@ bool VulkanTextureCache::Get(const uint32_t fetch[6], VkCommandBuffer cmd, uint6
       if (!t->initialized) return false;
     }
   }
-  out->view_unsigned = View(*t, false, swizzle);
-  out->view_signed = t->format_signed != VK_FORMAT_UNDEFINED ? View(*t, true, swizzle)
+  // A pack replacement may hold the guest's components in another channel order.
+  const uint32_t texture_swizzle = t->pack ? HostSwizzle(f.swizzle, t->host_swizzle) : swizzle;
+  out->view_unsigned = View(*t, false, texture_swizzle);
+  out->view_signed = t->format_signed != VK_FORMAT_UNDEFINED ? View(*t, true, texture_swizzle)
                                                              : VK_NULL_HANDLE;
   return out->view_unsigned != VK_NULL_HANDLE;
 }
@@ -457,6 +613,12 @@ void VulkanTextureCache::EndFrame(uint64_t completed) {
       ++i;
     }
   }
+  std::erase_if(retired_images_, [&](RetiredImage& r) {
+    if (r.fence > completed) return false;
+    memory_.Destroy(r.image);
+    return true;
+  });
+  fear::texture_pack::ReportStats();
 }
 
 }  // namespace fear::d3d12

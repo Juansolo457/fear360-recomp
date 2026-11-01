@@ -9,6 +9,7 @@
 #   ... -Files                    # F.E.A.R. Files (port-files, port-nx's host code)
 #   ... -Collection               # the collection menu: F.E.A.R. and F.E.A.R. Files
 #
+# -Collection lists F.E.A.R. Files as coming later, as the 1.0 releases do (-WithFiles to play it).
 # -Collection writes private/collection.toml with both games (each its own data, user and cache
 # folders, log, and texture pack when one is built: private/texture_pack, private/files/
 # texture_pack) and starts F.E.A.R. (or with -Files, F.E.A.R. Files) at the collection menu
@@ -21,9 +22,10 @@
 #
 #   ... -Collection -Invulnerable   # the smoke test (#55): both games, the player can't die
 #
-# port-nx and port-files draw with the D3D12 renderer only (docs/NATIVE_RENDERER.md), which has no
-# resolution scale or texture pack yet: -Scale applies to port only, and -TexturePack is refused
-# (no build reads a pack now; tools/texture_pack.py still builds one).
+# port-nx and port-files draw with the D3D12 renderer (docs/NATIVE_RENDERER.md): its resolution is
+# PC Settings > Resolution (fear_d3d12_resolution_scale), so -Scale applies to port only. It reads
+# a texture pack built by tools/texture_pack.py (docs/TEXTURES.md): -TexturePack <folder>, or with
+# -Collection each game's pack in private/ when there is one.
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Scale = 3,
@@ -32,6 +34,7 @@ param(
     [switch]$Nx,          # run port-nx (fear-nx's patched SDK + renderer) instead of port
     [switch]$Files,       # run F.E.A.R. Files (port-files: the same host code as port-nx)
     [switch]$Collection,  # the collection menu over F.E.A.R. and F.E.A.R. Files (implies -Nx)
+    [switch]$WithFiles,   # -Collection: F.E.A.R. Files startable (otherwise "coming soon", as in 1.0)
     # The game presents every 2 vblanks: 30 fps at the console's 60 Hz.
     # port-nx follows the display's own vblank (port-nx/src/display_vblank.h): each frame is
     # shown for a whole number of refreshes, the fewest that keep it at or under FrameRate
@@ -79,6 +82,24 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Files -or $Collection) { $Nx = $true }
 $given = $PSBoundParameters
+# Start-Process joins -ArgumentList with spaces: a value with a space (a texture pack in
+# "C:\Games\PC Textures") is quoted so the game gets it whole.
+# A TOML basic string (a path with an apostrophe or a backslash stays valid).
+function Toml([string]$Text) { '"' + ($Text -replace '\\', '\\' -replace '"', '\"') + '"' }
+# -Extra's flags: split at spaces, except inside double quotes
+# ('--fear_texture_pack "C:\PC Textures"' is two values, the path whole and unquoted).
+function Split-Extra([string]$Text) {
+    [regex]::Matches($Text, '"[^"]*"|[^\s"]+') | ForEach-Object { $_.Value.Trim('"') }
+}
+function Quote-Arguments([string[]]$List) {
+    # The Windows command-line rules: backslashes before a quote, and before the closing quote,
+    # doubled; a quote escaped.
+    $List | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+        } else { $_ }
+    }
+}
 $invariant = [System.Globalization.CultureInfo]::InvariantCulture
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
@@ -99,7 +120,7 @@ $log = Join-Path $port "logs\run-$stamp$tag.log"
 $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\$User",
-    '--cache_root', "$port\$Cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
+    '--cache_root', "$port\$Cache", '--log_file', $log) + @(Split-Extra $Extra)
 if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
 }
@@ -113,7 +134,8 @@ if ($isNx) {
     if ($Invulnerable) { $arguments += '--fear_invulnerable' }
 }
 if ($Pack) {
-    throw "-TexturePack: no build reads a texture pack yet; the D3D12 renderer gets one later (docs/NATIVE_RENDERER.md)."
+    if (!$isNx) { throw "-TexturePack: port-nx and port-files only (the D3D12 renderer reads it)." }
+    $arguments += @('--fear_texture_pack', (Resolve-Path $Pack).Path)
 }
 if ($isNx -and !$Timer) {
     # The game reports the rate it picked in its log ("vblank from the display").
@@ -150,30 +172,37 @@ foreach ($name in 'fear', 'fearfiles') {
 }
 
 if ($Collection) {
-    # No texture packs: the D3D12 renderer has none yet (docs/NATIVE_RENDERER.md, punch list).
+    # Each game's texture pack when one is built (docs/TEXTURES.md); -TexturePack wins for F.E.A.R.
     $root = Join-Path $PSScriptRoot '..' | Resolve-Path
     $titles = @(
-        @{ Id = 'fear'; Title = 'nx'; Name = 'F.E.A.R.'; Subtitle = 'First Encounter Assault Recon' },
-        @{ Id = 'files'; Title = 'files'; Name = 'F.E.A.R. Files'; Subtitle = 'Extraction Point and Perseus Mandate' })
+        @{ Id = 'fear'; Title = 'nx'; Name = 'F.E.A.R.'; Subtitle = 'First Encounter Assault Recon'; Pack = 'private\texture_pack' },
+        @{ Id = 'files'; Title = 'files'; Name = 'F.E.A.R. Files'; Subtitle = 'Extraction Point and Perseus Mandate'; Pack = 'private\files\texture_pack' })
     $toml = @('# The F.E.A.R. collection menu (port-nx/src/fear_collection.h), written by tools/launch.ps1 -Collection.')
     $runs = @{}
     foreach ($t in $titles) {
-        $run = Get-Run $t.Title ''
+        $pack = Join-Path $root $t.Pack
+        $pack = if ($TexturePack -and $t.Title -eq 'nx') { $TexturePack }
+                elseif (Test-Path (Join-Path $pack 'index.tsv')) { $pack } else { '' }
+        $run = Get-Run $t.Title $pack
         $runs[$t.Id] = $run
-        $toml += '', '[[title]]', "id = '$($t.Id)'", "name = '$($t.Name)'", "subtitle = '$($t.Subtitle)'",
-            "exe = '$($run.Executable)'", "working_dir = '$($run.Port)'",
-            ('args = [' + (($run.Arguments | ForEach-Object { "'$_'" }) -join ', ') + ']')
+        $toml += '', '[[title]]', "id = $(Toml $t.Id)", "name = $(Toml $t.Name)",
+            "subtitle = $(Toml $t.Subtitle)", "exe = $(Toml $run.Executable)",
+            "working_dir = $(Toml $run.Port)",
+            ('args = [' + (($run.Arguments | ForEach-Object { Toml $_ }) -join ', ') + ']')
+        # The Windows 1.0 release is F.E.A.R. alone, as Linux's: Files is listed as coming later
+        # (#118: its keyboard and mouse aren't done). -WithFiles or -Files to play it.
+        if ($t.Id -eq 'files' -and !$WithFiles -and !$Files) { $toml += 'later = true' }
     }
     $file = Join-Path $root 'private\collection.toml'
     New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
     Set-Content -Path $file -Value $toml -Encoding utf8NoBOM
     $first = $runs[$(if ($Files) { 'files' } else { 'fear' })]
     $arguments = $first.Arguments + @('--fear_collection', $file)
-    $process = Start-Process -FilePath $first.Executable -WorkingDirectory $first.Port -ArgumentList $arguments -PassThru
+    $process = Start-Process -FilePath $first.Executable -WorkingDirectory $first.Port -ArgumentList (Quote-Arguments $arguments) -PassThru
     "collection $file; pid $($process.Id), log $($first.Log)"
     return
 }
 
 $run = Get-Run $(if ($Files) { 'files' } elseif ($Nx) { 'nx' } else { 'port' }) $TexturePack
-$process = Start-Process -FilePath $run.Executable -WorkingDirectory $run.Port -ArgumentList $run.Arguments -PassThru
+$process = Start-Process -FilePath $run.Executable -WorkingDirectory $run.Port -ArgumentList (Quote-Arguments $run.Arguments) -PassThru
 "pid $($process.Id), log $($run.Log)"

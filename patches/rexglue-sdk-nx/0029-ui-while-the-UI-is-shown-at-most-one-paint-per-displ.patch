@@ -1,0 +1,61 @@
+From c46b4adc465002bc3b075132ed4c8bb28ec57d19 Mon Sep 17 00:00:00 2001
+From: juansolo457 <5344231+Juansolo457@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 15:49:32 -0700
+Subject: [PATCH] ui: while the UI is shown, at most one paint per display
+ refresh
+
+With an ImGui dialog up, the UI thread paints at every vblank, and each guest frame forced an
+extra paint at once. In F.E.A.R.'s menus (the version badge is a dialog) that was 240 Hz + 120
+fps = 360 presents a second, with mailbox presentation, where a second image in one refresh is
+never shown. A guest frame's paint now counts as its refresh's paint, and one arriving after the
+refresh was painted waits for the next vblank.
+---
+ src/ui/presenter.cpp | 25 ++++++++++++++++---------
+ 1 file changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+index 7360ed9..d3ebe39 100644
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -1584,22 +1584,29 @@ void Presenter::WaitForUITickFromUIThread() {
+   std::unique_lock<std::mutex> dxgi_ui_tick_lock(dxgi_ui_tick_mutex_);
+   uint64_t last_vblank_before_wait = dxgi_ui_tick_last_vblank_;
+   while (true) {
+-    // Guest output present requests should interrupt the wait as quickly as
+-    // possible as they should be fulfilled as early as possible.
+-    if (dxgi_ui_tick_force_requested_) {
+-      dxgi_ui_tick_force_requested_ = false;
+-      return;
+-    }
++    // Guest output present requests are fulfilled as early as possible: at
++    // once if this refresh hasn't been painted yet.
++    const bool forced = dxgi_ui_tick_force_requested_;
+     if (!AreDXGIUITicksWaitable(dxgi_ui_tick_lock)) {
++      dxgi_ui_tick_force_requested_ = false;
+       return;
+     }
+     if (dxgi_ui_tick_last_vblank_ > dxgi_ui_tick_last_draw_) {
+-      // If there have been multiple vblanks during the wait for some reason,
+-      // next time draw the UI immediately.
++      dxgi_ui_tick_force_requested_ = false;
++      // A guest output paint is this refresh's paint. Otherwise, if there have
++      // been multiple vblanks during the wait for some reason, next time draw
++      // the UI immediately.
+       dxgi_ui_tick_last_draw_ =
+-          std::min(last_vblank_before_wait + uint64_t(1), dxgi_ui_tick_last_vblank_);
++          forced ? dxgi_ui_tick_last_vblank_
++                 : std::min(last_vblank_before_wait + uint64_t(1), dxgi_ui_tick_last_vblank_);
+       return;
+     }
++    // This refresh has been painted: while the UI is shown, at most one paint
++    // per refresh, guest output included (it waits for the next vblank). With
++    // mailbox presentation a second image in one refresh is never shown, and
++    // the UI's paint at every vblank plus each guest frame added up to the
++    // refresh rate and the game's frame rate together (F.E.A.R.'s menus: 240 Hz
++    // + 120 fps = 360 presents a second).
+     dxgi_ui_tick_signal_condition_.wait(dxgi_ui_tick_lock);
+   }
+ #endif  // XE_PLATFORM
+-- 
+2.53.0.windows.1
+

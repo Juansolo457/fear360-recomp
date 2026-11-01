@@ -30,8 +30,9 @@ struct ShaderCacheStats {
 class ShaderCache {
  public:
   // vendor_id: the adapter's PCI vendor (DXGI_ADAPTER_DESC1::VendorId), as the fear-nx renderer
-  // passes it: the translator changes its code for Intel.
-  explicit ShaderCache(uint32_t vendor_id);
+  // passes it: the translator changes its code for Intel. resolution_scale: the draw resolution
+  // scale (DrawResolutionScale, surfaces.h), across and down.
+  ShaderCache(uint32_t vendor_id, uint32_t resolution_scale);
   ~ShaderCache();
 
   const DxbcShaderTranslator& translator() const { return translator_; }
