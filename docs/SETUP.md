@@ -1,14 +1,13 @@
 # Build and play from your own disc
 
-**1.0 is F.E.A.R. on Linux and the Steam Deck:** see [Linux and Steam Deck](#linux-and-steam-deck).
-It needs only your F.E.A.R. disc. *F.E.A.R. Files* (Extraction Point + Perseus Mandate) and the
-Windows build come in later releases: the steps for them below still build, but they aren't
-tested or supported in 1.0.
+**To just play:** 1.5's release has ready-built zips for Windows and for Linux and the Steam
+Deck; unpack your disc into one and play (its README.txt says how). This page is for building the
+game yourself. *F.E.A.R. Files* (Extraction Point + Perseus Mandate) comes in a later release: its
+steps below still build, but it isn't tested or supported yet.
 
-This project ships **source only**. There is no download that contains the game: the game's
-code is translated from your copy of the Xbox 360 disc on your own PC, and the game data comes
-from the same disc. You need your own disc of **F.E.A.R.** (and, once it's supported, of
-**F.E.A.R. Files**).
+No download contains game data: it comes from your own disc of **F.E.A.R.** (and, once it's
+supported, of **F.E.A.R. Files**). Building translates the game's code from that disc on your
+own PC.
 
 The first build takes 20–40 minutes. After that, rebuilds take a minute or two.
 

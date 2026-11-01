@@ -88,7 +88,8 @@ elif [ -n "$FEAR_START" ]; then
   start=(--fear_collection_start fear)
 fi
 if [ ! -f assets/default.xex ]; then
-  echo "No $program/assets/default.xex: unpack this over the FEAR360-SteamDeck folder" | tee -a "$info" >&2
+  echo "No $program/assets/default.xex: unpack your disc there (see the README)" \
+    | tee -a "$info" >&2
   exit 1
 fi
 "./$program" "${args[@]}" --fear_collection ../collection-linux.toml "${start[@]}" "$@" \

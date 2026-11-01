@@ -1,12 +1,12 @@
 # F.E.A.R. 360 Recompiled
 
-The Xbox 360 F.E.A.R., running natively on Linux and the Steam Deck. A native Vulkan renderer, evenly paced high frame rates, a controller in your hands. *F.E.A.R. Files* and the Windows build come in later releases.
+The Xbox 360 F.E.A.R., running natively on Windows, Linux and the Steam Deck. Up to 4K and 120 fps, keyboard and mouse or a controller, and the PC version's textures if you own it. *F.E.A.R. Files* comes in a later release.
 
 > Unofficial. **No game data included.** Bring your own Xbox 360 disc.
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v1.0.2](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, source only (1.0.2 adds the 360's bonus level, Holiday, to the main menu): **F.E.A.R. on native Linux and the Steam Deck** (no Proton). On the Deck it runs at 120 fps most of the time and holds 60 fps or more in 99.8% of frames. You need only your F.E.A.R. disc. **Next:** the Windows build (1.5) and *F.E.A.R. Files* ([After 1.0](#after-10)).
+**Latest release: [v1.5.0](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, ready to play on **Windows** and **Linux / the Steam Deck**: download the zip for your system, unpack your own F.E.A.R. disc into it and play ([docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)). 1.5 adds the Windows build with keyboard and mouse, 4K, the PC texture pack with sharper text, and John Wick mode. **Next:** *F.E.A.R. Files* ([After 1.0](#after-10)).
 
 ## Why
 
@@ -72,7 +72,7 @@ tools/build-deck.sh                                   # F.E.A.R.
 python3 -I tools/steamdeck/make_package.py --linux    # private/steamdeck/FEAR360-SteamDeck-linux.zip
 ```
 
-**Windows** (builds, not tested for 1.0; supported from 1.5): releases are source only: you build the game from your own discs ([the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest)). **Step by step: [docs/SETUP.md](docs/SETUP.md)**; what 1.0 will have: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md). In short, with the toolchain in `.tools/` and your discs extracted:
+**Windows** (supported from 1.5): [the latest release](https://github.com/Juansolo457/fear360-recomp/releases/latest) has a ready-built zip; to build it yourself instead, **step by step: [docs/SETUP.md](docs/SETUP.md)**. In short, with the toolchain in `.tools/` and your discs extracted:
 
 ```powershell
 pwsh -NoProfile -File tools/setup-sdk.ps1                      # the patched ReXGlue SDK
@@ -83,7 +83,7 @@ pwsh -NoProfile -File tools/launch.ps1 -Collection             # the collection 
 
 Launcher defaults: fullscreen, `-FrameRate auto` (locked to your display's refresh, at most 120 fps). Options: `-FrameRate auto|<20-240>` (the limit), `-Anisotropic 1..5` (2× to 16×), `-Timer` (the old software vblank timer instead), `-LookRamp console|nodelay|instant|off`, `-NoSoftLock`, `-Windowed`, `-Invulnerable` (for testing), `-Extra '<more flags>'`. Most of these are in Recompilation Settings too.
 
-**PC textures (needs the PC version):** the pack builder still works ([docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack)), but the Direct3D 12 renderer can't use a pack yet.
+**PC textures and sharper text (needs the PC version):** build the pack from your own PC copy ([docs/TEXTURES.md](docs/TEXTURES.md#build-a-pack)); both renderers use it.
 
 Your own `default.xex` and `Game/` folder go in `port-nx/assets/` (F.E.A.R., title `565507D9`) and `port-files/assets/` (F.E.A.R. Files, `565507E8`); [docs/SETUP.md](docs/SETUP.md) has the supported hashes and the ISO extraction step.
 
@@ -101,7 +101,7 @@ docs/             progress, handoff, findings, plan, ripping
 ## Legal
 
 - Changes reach `master` only through reviewed pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
-- No assets, executables, generated code or proprietary code are distributed. Releases are source only: never attach builds, game files or the private test packages `tools/steamdeck/make_package.py` makes. Before pushing, run `python -I tools/audit_repo.py` (CI runs it too).
+- No game data is distributed, and none is in this repository. From 1.5 on, releases attach the built program (`make_package.py --release`), never game files or the private test packages the script's other modes make; players bring their own disc ([CONTRIBUTING.md](CONTRIBUTING.md#releases)). The source of every release is its tag here. Before pushing, run `python -I tools/audit_repo.py` (CI runs it too).
 - Three sets of terms, file by file in [NOTICE](NOTICE), full texts in [LICENSES/](LICENSES/):
   - **MIT** ([LICENSE](LICENSE)): our own tools, docs and glue.
   - **GPL-3.0-or-later** ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)): `port-nx/src/native/` (what's left of fear-nx ← Project8Recomp ← nfsmw-nx: the GPU ring and display pacing), the manifests and SDK patch 0000. Builds that link it are GPL.
