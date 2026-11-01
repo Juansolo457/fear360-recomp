@@ -59,6 +59,8 @@
 //   fear_letterbox (off)      LetterBoxDisabled 0 -> 1 (no cutscene bars)                  console
 //   fear_full_detail_models   ModelLODDistanceScale -> 0.003 (FearModelLodScale, below)    hook
 //   fear_fast_checkpoints     CheckPointOptimizeVideoMemory 1 -> 0 (on by default)         console
+// Not EchoPatch's: fear_auto_shotgun (#127), an automatic shotgun the 360 disc has but never
+// places (not the PS3 version's): Arsenal/Weapons/Default/Shotgun takes AutoShotgun's values (the VK-12's ammo kept).
 // The database ones go into the same patched copy as the stick tuning; F.E.A.R. Files keeps its
 // database in uberCatalog.cat, so there only the console ones apply for now. The field of view
 // (fear_fov) also moves the first-person camera forward at wide angles (CameraAttachedOffsetZ, by

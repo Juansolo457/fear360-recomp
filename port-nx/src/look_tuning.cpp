@@ -73,6 +73,10 @@ REXCVAR_DEFINE_BOOL(fear_john_wick, false, "F.E.A.R.",
                     "John Wick mode (#61): infinite ammo, dual pistols from the start, 25% faster "
                     "movement and a slow-mo meter that never runs out. F.E.A.R. only for now")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fear_auto_shotgun, false, "F.E.A.R.",
+                    "The automatic shotgun the 360 disc has but never places (#127; not the PS3 "
+                    "version's): every VK-12 becomes one. F.E.A.R. only")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_STRING(fear_intro_videos, "all", "F.E.A.R.",
                       "Videos at startup: all (as shipped: ESRB, Sierra, Day 1, Monolith), "
                       "monolith (Monolith's logo only), none (#19). F.E.A.R. only for now")
@@ -324,6 +328,28 @@ uint32_t ReadWord(const std::vector<uint8_t>& data, size_t pos) {
 }
 
 // "Category/Record/Attribute" -> file offset of the first value of each float attribute.
+// fear_auto_shotgun (#127): Arsenal/Weapons/Default/AutoShotgun is a complete weapon on the 360
+// disc (its model, skins, HUD icons, sounds and name; the files are named Watson SAS-12), in
+// PlayerWeapons, but no level places it. Played 2026-11-01: it is an automatic shotgun, but not
+// the PS3 version's, which still needs the PS3 dump. Levels and the AI's drops name the VK-12 ("Shotgun"), so its record takes the
+// Watson's values, attribute by attribute (both records have the same 172). The VK-12's ammo
+// stays, so shotgun shells still feed it (the two ammo records differ only in pickup amounts), and
+// so does its AI weapon.
+struct RecordCopy {
+  std::string category, from, to;
+  std::set<std::string> keep;
+  size_t applied = 0;
+};
+
+std::vector<RecordCopy> RecordCopies() {
+  std::vector<RecordCopy> copies;
+  if (REXCVAR_GET(fear_auto_shotgun)) {
+    copies.push_back({.category = "Arsenal/Weapons/Default", .from = "AutoShotgun",
+                      .to = "Shotgun", .keep = {"AmmoName", "AIWeaponName"}});
+  }
+  return copies;
+}
+
 // The format is described in tools/gamedb.py.
 bool FindFloats(const std::vector<uint8_t>& data, std::map<std::string, size_t>& wanted) {
   if (data.size() < 0x1C || std::memcmp(data.data(), "BDAG", 4)) return false;
@@ -451,6 +477,86 @@ bool PatchAttributes(std::vector<uint8_t>& data, std::vector<DbChange>& changes)
   return true;
 }
 
+// Calls visit(category, record, attribute, type, count, offset of the first value) for every
+// attribute.
+template <typename Visit>
+bool WalkAttributes(const std::vector<uint8_t>& data, Visit&& visit) {
+  if (data.size() < 0x1C || std::memcmp(data.data(), "BDAG", 4)) return false;
+  const size_t strings = 0x1C;
+  const size_t string_size = ReadWord(data, 8);
+  auto text = [&](uint32_t offset) -> std::string {
+    const size_t start = strings + offset;
+    if (start >= data.size()) return {};
+    const auto* begin = reinterpret_cast<const char*>(data.data() + start);
+    return std::string(begin, strnlen(begin, data.size() - start));
+  };
+  size_t pos = strings + string_size;
+  auto word = [&]() -> uint32_t {
+    if (pos + 4 > data.size()) throw std::out_of_range("gamedb");
+    const uint32_t value = ReadWord(data, pos);
+    pos += 4;
+    return value;
+  };
+  try {
+    for (uint32_t c = 0, categories = word(); c < categories; ++c) {
+      const std::string category = text(word());
+      for (uint32_t r = 0, records = word(); r < records; ++r) {
+        const std::string record = text(word());
+        for (uint32_t a = 0, attributes = word(); a < attributes; ++a) {
+          const uint32_t name = word(), type = word();
+          word();  // flags
+          const uint32_t count = word();
+          if (pos + size_t(count) * 4 > data.size()) return false;
+          visit(category, record, text(name), type, count, pos);
+          pos += size_t(count) * 4;
+        }
+      }
+    }
+  } catch (const std::out_of_range&) {
+    return false;
+  }
+  return true;
+}
+
+// Gives each copy's `to` record the values of its `from` record, where an attribute has the same
+// name, type and value count in both (string values are offsets into the shared string table, so
+// they copy as words), counting the attributes changed.
+bool CopyRecords(std::vector<uint8_t>& data, std::vector<RecordCopy>& copies) {
+  for (RecordCopy& copy : copies) {
+    std::map<std::string, std::pair<uint32_t, std::vector<uint8_t>>> source;
+    if (!WalkAttributes(data, [&](const std::string& category, const std::string& record,
+                                  const std::string& name, uint32_t type, uint32_t count,
+                                  size_t at) {
+          if (category != copy.category || record != copy.from) return;
+          source[name] = {type, std::vector<uint8_t>(data.begin() + at,
+                                                     data.begin() + at + size_t(count) * 4)};
+        })) {
+      return false;
+    }
+    std::vector<std::pair<size_t, const std::vector<uint8_t>*>> writes;
+    if (!WalkAttributes(data, [&](const std::string& category, const std::string& record,
+                                  const std::string& name, uint32_t type, uint32_t count,
+                                  size_t at) {
+          if (category != copy.category || record != copy.to || copy.keep.contains(name)) return;
+          auto it = source.find(name);
+          if (it == source.end() || it->second.first != type ||
+              it->second.second.size() != size_t(count) * 4) {
+            return;
+          }
+          if (std::memcmp(data.data() + at, it->second.second.data(), it->second.second.size())) {
+            writes.emplace_back(at, &it->second.second);
+          }
+        })) {
+      return false;
+    }
+    for (const auto& [at, values] : writes) {
+      std::memcpy(data.data() + at, values->data(), values->size());
+    }
+    copy.applied = writes.size();
+  }
+  return true;
+}
+
 // The override device, logging the first time the game opens the patched database, so a run
 // shows the tuning was really used.
 class OverrideDevice final : public rex::filesystem::HostPathDevice {
@@ -489,7 +595,8 @@ void Apply(rex::Runtime& runtime) {
   const bool softlock = REXCVAR_GET(fear_aim_softlock);
   const auto changes = Changes();
   auto options = DatabaseChanges();
-  if (changes.empty() && options.empty()) return;
+  auto copies = RecordCopies();
+  if (changes.empty() && options.empty() && copies.empty()) return;
 
   const auto source = runtime.game_data_root() / kDatabase;
   std::error_code exists_error;
@@ -497,7 +604,7 @@ void Apply(rex::Runtime& runtime) {
     // F.E.A.R. Files: the database is in the catalogue; FearConsoleVarDefault does the stick's.
     REXLOG_INFO("F.E.A.R.: look tuning: stick edge boost '{}', soft lock {} (as the game sets "
                 "up its console variables)", ramp, softlock ? "on" : "off");
-    if (!options.empty()) {
+    if (!options.empty() || !copies.empty()) {
       REXLOG_WARN("F.E.A.R.: Recompilation Settings: weapon slots, infinite flashlight, intro "
                   "videos and lasting glass change the game database, which F.E.A.R. Files keeps "
                   "in its catalogue: not applied here yet");
@@ -532,6 +639,24 @@ void Apply(rex::Runtime& runtime) {
       } else {
         REXLOG_WARN("F.E.A.R.: Recompilation Settings: {}{} not found in the database", where,
                     option.attribute);
+      }
+    }
+  }
+  if (!copies.empty()) {
+    if (!CopyRecords(data, copies)) {
+      REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not read {}; its weapons stay as "
+                   "shipped",
+                   source.string());
+      return;
+    }
+    for (const RecordCopy& copy : copies) {
+      if (copy.applied) {
+        REXLOG_INFO("F.E.A.R.: Recompilation Settings: {}/{} takes {}'s values: {} attribute(s) "
+                    "changed",
+                    copy.category, copy.to, copy.from, copy.applied);
+      } else {
+        REXLOG_WARN("F.E.A.R.: Recompilation Settings: {}/{} or {} not found in the database",
+                    copy.category, copy.to, copy.from);
       }
     }
   }
