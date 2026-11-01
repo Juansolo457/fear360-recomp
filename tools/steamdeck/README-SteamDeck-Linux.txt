@@ -42,7 +42,6 @@ at 120 Hz, try 60 Hz.
 
 Launch options (Properties > Shortcut > LAUNCH OPTIONS):
   FEAR_FPS=60 %command%      this frame rate instead of Recompilation Settings'
-  FEAR_GOD=1 %command%       the player can't die (for testing)
 
 The first run builds shaders and pipelines as they appear (brief hitches the first time an area
 or effect is seen); they're kept in the game's cache/ folder, so later runs are smooth.
