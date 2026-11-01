@@ -231,16 +231,16 @@ class CollectionMenu final : public Panel {
       } else if (selected_ < titles && titles_[selected_].later) {
         const Title& title = titles_[selected_];
         help = title.name + (title.subtitle.empty() ? "" : " (" + title.subtitle + ")") +
-               " comes in a later release.";
+               " is coming in a later release.";
       } else if (selected_ < titles && !installed_[selected_]) {
-        help = "Not found: " + titles_[selected_].exe.string();
+        help = "Unable to find " + titles_[selected_].exe.string() + ".";
       } else if (selected_ < titles) {
         // "Play F.E.A.R." ends its own sentence.
         const std::string& name = titles_[selected_].name;
         help = "Play " + name + (name.ends_with('.') ? "" : ".");
-        if (Switchable(titles_)) help += " Switch Game in its main menu comes back here.";
+        if (Switchable(titles_)) help += " Select Switch Game in its main menu to return here.";
       } else {
-        help = "Quit to the desktop.";
+        help = "Exit to the desktop.";
       }
       // Wrapped short of the A prompt: an error (message_, a missing program's path) can be long.
       const float bottom = size.y * 0.86f;
@@ -308,7 +308,7 @@ class CollectionMenu final : public Panel {
     std::vector<std::string> args = title.args;
     args.insert(args.end(), {"--fear_collection", file_, "--fear_collection_start", title.id});
     if (!fear::process::StartAfterThis(title.exe, std::move(args), title.working_dir)) {
-      message_ = "Couldn't start " + title.exe.string() + ".";
+      message_ = "Unable to start " + title.exe.string() + ".";
       return;
     }
     REXLOG_INFO("F.E.A.R. collection: starting {} ({})", title.name, title.exe.string());

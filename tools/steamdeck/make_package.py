@@ -79,7 +79,7 @@ ARGS = ['--resolution', '720p', '--anisotropic_override', '5', '--game_data_root
 SHIP_TEXTURE_PACKS = False
 if SHIP_TEXTURE_PACKS:
     ARGS += ['--fear_texture_pack', 'texture_pack']
-DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
+DECK_SETTINGS = ('# F.E.A.R. Recompilation Settings, written by the panel in the main menu.\n'
                  '# Loaded at startup; a flag on the command line still wins for that run.\n'
                  '# Uncapped to 120 fps (#28): the vblank from a timer at 240 Hz instead of the\n'
                  '# display (the game presents every second one), mailbox presentation (no\n'
@@ -90,9 +90,9 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
                  'video_mode_refresh_rate = 240\n'
                  "# Deck baseline (#28): SDL's HIDAPI drivers off (the controls come through Steam\n"
                  "# Input's pad, the usual Proton path; #29) and the profiler on for the logs\n"
-                 '# (about 6% of a core). Saving PC Settings in the game rewrites this file\n'
-                 '# without them. No MSAA (the game\'s 2x/4x costs the Deck\'s GPU; PC Settings >\n'
-                 '# Anti-aliasing).\n'
+                 '# (about 6% of a core). Saving Recompilation Settings in the game rewrites this\n'
+                 '# file without them. No MSAA (the game\'s 2x/4x costs the Deck\'s GPU;\n'
+                 '# Recompilation Settings > Anti-aliasing).\n'
                  'fear_d3d12_msaa = false\n'
                  'hid_sdl_hidapi = "off"\n'
                  'fear_profile = true\n'
@@ -100,8 +100,8 @@ DECK_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.
 # The native Linux package's (--linux): the Deck baseline, the 360's settings at up to 120 fps
 # with MSAA off (the rest are the defaults: field of view 70, no bloom). No timer or SDL lines:
 # Linux paces from a timer at twice the frame rate on its own (docs/LINUX_NATIVE.md), and SDL
-# reads the pads natively. Everything here is a PC Settings choice, so Save keeps it.
-LINUX_SETTINGS = ('# F.E.A.R. PC Settings, written by the panel in the main menu.\n'
+# reads the pads natively. Everything here is a Recompilation Settings choice, so Save keeps it.
+LINUX_SETTINGS = ('# F.E.A.R. Recompilation Settings, written by the panel in the main menu.\n'
                   '# Loaded at startup; a flag on the command line still wins for that run.\n'
                   '# The Steam Deck baseline: the 360\'s settings at up to 120 fps, MSAA off.\n'
                   'fullscreen = true\n'

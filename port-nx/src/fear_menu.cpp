@@ -132,10 +132,10 @@ struct Item {
 constexpr Item kItems[] = {
     {u"Bonus Mission", kCommandBonus, nullptr, nullptr, kBonusText, kBonusHelp},
     {u"Recompilation Settings", kCommandSettings, "Fear360_Help_PCSettings",
-     u"Options the recompilation adds: display, controls and gameplay."},
+     u"Set display, control and gameplay options added by the recompilation."},
     {u"Switch Game", kCommandSwitch, "Fear360_Help_SwitchGame",
      u"Play the other game in the collection."},
-    {u"Quit to Desktop", kCommandQuit, "Fear360_Help_Quit", u"Quit the game."}};
+    {u"Quit to Desktop", kCommandQuit, "Fear360_Help_Quit", u"Exit to the desktop."}};
 constexpr size_t kItemCount = sizeof(kItems) / sizeof(kItems[0]);
 
 std::mutex g_mutex;

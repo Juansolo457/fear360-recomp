@@ -34,7 +34,7 @@ struct Smoothing {
   double ms;
   const char* label;
 };
-constexpr Smoothing kSmoothings[] = {{0, "Off (raw)"}, {8, "Low"}, {16, "Medium"}, {32, "High"}};
+constexpr Smoothing kSmoothings[] = {{0, "Off"}, {8, "Low"}, {16, "Medium"}, {32, "High"}};
 
 double Round(double value, double step) { return std::round(value / step) * step; }
 
@@ -218,7 +218,7 @@ void Page::ResetToDefaults() {
   for (size_t i = 0; i < actions_.size(); ++i) {
     state_.keys[i] = Slots(DefaultOf(actions_[i].setting));
   }
-  message_ = "Back to the PC's default keys and mouse settings (not saved yet).";
+  message_ = "Default settings restored. Save to keep them.";
 }
 
 std::string Page::Note() const {
@@ -228,33 +228,26 @@ std::string Page::Note() const {
     // 0.022 degrees per count at 1 (fear_mkb.h); a full turn at 800 counts an inch.
     const double cm = 360.0 / (0.022 * state_.sensitivity) / 800.0 * 2.54;
     return fmt::format(
-        "Mouse look speed. 1.00 turns 0.022 degrees per mouse count, the scale of most PC "
-        "shooters, so a sensitivity from another game carries over. At 800 DPI a full turn takes "
-        "{:.0f} cm of mouse movement. Drag the slider, or Left and Right.",
+        "Set the sensitivity of the mouse. Matches the scale of most PC shooters. At 800 DPI a "
+        "full turn takes {:.0f} cm of mouse movement.",
         cm);
   }
   if (selected_ == kVertical) {
-    return "Up and down speed, as a share of the sensitivity: 100% is the same as left and right.";
+    return "Set the speed of looking up and down, as a percentage of the mouse sensitivity.";
   }
-  if (selected_ == kInvert) return "On: moving the mouse forward looks down.";
-  if (selected_ == kSmoothing) {
-    return "Spreads each mouse movement over a few milliseconds, for a steadier view at a cost of "
-           "a little lag. Off is the raw movement. The same at any frame rate.";
-  }
+  if (selected_ == kInvert) return "Toggle inversion of the mouse.";
+  if (selected_ == kSmoothing) return "Set how much the mouse movement is smoothed.";
   if (selected_ < kMouseRows + actions) {
     const auto& action = actions_[selected_ - kMouseRows];
     std::string note = action.note ? std::string(action.note) + " " : std::string();
     return note +
-           "Enter or click: choose its key, then press a key, mouse button or the wheel. Left and "
-           "Right: its first or second key. Delete: clear it.";
+           "Press Enter to assign a key. Left and Right select the first or second key. Delete "
+           "clears it.";
   }
   switch (selected_ - kMouseRows - actions) {
-    case kResetButton: return "The PC's default keys and mouse settings.";
-    case kSaveButton:
-      return "Saves all of Recompilation Settings, these controls included, and closes.";
-    default:
-      return "Back to Recompilation Settings. Changes here are kept until you save or cancel "
-             "there.";
+    case kResetButton: return "Restore the default keys and mouse settings.";
+    case kSaveButton: return "Save all settings and return to the main menu.";
+    default: return "Return to Recompilation Settings.";
   }
 }
 
@@ -328,10 +321,10 @@ Page::Result Page::Draw(uint32_t input) {
   if (capturing_) {
     const auto& action = actions_[selected_ - kMouseRows];
     ImGui::Dummy(ImVec2(0.0f, FontSize() * 2.0f));
-    ImGui::TextWrapped("Press a key, a mouse button or the wheel for %s (%s key).", action.label,
+    ImGui::TextWrapped("Press a key. . .  (%s, %s key)", action.label,
                        slot_ == 0 ? "first" : "second");
     ImGui::Dummy(ImVec2(0.0f, FontSize() * 0.5f));
-    Dim("Escape cancels. Escape itself always opens the pause menu.");
+    Dim("Press Escape to cancel. Escape always opens the pause menu.");
     ImGui::Dummy(ImVec2(0.0f, FontSize() * 2.0f));
     return result;
   }
@@ -355,7 +348,7 @@ Page::Result Page::Draw(uint32_t input) {
       ImGui::TextDisabled("MOUSE");
 
       // Sensitivity and vertical speed: sliders a mouse can drag, Left and Right step them.
-      const char* mouse_labels[] = {"Mouse sensitivity", "Up and down speed", "Invert mouse",
+      const char* mouse_labels[] = {"Mouse sensitivity", "Look up/down speed", "Invert y axis",
                                     "Mouse smoothing"};
       for (int row = 0; row < kMouseRows; ++row) {
         ImGui::TableNextRow();

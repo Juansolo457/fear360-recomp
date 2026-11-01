@@ -33,8 +33,8 @@ WINEDLLOVERRIDES="msvcp140,msvcp140_atomic_wait,vcruntime140,vcruntime140_1=n,b"
   4. Rename the entry (e.g. "F.E.A.R. Collection") and go back to Game Mode.
 
 It starts at the collection menu; pick a game. Switch Game in either game's main menu starts the
-other one. Settings are in each game's PC Settings menu. The game draws at 1280x720 (the
-D3D12 renderer has no render scale yet).
+other one. Settings are in each game's Recompilation Settings menu. The game draws at 1280x720
+(the D3D12 renderer has no render scale yet).
 
 Performance testing
   - The Deck's overlay: Quick Access (...) > Performance > Performance Overlay Level 3 or 4.
@@ -45,8 +45,8 @@ Performance testing
     For 60 again, see the comment in user/settings.toml.
   - The first run translates shaders as they appear (brief hitches the first time an effect is
     seen); each later run starts with them pre-built, so test the second run for smoothness.
-  - Saving PC Settings in the game rewrites user/settings.toml with only the panel's settings:
-    the HIDAPI setting and the profiler then go back to their defaults.
+  - Saving Recompilation Settings in the game rewrites user/settings.toml with only the panel's
+    settings: the HIDAPI setting and the profiler then go back to their defaults.
   - Logs: fear/logs/fear_NNN.log and fearfiles/logs/fearfiles_NNN.log (one per run). Every 10 s
     they give frame pacing and slow frames, and every 150 frames the D3D12 renderer's CPU time
     per frame ("D3D12: frames"). Copy them back to the PC for a read.

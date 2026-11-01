@@ -90,90 +90,89 @@ std::vector<Setting> BuildSettings() {
                         "fear_mkb",
                         {{"true", "Keyboard and mouse"}, {"false", "Controller"}},
                         false,
-                        "One or the other in play: the keyboard and mouse (mouse look, the PC's "
-                        "keys), or your controllers. Both work in the menus and here. Saving a "
-                        "change restarts the game, so its button pictures follow."});
+                        "Set the controls used in the game. Both work in the menus. Changing "
+                        "this restarts the game."});
   }
-  settings.push_back({"Display",
+  settings.push_back({"Display mode",
                       "fullscreen",
-                      {{"true", "Fullscreen"}, {"false", "Window"}},
+                      {{"true", "Fullscreen"}, {"false", "Windowed"}},
                       true,
-                      "Alt+Enter switches too."});
+                      "Set fullscreen or windowed display. Alt+Enter also switches."});
 #if defined(_WIN32)
   // The D3D12 renderer's (the Vulkan renderer, Linux's, draws at the 360's 1280x720).
   settings.push_back({"Resolution",
                       "fear_d3d12_resolution_scale",
-                      {{"0", "Your display's"},
-                       {"1", "1280x720 (the 360's)"},
+                      {{"0", "Match display"},
+                       {"1", "1280x720 (Xbox 360)"},
                        {"2", "2560x1440"},
                        {"3", "3840x2160"}},
                       false,
-                      "What the game is drawn at before it's fitted to the screen. Your display's: "
-                      "the smallest of these at least as tall as your screen. Each step up costs "
-                      "the GPU more."});
+                      "Set the resolution the game is drawn at. Lower values can increase "
+                      "performance."});
 #endif
-  settings.push_back({"Frame rate",
+  settings.push_back({"Frame rate limit",
                       "fear_frame_rate_limit",
-                      {{"30", FrameRateLabel(30) + " (the 360's)"},
+                      {{"30", FrameRateLabel(30) + " (Xbox 360)"},
                        {"60", FrameRateLabel(60)},
                        {"90", FrameRateLabel(90)},
                        {"120", FrameRateLabel(120)}},
                       false,
-                      "Each frame is shown for a whole number of your display's refreshes, the "
-                      "fewest that keep it at or under the limit."});
+                      "Set the maximum frame rate. Frames are paced to the display's refresh "
+                      "rate."});
   settings.push_back({"Anti-aliasing",
                       "fear_d3d12_msaa",
-                      {{"true", "The game's MSAA (as shipped)"}, {"false", "Off"}},
+                      {{"true", "On"}, {"false", "Off"}},
                       false,
-                      "The game's own 2x or 4x multisampling. Off costs the GPU much less: the "
-                      "Steam Deck runs faster without it."});
-  settings.push_back({"Texture filtering",
+                      "Toggle full screen anti-aliasing. Turning it off can increase "
+                      "performance, most of all on the Steam Deck."});
+  settings.push_back({"Anisotropic filtering",
                       "fear_d3d12_anisotropy",
                       {{"1", "Off"}, {"2", "2x"}, {"4", "4x"}, {"8", "8x"}, {"16", "16x"}},
                       false,
-                      "Anisotropic filtering: sharper floors and walls at an angle."});
+                      "Set the level of anisotropic filtering. Higher values sharpen textures "
+                      "seen at an angle."});
   settings.push_back({"Texture sharpness",
                       "fear_mip_bias",
-                      {{"0", "As shipped"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
+                      {{"0", "Normal"}, {"-0.5", "Sharper"}, {"-1", "Sharpest"}},
                       false,
-                      "Sharper distant textures, like EchoPatch's mipmap bias on PC. The "
-                      "sharpest setting can shimmer on fine patterns."});
+                      "Set the sharpness of distant textures. Sharpest can shimmer on fine "
+                      "patterns."});
   // The texture pack (docs/TEXTURES.md), in both renderers.
   const std::string pack = CvarValue("fear_texture_pack");
   if (pack.empty()) {
     settings.push_back({"PC textures",
                         "fear_texture_pack_enabled",
-                        {{"true", "Not built"}},
+                        {{"true", "Not installed"}},
                         false,
-                        "Built on your PC from your own copy of the PC game: "
-                        "tools/texture_pack.py (docs/TEXTURES.md)."});
+                        "Use the PC version's textures and sharper text. Build them from your own "
+                        "copy of the PC game with tools/texture_pack.py."});
   } else {
     settings.push_back({"PC textures",
                         "fear_texture_pack_enabled",
-                        {{"true", "On"}, {"false", "Off (the 360's)"}},
+                        {{"true", "On"}, {"false", "Off"}},
                         false,
-                        "The PC version's textures, from the pack built from your own copy: " +
+                        "Toggle the PC version's textures and sharper text, built from your own "
+                        "copy: " +
                             pack});
   }
-  settings.push_back({"Right stick at its edge",
+  settings.push_back({"Look acceleration",
                       "fear_look_ramp",
-                      {{"off", "No boost"},
-                       {"console", "As on the 360"},
-                       {"nodelay", "Boost at once, ramping"},
-                       {"instant", "Full boost at once"}},
+                      {{"off", "Off"},
+                       {"console", "Xbox 360"},
+                       {"nodelay", "Immediate"},
+                       {"instant", "Full speed"}},
                       false,
-                      "On the 360, holding the stick at its edge speeds turning up after 0.3 s, "
-                      "ramping to 360 degrees a second; no boost keeps turning in step with the "
-                      "stick."});
+                      "Set how turning speeds up with the right stick held at its edge. Off "
+                      "keeps turning in step with the stick."});
   settings.push_back({"Aim assist",
                       "fear_aim_softlock",
                       {{"true", "On"}, {"false", "Off"}},
                       false,
-                      "Turning slows when your aim crosses an enemy (the 360's soft lock)."});
+                      "Toggle aim assist. Turning slows when your aim crosses an enemy."});
   settings.push_back({"Field of view",
                       "fear_fov",
                       {{"65", "65"},
-                       {"70", "70 (the 360's and the PC's)"},
+                       {"70", "70 (default)"},
                        {"75", "75"},
                        {"80", "80"},
                        {"85", "85"},
@@ -181,106 +180,100 @@ std::vector<Setting> BuildSettings() {
                        {"95", "95"},
                        {"100", "100"}},
                       false,
-                      "Vertical, in degrees. Above 70 the gun moves forward to keep its place on "
-                      "screen, as EchoPatch does on PC."});
+                      "Set the vertical field of view. Above 70 the weapon moves forward to "
+                      "stay in view."});
   settings.push_back({"Bloom",
                       "fear_bloom_intensity",
-                      {{"0", "Off (the PC's)"}, {"-1", "On (the 360's)"}},
+                      {{"0", "Off (PC)"}, {"-1", "On (Xbox 360)"}},
                       false,
-                      "The 360 version adds a screen bloom the PC version doesn't have. Near "
-                      "bright lights it spreads a grey haze over the scene."});
+                      "Toggle the Xbox 360 version's bloom. Bright lights spread a haze over the "
+                      "scene."});
   settings.push_back({"Enemy AI",
                       "fear_ai",
-                      {{"sharp", "Sharp"}, {"pc", "As on PC"}, {"360", "As on 360"}},
+                      {{"sharp", "Sharp"}, {"pc", "PC"}, {"360", "Xbox 360"}},
                       false,
-                      "Sharp: enemies fight like Very Hard's at every difficulty (aim, grenades, "
-                      "dodging); how hard they hit still follows the difficulty. As on PC: the "
-                      "PC's difficulties. As on 360: its easier Normal."});
-  settings.push_back({"Blood and armour marks",
+                      "Set enemy tactics. Sharp uses Very Hard tactics at every difficulty; "
+                      "damage still follows the difficulty."});
+  settings.push_back({"Blood and armor marks",
                       "fear_body_marks",
-                      {{"true", "On (as on PC)"}, {"false", "Off (as on 360)"}},
+                      {{"true", "On (PC)"}, {"false", "Off (Xbox 360)"}},
                       false,
-                      "Bullet hits leave blood and armour marks on enemies. The 360 version "
-                      "starts with them off."});
+                      "Toggle blood and armor marks from bullet hits on enemies."});
   // The database options (look_tuning.h): F.E.A.R. only until F.E.A.R. Files' database, inside its
   // catalogue, can be changed too.
   if (!fear::title::kFiles) {
     settings.push_back({"Weapon slots",
                         "fear_weapon_slots",
-                        {{"3", "3 (as shipped)"}, {"4", "4"}, {"5", "5"}, {"10", "10 (every weapon)"}},
+                        {{"3", "3 (default)"}, {"4", "4"}, {"5", "5"}, {"10", "10 (all weapons)"}},
                         false,
-                        "How many weapons you can carry at once."});
-    settings.push_back({"Enable John Wick mode",
+                        "Set the maximum number of weapons you may carry."});
+    settings.push_back({"John Wick mode",
                         "fear_john_wick",
-                        {{"false", "False"}, {"true", "True"}},
+                        {{"false", "Off"}, {"true", "On"}},
                         false,
-                        "Infinite ammo, dual pistols, 25% faster movement and a slow-mo meter "
+                        "Toggle infinite ammo, dual pistols, faster movement and a SlowMo meter "
                         "that never runs out."});
-    settings.push_back({"Flashlight",
+    settings.push_back({"Flashlight battery",
                         "fear_infinite_flashlight",
-                        {{"false", "Battery (as shipped)"}, {"true", "Never runs out"}},
+                        {{"false", "Normal"}, {"true", "Unlimited"}},
                         false,
-                        "Never runs out also removes the battery bar from the HUD."});
+                        "Set the flashlight's battery life. Unlimited also hides the battery "
+                        "meter."});
     settings.push_back({"Intro videos",
                         "fear_intro_videos",
-                        {{"all", "All (as shipped)"},
-                         {"monolith", "Monolith logo only"},
-                         {"none", "Skip"}},
+                        {{"all", "All"}, {"monolith", "Monolith only"}, {"none", "Skip"}},
                         false,
-                        "The rating card and the Sierra, Day 1 and Monolith logos at startup."});
+                        "Set which logo videos play at startup."});
   }
-  settings.push_back({"Cutscene black bars",
+  settings.push_back({"Letterbox",
                       "fear_letterbox",
-                      {{"true", "On (as shipped)"}, {"false", "Off"}},
+                      {{"true", "On"}, {"false", "Off"}},
                       false,
-                      "The letterbox bars at the top and bottom of the screen in cutscenes."});
+                      "Toggle the black bars at the top and bottom of the screen during "
+                      "cutscenes."});
   settings.push_back({"Model detail",
                       "fear_full_detail_models",
-                      {{"false", "As shipped"}, {"true", "Full at any distance"}},
+                      {{"false", "Normal"}, {"true", "Maximum"}},
                       false,
-                      "Full: characters and objects keep their most detailed models far away, "
-                      "like EchoPatch's no model LOD bias. Costs some GPU."});
+                      "Set the detail of distant characters and objects. Lower values can "
+                      "increase performance."});
   settings.push_back({"Bodies and debris",
                       "fear_bodies_stay",
-                      {{"false", "Fade (as shipped)"}, {"true", "Stay"}},
+                      {{"false", "Fade"}, {"true", "Stay"}},
                       false,
                       fear::title::kFiles
-                          ? "Stay: bodies no longer fade away once there are more than 10, and "
-                            "bullet holes, blood splats, debris and shell casings stay."
-                          : "Stay: bodies no longer fade away once there are more than 10, and "
-                            "bullet holes, blood splats, debris, shell casings and broken glass "
-                            "stay. A long fight leaves a lot behind."});
+                          ? "Toggle whether bodies, bullet holes, blood, debris and shell "
+                            "casings stay instead of fading away."
+                          : "Toggle whether bodies, bullet holes, blood, debris, shell casings "
+                            "and broken glass stay instead of fading away."});
   settings.push_back({"Interval select",
                       "fear_all_intervals",
-                      {{"false", "Reached (as shipped)"}, {"true", "Every interval"}},
+                      {{"false", "Reached"}, {"true", "All intervals"}},
                       true,
-                      "Campaign > Interval: every interval, not just the ones this profile has "
-                      "reached (the 360 version's own unlock)."});
+                      "Set which intervals can be chosen from Campaign > Interval."});
   settings.push_back({"Checkpoint saves",
                       "fear_fast_checkpoints",
-                      {{"true", "Fast"}, {"false", "As shipped"}},
+                      {{"true", "Fast"}, {"false", "Normal"}},
                       false,
-                      "Fast skips the video memory clean-up the game does at each checkpoint, as "
-                      "EchoPatch's faster saves do on PC."});
+                      "Set checkpoint save speed. Fast skips the video memory cleanup at each "
+                      "checkpoint."});
   settings.push_back({"High frame rate fixes",
                       "fear_high_fps_fixes",
-                      {{"true", "On (EchoPatch's)"}, {"false", "Off (as shipped)"}},
+                      {{"true", "On"}, {"false", "Off"}},
                       true,
-                      "Above 30 fps the game slides on slopes, misses jump kicks, loses speed on "
-                      "landing and leaving water, and its water and slow-mo meter misbehave. On "
-                      "fixes them as EchoPatch does on PC."});
-  settings.push_back({"Version badge",
+                      "Toggle fixes for play above 30 fps: sliding on slopes, jump kicks, "
+                      "landing speed, water and the SlowMo meter."});
+  settings.push_back({"Version display",
                       "fear_version_badge",
-                      {{"launch", "At launch"}, {"always", "Always"}, {"off", "Off"}},
+                      {{"launch", "At startup"}, {"always", "Always"}, {"off", "Off"}},
                       false,
-                      "This build's version in the bottom right corner: for the first 30 seconds, "
-                      "all the time (for test runs and recordings), or never."});
+                      "Set when the build version is shown in the corner of the screen."});
   settings.push_back({"Animation timing",
                       "fear_anim_exact_time",
-                      {{"true", "Exact"}, {"false", "As shipped"}},
+                      {{"true", "Exact"}, {"false", "Normal"}},
                       true,
-                      "The engine drops a fraction of a millisecond from every animation step; "
-                      "exact keeps it, so effects play at the right speed at any frame rate."});
+                      "Set animation timing. Exact keeps effects at the right speed at any "
+                      "frame rate."});
 
   // A value set some other way (a launcher flag, the settings file) that no option has.
   for (Setting& setting : settings) {
@@ -455,7 +448,7 @@ class SettingsPanel final : public HostPanel {
         if (index < first) {
           if (Row("Controls", 0, selected_)) OpenControls();
           ImGui::TableNextColumn();
-          std::string value = controls_ && controls_->Changed() ? "Changed, not saved yet"
+          std::string value = controls_ && controls_->Changed() ? "Changed (not saved)"
                                                                 : "Keyboard and mouse";
           if (selected_ == 0) value += "  >";
           ImGui::TextUnformatted(value.c_str());
@@ -472,7 +465,7 @@ class SettingsPanel final : public HostPanel {
         ImGui::TextUnformatted(value.c_str());
         if (chosen_[i] != running_[i] && !setting.live) {
           ImGui::SameLine();
-          ImGui::TextDisabled("(on restart)");
+          ImGui::TextDisabled("(restart)");
         }
       };
       if (ImGui::BeginTable("##columns", 2, ImGuiTableFlags_SizingStretchSame)) {
@@ -508,27 +501,24 @@ class SettingsPanel final : public HostPanel {
       if (!message_.empty()) {
         ImGui::TextWrapped("%s", message_.c_str());
       } else if (selected_ < first) {
-        Dim("Rebind the keys and set the mouse's sensitivity, up and down speed, invert and "
-            "smoothing.");
+        Dim("Set keyboard and mouse configuration options.");
       } else if (selected_ < items) {
         const Setting& setting = settings_[selected_ - first];
         std::string note = setting.note;
         if (rex::cvar::GetFlagSource(setting.cvar) == rex::cvar::Source::kCommandLine) {
-          note += " This run: set by a command-line flag, which wins over the saved value; "
-                  "Save and restart leaves it out.";
+          note += " Currently set by a command-line option, which overrides the saved value.";
         }
         if (setting.cvar == "fear_frame_rate_limit" && TimerPaced()) {
-          note += " This run is paced by a timer (a launch flag), not by this setting. Save and "
-                  "restart with another frame rate goes back to the display's pacing.";
+          note += " Currently paced by a timer (a launch option). Save and restart to pace to "
+                  "the display.";
         }
         Dim(note.c_str());
       } else {
-        Dim(selected_ == items + 1
-                ? "Saves, closes the game and starts it again with these settings."
+        Dim(selected_ == items + 1 ? "Save changes and restart the game."
             : selected_ == items + 2
-                ? "Closes without saving. Back (B or Escape) saves, as Save does."
-                : "Changes marked (on restart) apply the next time the game starts; a new Input "
-                  "restarts the game now. Saved in your user data folder (settings.toml).");
+                ? "Return to the main menu without saving. Back also saves changes."
+                : "Save changes. Settings marked (restart) apply the next time the game "
+                  "starts.");
       }
       ImGui::EndChild();
       // Still taller than the screen (a long note, a small display): a smaller font next frame.
@@ -560,7 +550,7 @@ class SettingsPanel final : public HostPanel {
                                     : std::vector<std::pair<std::string, std::string>>();
     values.insert(values.end(), controls.begin(), controls.end());
     if (!WriteSettings(values)) {
-      message_ = "Couldn't write " + g_path.string() + ".";
+      message_ = "Unable to save settings to " + g_path.string() + ".";
       return false;
     }
     REXLOG_INFO("F.E.A.R. settings: saved to {}", g_path.string());
@@ -591,7 +581,7 @@ class SettingsPanel final : public HostPanel {
         Finish();
         if (host_.later && host_.quit) host_.later(host_.quit);
       } else {
-        message_ = "Saved, but the game couldn't restart itself: quit and start it again.";
+        message_ = "Settings saved. The game could not restart: quit and start it again.";
       }
     } else if (action == 2) {
       Finish();
@@ -708,12 +698,12 @@ class InputPanel final : public HostPanel {
     if (input & (kUp | kDown | kLeft | kRight)) selected_ = 1 - selected_;
     if (input & kAccept) Act(selected_);
     if (BeginPanel("##fear_input", 24.0f)) {
-      ImGui::TextUnformatted("HOW DO YOU WANT TO PLAY?");
+      ImGui::TextUnformatted("SELECT CONTROLS");
       ImGui::Separator();
       if (Row("Keyboard and mouse", 0, selected_)) Act(0);
       if (Row("Controller", 1, selected_)) Act(1);
       ImGui::Separator();
-      Dim("In the menus both work either way. Recompilation Settings > Input changes it later.");
+      Dim("Both work in the menus. Change this later in Recompilation Settings.");
     }
     EndPanel();
   }

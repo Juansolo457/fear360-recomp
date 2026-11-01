@@ -51,8 +51,7 @@ class WarmupPanel final : public fear::panel::Panel {
                          fmt::format("{} / {}", done, total).c_str());
       ImGui::PopStyleColor(2);
       fear::panel::Dim(
-          "Building the game's shaders for this graphics card and driver, once: later starts skip "
-          "this.");
+          "Building shaders for your graphics card. This happens only once.");
     }
     fear::panel::EndPanel();
   }
