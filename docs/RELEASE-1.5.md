@@ -1,4 +1,4 @@
-# F.E.A.R. 360 Recompiled 1.5 (Windows, Linux and Steam Deck)
+# F.E.A.R. 360 Recompiled 1.5.1 (Windows, Linux and Steam Deck)
 
 The Xbox 360 version of **F.E.A.R.**, statically recompiled to run natively on **Windows** and on
 **Linux and the Steam Deck**.
@@ -55,4 +55,5 @@ written the way the game's own options are.
 - Interval 03's biggest water fight can dip into the 50s for a second or two on the Deck (#103).
 - Docked at 120 Hz, the Deck's TV output dropped out twice (#89). 60 Hz works.
 
-The source of this release is the `v1.5.0` tag.
+The source of this release is the `v1.5.1` tag. (1.5.0 was tagged but never released: 1.5.1 is
+the same game with the Linux launcher's test-only god mode option removed.)
