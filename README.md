@@ -6,7 +6,7 @@ The Xbox 360 F.E.A.R., running natively on Windows, Linux and the Steam Deck. Up
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v1.5.0](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, ready to play on **Windows** and **Linux / the Steam Deck**: download the zip for your system, unpack your own F.E.A.R. disc into it and play ([docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)). 1.5 adds the Windows build with keyboard and mouse, 4K, the PC texture pack with sharper text, and John Wick mode. **Next:** *F.E.A.R. Files* ([After 1.0](#after-10)).
+**Latest release: [v1.5.1](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, ready to play on **Windows** and **Linux / the Steam Deck**: download the zip for your system, unpack your own F.E.A.R. disc into it and play ([docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)). 1.5 adds the Windows build with keyboard and mouse, 4K, the PC texture pack with sharper text, and John Wick mode. **Next:** *F.E.A.R. Files* ([After 1.0](#after-10)).
 
 ## Why
 
