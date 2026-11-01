@@ -124,4 +124,9 @@ target_include_directories(fear PRIVATE
 add_executable(fear_texindex tools/texindex.cpp src/texture_pack.cpp)
 target_include_directories(fear_texindex PRIVATE src "${REXSDK_DIR}/src/graphics")
 target_link_libraries(fear_texindex PRIVATE rexgpu-xenos rex::runtime xxHash::xxhash)
+# Linux: the SDK's libraries next to it (the release zip puts it beside the game's), as the game.
+if(UNIX AND NOT APPLE)
+    set_target_properties(fear_texindex PROPERTIES INSTALL_RPATH "\$ORIGIN"
+                          BUILD_WITH_INSTALL_RPATH ON)
+endif()
 add_dependencies(fear fear_texindex)

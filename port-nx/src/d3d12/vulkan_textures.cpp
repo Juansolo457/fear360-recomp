@@ -409,10 +409,16 @@ bool VulkanTextureCache::Upload(Texture& t, VkCommandBuffer cmd, uint64_t frame)
     }
   }
   if (pack) {
+    // No upload memory earlier this frame: wait for the next (no second read of the file now).
+    if (t.pack_retry_frame == frame) {
+      t.dirty.store(true, std::memory_order_release);
+      return false;
+    }
     const PackUpload result = UploadPack(t, cmd, frame);
     if (result == PackUpload::kOk) return true;
     if (result == PackUpload::kRetry) {
-      // No upload memory this frame: still dirty, so a later Get tries again.
+      // Still dirty, so a Get in a later frame tries again.
+      t.pack_retry_frame = frame;
       t.dirty.store(true, std::memory_order_release);
       return false;
     }

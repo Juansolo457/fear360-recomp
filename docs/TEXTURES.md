@@ -11,7 +11,7 @@ cover, or whose file fails to load, stays the 360's.
 | | |
 |---|---|
 | ✅ Offline pack builder (`tools/texture_pack.py` + `fear_texindex`) | reads both archives, matches by path, quality gate, writes the pack |
-| ✅ Runtime replacement (`port-nx/src/texture_pack.*`, in the D3D12 renderer's texture cache `d3d12/textures.cpp` since 2026-10-31; fear-nx's `native_textures.cpp` before) | read from the pack on the untile workers; per-key fallback |
+| ✅ Runtime replacement (`port-nx/src/texture_pack.*`, in the D3D12 renderer's texture cache `d3d12/textures.cpp` since 2026-10-31 and the Vulkan one's `d3d12/vulkan_textures.cpp` since 1.5; fear-nx's `native_textures.cpp` before) | read from the pack on the untile workers; per-key fallback |
 | ✅ Keys agree offline and at runtime | checked with `fear_texture_log_keys` on the intro: 393 catalogue textures found in the offline index; the only misses besides video frames were two 4×4 textures |
 | ✅ Visible in game | A/B at 2×: the ATC guard's shoulder patch and fabric weave go from blurred to sharp |
 | ✅ Pack v2: normal maps, RGBA and mixed formats | 4,710 replacements (v1: 2,666 DXT-only); in-game check of v2 below |
@@ -34,8 +34,8 @@ python -I tools/texture_pack.py build   private/texwork "<PC F.E.A.R. install>" 
 pwsh -NoProfile -File tools/launch.ps1 -Nx -TexturePack private/texture_pack
 ```
 `launch.ps1 -Collection` passes each game's pack from `private/` when it is built. The game saves
-the folder in its `settings.toml`; Recompilation Settings > PC textures turns the pack on or off (Windows: the
-Vulkan renderer, Linux's, has no pack yet).
+the folder in its `settings.toml`; Recompilation Settings > PC textures turns the pack on or off,
+in both renderers (Direct3D 12 on Windows, Vulkan on Linux and the Steam Deck).
 For *F.E.A.R. Files*, the same three steps over its own catalogue, with the PC expansions'
 archives first (`FEARXP2`, then `FEARXP`, then the base game's; Files is the Perseus Mandate
 build, carrying Extraction Point):
@@ -48,21 +48,31 @@ pwsh -NoProfile -File tools/launch.ps1 -Files -TexturePack private/files/texture
 
 ### From a release zip
 The release zips carry the builder: `texture-pack/` (its scripts) and `fear/fear_texindex`. You
-need Python 3 with numpy and Pillow (`python -m pip install numpy pillow`) and your own PC copy of
-F.E.A.R. (its install folder, with `FEAR.Arch00`). In the zip's top folder, after your disc is in
-`fear/assets`:
+need Python 3 and your own PC copy of F.E.A.R. (its install folder, with `FEAR.Arch00`). In the
+zip's top folder, after your disc is in `fear/assets`, give the builder its own Python environment
+with numpy and Pillow, then run it with that environment's Python. On Windows:
 ```
-python -I texture-pack/texture_pack.py bundle fear/assets/Game/uberCatalog.cat texwork
+python -m venv texwork-venv
+texwork-venv\Scripts\python -m pip install numpy pillow
+texwork-venv\Scripts\python -I texture-pack\texture_pack.py bundle fear\assets\Game\uberCatalog.cat texwork
+fear\fear_texindex.exe texwork\x360.bundle texwork\x360.tsv texwork\x360_base.bin
+texwork-venv\Scripts\python -I texture-pack\texture_pack.py build texwork "<PC F.E.A.R. install>" fear\texture_pack
+```
+On Linux and the Steam Deck:
+```
+python3 -m venv texwork-venv
+texwork-venv/bin/python -m pip install numpy pillow
+texwork-venv/bin/python -I texture-pack/texture_pack.py bundle fear/assets/Game/uberCatalog.cat texwork
 fear/fear_texindex texwork/x360.bundle texwork/x360.tsv texwork/x360_base.bin
-python -I texture-pack/texture_pack.py build texwork "<PC F.E.A.R. install>" fear/texture_pack
+texwork-venv/bin/python -I texture-pack/texture_pack.py build texwork "<PC F.E.A.R. install>" fear/texture_pack
 ```
-(On Windows, `fear\fear_texindex.exe` and backslashes; on Linux, `python3`.) Then add this line to
+Then add this line to
 `fear/user/settings.toml` (create the file if it isn't there yet) and start the game:
 ```
 fear_texture_pack = "texture_pack"
 ```
-Recompilation Settings > PC textures then turns the pack on or off. The `texwork` folder can be
-deleted afterwards.
+Recompilation Settings > PC textures then turns the pack on or off. The `texwork` and
+`texwork-venv` folders can be deleted afterwards.
 
 Either way, about 6 minutes and 1.3 GB. `report.tsv` in the pack says what happened to every 360 texture;
 `compare <work> <run.log> --pack <pack>` breaks down a run logged with

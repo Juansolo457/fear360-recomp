@@ -84,8 +84,15 @@ if ($Files -or $Collection) { $Nx = $true }
 $given = $PSBoundParameters
 # Start-Process joins -ArgumentList with spaces: a value with a space (a texture pack in
 # "C:\Games\PC Textures") is quoted so the game gets it whole.
+# -Extra's flags: split at spaces, except inside double quotes
+# ('--fear_texture_pack "C:\PC Textures"' is two values, the path whole and unquoted).
+function Split-Extra([string]$Text) {
+    [regex]::Matches($Text, '"[^"]*"|[^\s"]+') | ForEach-Object { $_.Value.Trim('"') }
+}
 function Quote-Arguments([string[]]$List) {
-    $List | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
+    $List | ForEach-Object {
+        if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }
 }
 $invariant = [System.Globalization.CultureInfo]::InvariantCulture
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -107,7 +114,7 @@ $log = Join-Path $port "logs\run-$stamp$tag.log"
 $arguments = @(
     '--resolution', '720p', '--resolution_scale', "$Scale", '--anisotropic_override', "$Anisotropic",
     '--game_data_root', "$port\assets", '--user_data_root', "$port\$User",
-    '--cache_root', "$port\$Cache", '--log_file', $log) + @($Extra -split '\s+' | Where-Object { $_ })
+    '--cache_root', "$port\$Cache", '--log_file', $log) + @(Split-Extra $Extra)
 if (!$isNx -or $given.ContainsKey('Windowed')) {
     $arguments += $(if ($Windowed) { '--no-fullscreen' } else { '--fullscreen' })
 }

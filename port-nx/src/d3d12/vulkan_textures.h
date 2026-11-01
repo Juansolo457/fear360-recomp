@@ -104,6 +104,8 @@ class VulkanTextureCache {
     // channel order its views map the guest components from.
     const fear::texture_pack::Entry* pack = nullptr;
     uint32_t host_swizzle = 0;
+    // The frame whose replacement upload found no upload memory: tried again from the next one.
+    uint64_t pack_retry_frame = UINT64_MAX;
     bool initialized = false;  // in SHADER_READ_ONLY_OPTIMAL (false: UNDEFINED)
     std::atomic<bool> dirty{true};
     // Views by (signed << 12 | host component swizzle).
