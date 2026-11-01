@@ -84,14 +84,20 @@ if ($Files -or $Collection) { $Nx = $true }
 $given = $PSBoundParameters
 # Start-Process joins -ArgumentList with spaces: a value with a space (a texture pack in
 # "C:\Games\PC Textures") is quoted so the game gets it whole.
+# A TOML basic string (a path with an apostrophe or a backslash stays valid).
+function Toml([string]$Text) { '"' + ($Text -replace '\\', '\\' -replace '"', '\"') + '"' }
 # -Extra's flags: split at spaces, except inside double quotes
 # ('--fear_texture_pack "C:\PC Textures"' is two values, the path whole and unquoted).
 function Split-Extra([string]$Text) {
     [regex]::Matches($Text, '"[^"]*"|[^\s"]+') | ForEach-Object { $_.Value.Trim('"') }
 }
 function Quote-Arguments([string[]]$List) {
+    # The Windows command-line rules: backslashes before a quote, and before the closing quote,
+    # doubled; a quote escaped.
     $List | ForEach-Object {
-        if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+        if ($_ -match '[\s"]') {
+            '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+        } else { $_ }
     }
 }
 $invariant = [System.Globalization.CultureInfo]::InvariantCulture
@@ -179,9 +185,10 @@ if ($Collection) {
                 elseif (Test-Path (Join-Path $pack 'index.tsv')) { $pack } else { '' }
         $run = Get-Run $t.Title $pack
         $runs[$t.Id] = $run
-        $toml += '', '[[title]]', "id = '$($t.Id)'", "name = '$($t.Name)'", "subtitle = '$($t.Subtitle)'",
-            "exe = '$($run.Executable)'", "working_dir = '$($run.Port)'",
-            ('args = [' + (($run.Arguments | ForEach-Object { "'$_'" }) -join ', ') + ']')
+        $toml += '', '[[title]]', "id = $(Toml $t.Id)", "name = $(Toml $t.Name)",
+            "subtitle = $(Toml $t.Subtitle)", "exe = $(Toml $run.Executable)",
+            "working_dir = $(Toml $run.Port)",
+            ('args = [' + (($run.Arguments | ForEach-Object { Toml $_ }) -join ', ') + ']')
         # The Windows 1.0 release is F.E.A.R. alone, as Linux's: Files is listed as coming later
         # (#118: its keyboard and mouse aren't done). -WithFiles or -Files to play it.
         if ($t.Id -eq 'files' -and !$WithFiles -and !$Files) { $toml += 'later = true' }

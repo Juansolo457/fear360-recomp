@@ -11,7 +11,7 @@ cover, or whose file fails to load, stays the 360's.
 | | |
 |---|---|
 | ✅ Offline pack builder (`tools/texture_pack.py` + `fear_texindex`) | reads both archives, matches by path, quality gate, writes the pack |
-| ✅ Runtime replacement (`port-nx/src/texture_pack.*`, in the D3D12 renderer's texture cache `d3d12/textures.cpp` since 2026-10-31 and the Vulkan one's `d3d12/vulkan_textures.cpp` since 1.5; fear-nx's `native_textures.cpp` before) | read from the pack on the untile workers; per-key fallback |
+| ✅ Runtime replacement (`port-nx/src/texture_pack.*`, in the D3D12 renderer's texture cache `d3d12/textures.cpp` since 2026-10-31 and the Vulkan one's `d3d12/vulkan_textures.cpp` since 1.5; fear-nx's `native_textures.cpp` before) | D3D12: read from the pack on the untile workers; Vulkan: read during the texture's upload on the recording thread; both with a per-key fallback |
 | ✅ Keys agree offline and at runtime | checked with `fear_texture_log_keys` on the intro: 393 catalogue textures found in the offline index; the only misses besides video frames were two 4×4 textures |
 | ✅ Visible in game | A/B at 2×: the ATC guard's shoulder patch and fabric weave go from blurred to sharp |
 | ✅ Pack v2: normal maps, RGBA and mixed formats | 4,710 replacements (v1: 2,666 DXT-only); in-game check of v2 below |
@@ -106,10 +106,15 @@ logged for Arial_18 and NeuropoX_36).
   reads the DDS into the upload buffer instead of untiling. The guest pages stay watched: new
   content looks the pack up again, and content it doesn't cover goes back to a guest-format
   resource (a swapped-out resource lives until the GPU is done with it). A failed read marks the
-  key bad (that texture is black until its content changes) and the 360 texture is used from
-  then on. Resolve destinations are never replaced. With a pack, the texture memory budget is
+  key bad: that upload leaves the texture black, and the 360 texture comes with its next upload
+  (new content in its pages, or the texture made again), and from then on. Resolve destinations are never replaced. With a pack, the texture memory budget is
   four times larger (replacements are about 4x the 360's size). Holiday at 4K on an RTX 4090:
   506 of 1,618 new textures replaced (the rest mostly video frames), 120 fps.
+- **Runtime (Vulkan, since 1.5).** The same lookup at each upload of new 2D guest content
+  (`d3d12/vulkan_textures.cpp`): on a hit the texture gets an image of the replacement's size,
+  format and mips, and the DDS is read into upload memory in place of the untile; the old image
+  and its views go once the GPU is done with them. An unreadable file marks the key bad and the
+  360 texture is uploaded at once; no upload memory retries in the next frame.
 - **Quality gate.** The PC base level, box-filtered per channel to the 360 size, against the
   decoded 360 base level, in the 360's logical channel order: PSNR ≥ 24 dB, or for normal maps
   a channel correlation ≥ 0.9 (the 360's normal maps were re-derived and differ in strength).
