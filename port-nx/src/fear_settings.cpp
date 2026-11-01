@@ -88,9 +88,10 @@ std::vector<Setting> BuildSettings() {
     settings.push_back({"Input",
                         "fear_mkb",
                         {{"true", "Keyboard and mouse"}, {"false", "Controller"}},
-                        true,
+                        false,
                         "One or the other in play: the keyboard and mouse (mouse look, the PC's "
-                        "keys), or your controllers. Both work in the menus and here."});
+                        "keys), or your controllers. Both work in the menus and here. Saving a "
+                        "change restarts the game, so its button pictures follow."});
   }
   settings.push_back({"Display",
                       "fullscreen",
@@ -441,7 +442,7 @@ class SettingsPanel final : public HostPanel {
         if (input & (kRight | kAccept)) Step(selected_ - first, +1);
       }
     }
-    if (input & kBack) Act(2);
+    if (input & kBack) Act(0);  // leaving saves; Cancel is the way out without
 
     if (BeginPanel("##fear_settings", 56.0f, fit_scale_)) {
       ImGui::TextUnformatted("RECOMPILATION SETTINGS");
@@ -525,8 +526,10 @@ class SettingsPanel final : public HostPanel {
       } else {
         Dim(selected_ == items + 1
                 ? "Saves, closes the game and starts it again with these settings."
-                : "Changes marked (on restart) apply the next time the game starts. "
-                  "Saved in your user data folder (settings.toml).");
+            : selected_ == items + 2
+                ? "Closes without saving. Back (B or Escape) saves, as Save does."
+                : "Changes marked (on restart) apply the next time the game starts; a new Input "
+                  "restarts the game now. Saved in your user data folder (settings.toml).");
       }
       ImGui::EndChild();
       // Still taller than the screen (a long note, a small display): a smaller font next frame.
@@ -580,6 +583,8 @@ class SettingsPanel final : public HostPanel {
 
   void Act(int action) {
     if (closing_) return;
+    // A new Input restarts the game: the game picks its button pictures when it starts.
+    if (action == 0 && InputChanged()) action = 1;
     if (action == 0 && Save()) {
       Finish();
     } else if (action == 1 && Save()) {
@@ -602,6 +607,13 @@ class SettingsPanel final : public HostPanel {
   bool FrameRateChanged() const {
     for (size_t i = 0; i < settings_.size(); ++i) {
       if (settings_[i].cvar == "fear_frame_rate_limit") return chosen_[i] != running_[i];
+    }
+    return false;
+  }
+
+  bool InputChanged() const {
+    for (size_t i = 0; i < settings_.size(); ++i) {
+      if (settings_[i].cvar == "fear_mkb") return chosen_[i] != running_[i];
     }
     return false;
   }
