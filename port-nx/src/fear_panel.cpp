@@ -271,7 +271,10 @@ bool BeginPanel(const char* id, float width_em, float font_scale) {
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(size * 0.4f, size * 0.15f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.05f, 0.94f));
+  // Opaque, over a darkened screen: the menu behind doesn't show through.
+  ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize,
+                                                IM_COL32(0, 0, 0, 190));
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.05f, 1.0f));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.55f, 0.55f, 0.58f, 0.6f));
   ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.62f, 0.10f, 0.08f, 0.85f));
   ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.62f, 0.10f, 0.08f, 0.85f));
