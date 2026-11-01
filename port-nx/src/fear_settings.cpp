@@ -500,6 +500,11 @@ class SettingsPanel final : public HostPanel {
         if (Row(labels[a], items + a, selected_, width)) Act(a);
       }
       ImGui::Separator();
+      // The note gets a fixed five lines, so the panel keeps its size from row to row (and
+      // covers the menu behind it whatever the note's length).
+      ImGui::BeginChild("##note", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 5.0f),
+                        ImGuiChildFlags_None,
+                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
       if (!message_.empty()) {
         ImGui::TextWrapped("%s", message_.c_str());
       } else if (selected_ < first) {
@@ -523,6 +528,7 @@ class SettingsPanel final : public HostPanel {
                 : "Changes marked (on restart) apply the next time the game starts. "
                   "Saved in your user data folder (settings.toml).");
       }
+      ImGui::EndChild();
       // Still taller than the screen (a long note, a small display): a smaller font next frame.
       const float limit = ImGui::GetIO().DisplaySize.y * 0.96f;
       const float height = ImGui::GetWindowHeight();

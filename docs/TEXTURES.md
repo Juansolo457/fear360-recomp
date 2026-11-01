@@ -60,7 +60,9 @@ baseline, weight and the outline in alpha are fitted to the 360 atlas, and each 
 in its own cell at its best x, so the layout is the 360's. The controller-button glyphs and the
 characters a face lacks (Neuropol has no accented capitals) stay the 360's, upscaled. About 30
 seconds; `report.tsv` gives each font's fit. Only an upscale of the 360 atlas was tried first:
-it kept the stair-steps.
+it kept the stair-steps. The atlases are linear in the files, but the game tiles them when it
+loads them, so `fear_texindex` keys them by their tiled copy (checked against the keys a run
+logged for Arial_18 and NeuropoX_36).
 
 ## How it works
 - **Key.** XXH3 of the 360 texture's base level exactly as it sits in guest memory (tiled,
