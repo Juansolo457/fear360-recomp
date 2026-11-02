@@ -51,12 +51,16 @@ def walk(f, base, sector, size, path=""):
 
 
 def check_output(out):
-    """A relative output naming the current folder lands inside itself: fear/assets, run from
-    fear/assets, is fear/assets/fear/assets, where the game won't look."""
+    """A relative output that starts with the end of the current folder lands inside itself:
+    fear/assets, run from fear/assets, is fear/assets/fear/assets, where the game won't look. All
+    of the output repeating is always that; only part of it (fear/assets, run from fear) can be
+    right, in a release unpacked to a folder named fear, where fear/assets is already there."""
     if os.path.isabs(out):
         return
-    here = os.path.basename(os.getcwd()).lower()
-    if here in os.path.normpath(out).lower().split(os.sep):
+    parts = os.path.normpath(out).lower().split(os.sep)
+    here = os.getcwd().lower().split(os.sep)
+    repeated = max((n for n in range(1, len(parts) + 1) if here[-n:] == parts[:n]), default=0)
+    if repeated == len(parts) or (repeated and not os.path.isdir(out)):
         raise SystemExit(f"{out} from here would be {os.path.abspath(out)}, a folder inside itself.\n"
                          "Run this from the folder xdvdfs.py came in, or give the full path.")
 

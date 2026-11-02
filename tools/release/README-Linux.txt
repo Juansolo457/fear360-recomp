@@ -16,7 +16,8 @@ What you need
 
 Setup (on the Deck: Desktop Mode)
   1. Extract this zip where you keep games, for example /home/deck/Games.
-  2. Unpack your disc image into the fear/assets folder. In this folder, run:
+  2. Unpack your disc image into the fear/assets folder. Open a terminal in the folder this README
+     is in, the one with xdvdfs.py, and run:
        python3 -I xdvdfs.py "<your F.E.A.R. ISO>" extract fear/assets
      fear/assets should then hold default.xex and a Game folder, directly, not in another folder
      inside it. Leave xdvdfs.py where it is: the game doesn't use it, and it doesn't go in
