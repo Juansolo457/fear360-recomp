@@ -59,6 +59,10 @@
 //   fear_letterbox (off)      LetterBoxDisabled 0 -> 1 (no cutscene bars)                  console
 //   fear_full_detail_models   ModelLODDistanceScale -> 0.003 (FearModelLodScale, below)    hook
 //   fear_fast_checkpoints     CheckPointOptimizeVideoMemory 1 -> 0 (on by default)         console
+// Not EchoPatch's: fear_auto_shotgun (#127), an automatic shotgun the 360 disc has but never
+// places: Arsenal/Weapons/Default/Shotgun takes AutoShotgun's values (the VK-12's ammo kept). With
+// fear_ps3_game (the player's own PS3 disc), its first-person animations and models are the PS3
+// version's, put into a copy of uberCatalog.cat in <user data>/overrides/.
 // The database ones go into the same patched copy as the stick tuning; F.E.A.R. Files keeps its
 // database in uberCatalog.cat, so there only the console ones apply for now. The field of view
 // (fear_fov) also moves the first-person camera forward at wide angles (CameraAttachedOffsetZ, by
@@ -96,6 +100,17 @@ bool FearHealthTestNotice();
 //                 0x823B8440 0x823B9110                          0x8238DB44 0x8238E808
 // (CameraFirstPersonLODBias, EchoPatch's other half, is already -1,000,000 on the 360.)
 void FearModelLodScale(PPCRegister& f1);
+
+// fear_fov: the forward push (CameraAttachedOffsetZ) fades out as the player aims, because a gun's
+// sight animation can hold it close enough for the pushed camera to land inside it (the PS3
+// Watson's does; the PS3 never had a push). The zoom's state is the camera's +368: 0 zooming in,
+// 1 zoomed, 2 zooming out, 3 not zoomed.
+// FearZoomFov: the camera's zoom update (sub_823B6528, once a frame while the zoom moves) where it
+// stores the field of view it worked out (f0), between the normal one (f29) and the zoomed (f28).
+// FearCameraOffsetZ: sub_823B47C8, the only reader of the variable, the camera in r28, as it stores
+// the offset's Z (f30).
+void FearZoomFov(PPCRegister& f0, PPCRegister& f28, PPCRegister& f29);
+void FearCameraOffsetZ(PPCRegister& r28, PPCRegister& f30);
 
 // fear_intro_videos=none (#19), F.E.A.R. only: CInterfaceMgr's next-movie function (sub_82362C88)
 // just after it counts SplashMovies (r23), the interface manager in r31: the count becomes 0.
