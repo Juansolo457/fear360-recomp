@@ -86,7 +86,7 @@ elif [ -n "$FEAR_START" ]; then
   start=(--fear_collection_start fear)
 fi
 if [ ! -f assets/default.xex ]; then
-  echo "No $program/assets/default.xex: unpack your disc there (see the README)" \
+  echo "No $program/assets/default.xex: unpack your disc so that it and the Game folder are directly in $program/assets, not in another folder inside it (see the README)" \
     | tee -a "$info" >&2
   exit 1
 fi

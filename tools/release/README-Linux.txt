@@ -18,7 +18,10 @@ Setup (on the Deck: Desktop Mode)
   1. Extract this zip where you keep games, for example /home/deck/Games.
   2. Unpack your disc image into the fear/assets folder. In this folder, run:
        python3 -I xdvdfs.py "<your F.E.A.R. ISO>" extract fear/assets
-     fear/assets should then hold default.xex and a Game folder.
+     fear/assets should then hold default.xex and a Game folder, directly, not in another folder
+     inside it. Leave xdvdfs.py where it is: the game doesn't use it, and it doesn't go in
+     fear/assets. If the game won't start and fear/logs says "No fear/assets/default.xex",
+     default.xex isn't directly in fear/assets: move it and the Game folder there.
   3. Run fear-linux.sh. On the Deck, add it to Steam instead:
        - Steam > Games > "Add a Non-Steam Game to My Library" > Browse > set the file type to
          "All Files" > fear-linux.sh > Add.

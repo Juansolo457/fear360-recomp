@@ -19,7 +19,10 @@ Setup
   1. Extract this zip anywhere, for example C:\Games\FEAR360.
   2. Unpack your disc image into the fear\assets folder. In this folder, run:
        python -I xdvdfs.py "<your F.E.A.R. ISO>" extract fear\assets
-     fear\assets should then hold default.xex and a Game folder.
+     fear\assets should then hold default.xex and a Game folder, directly, not in another folder
+     inside it. Leave xdvdfs.py where it is: the game doesn't use it, and it doesn't go in
+     fear\assets. If you see "Your game files are missing", default.xex isn't directly in
+     fear\assets: move it and the Game folder there.
   3. Double-click "Play F.E.A.R..cmd".
 
 The first start asks whether you play with the keyboard and mouse or a controller. Change it later
