@@ -782,11 +782,61 @@ void WriteFloat(std::vector<uint8_t>& data, size_t pos, float value) {
   std::memcpy(data.data() + pos, &word, 4);
 }
 
+// What PreparePs3Assets writes under the override folder; the catalogue copy is over 400 MB.
+void RemovePs3Assets(const std::filesystem::path& root) {
+  std::error_code error;
+  std::filesystem::remove_all(root / "database_anim", error);
+  std::filesystem::remove(root / "uberCatalog.cat", error);
+  std::filesystem::remove(root / "uberCatalog.cat.stamp", error);
+}
+
+// The PS3 animation files, under the 360's names, and the catalogue copy the game opens instead of
+// its own. All or nothing: the database may only name WEAP_AUTOSHOTGUN if the tree that defines it
+// is in place, or the gun doesn't show at all.
+bool PreparePs3Assets(rex::filesystem::VirtualFileSystem& vfs,
+                      const std::filesystem::path& game_data_root,
+                      const std::filesystem::path& ps3_anims, const std::filesystem::path& root) {
+  std::error_code error;
+  std::filesystem::remove_all(root / "database_anim", error);
+  std::filesystem::create_directories(root / "database_anim", error);
+  std::error_code copy_error;
+  std::filesystem::copy_file(ps3_anims / "anim.anmtree", root / "database_anim" / "Anim.anmtree",
+                             copy_error);
+  if (!copy_error) {
+    std::filesystem::copy_file(ps3_anims / "anim.gamedb", root / "database_anim" / "Anim.gamedb",
+                               copy_error);
+  }
+  if (copy_error) {
+    REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not copy the PS3 animation files: {}; "
+                 "the automatic shotgun keeps the nail gun's animations",
+                 copy_error.message());
+    RemovePs3Assets(root);
+    return false;
+  }
+  const int replaced = PatchCatalog(game_data_root / "Game" / "uberCatalog.cat",
+                                    ps3_anims.parent_path(), ps3_anims / "anim.anmtree",
+                                    root / "uberCatalog.cat");
+  if (replaced < 0 || !SwapCatalogEntry(vfs, root / "uberCatalog.cat")) {
+    REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not put the PS3 animation tree into a "
+                 "copy of uberCatalog.cat; the automatic shotgun keeps the nail gun's animations");
+    RemovePs3Assets(root);
+    return false;
+  }
+  REXLOG_INFO("F.E.A.R.: Recompilation Settings: the automatic shotgun's animations from the PS3 "
+              "data in {}; a copy of uberCatalog.cat with {} PS3 entries (the animation tree, "
+              "then the Watson's models)",
+              ps3_anims.string(), replaced);
+  return true;
+}
+
 }  // namespace
 
 void Apply(rex::Runtime& runtime) {
   const std::string ramp = REXCVAR_GET(fear_look_ramp);
   const bool softlock = REXCVAR_GET(fear_aim_softlock);
+  const auto root = runtime.user_data_root() / "overrides" / "Game";
+  const auto ps3_anims = Ps3AnimFolder();
+  if (ps3_anims.empty()) RemovePs3Assets(root);
   const auto changes = Changes();
   auto options = DatabaseChanges();
   auto copies = RecordCopies();
@@ -807,8 +857,10 @@ void Apply(rex::Runtime& runtime) {
   }
   std::ifstream in(source, std::ios::binary);
   std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)), {});
-  const auto ps3_anims = Ps3AnimFolder();
-  if (!ps3_anims.empty() && data.size() >= 0x1C && !std::memcmp(data.data(), "BDAG", 4)) {
+  auto* vfs = runtime.file_system();
+  const bool ps3_ready = !ps3_anims.empty() && vfs &&
+                         PreparePs3Assets(*vfs, runtime.game_data_root(), ps3_anims, root);
+  if (ps3_ready && data.size() >= 0x1C && !std::memcmp(data.data(), "BDAG", 4)) {
     const uint32_t property = AppendString(data, "WEAP_AUTOSHOTGUN");
     for (const char* category :
          {"Arsenal/Weapons/Default", "Arsenal/Weapons/AI", "Arsenal/Weapons/Multiplayer"}) {
@@ -866,7 +918,6 @@ void Apply(rex::Runtime& runtime) {
   }
 
   std::error_code error;
-  const auto root = runtime.user_data_root() / "overrides" / "Game";
   std::filesystem::create_directories(root / "database", error);
   {
     std::ofstream out(root / "database" / "Loki.gamedb", std::ios::binary | std::ios::trunc);
@@ -877,54 +928,16 @@ void Apply(rex::Runtime& runtime) {
       return;
     }
   }
-  // The PS3 animation files go next to the database, under the 360's names, with a redirect of
-  // their own (kGuestAnimFolder, below).
-  std::filesystem::remove_all(root / "database_anim", error);
-  bool ps3_copied = !ps3_anims.empty();
-  if (ps3_copied) {
-    std::filesystem::create_directories(root / "database_anim", error);
-    std::error_code copy_error;
-    std::filesystem::copy_file(ps3_anims / "anim.anmtree", root / "database_anim" / "Anim.anmtree",
-                               copy_error);
-    if (!copy_error) {
-      std::filesystem::copy_file(ps3_anims / "anim.gamedb", root / "database_anim" / "Anim.gamedb",
-                                 copy_error);
-    }
-    if (copy_error) {
-      REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not copy the PS3 animation files: {}",
-                   copy_error.message());
-      std::filesystem::remove_all(root / "database_anim", error);
-      ps3_copied = false;
-    } else {
-      REXLOG_INFO("F.E.A.R.: Recompilation Settings: the automatic shotgun's animations from the "
-                  "PS3 data in {}",
-                  ps3_anims.string());
-    }
-  }
   auto device =
       std::make_unique<OverrideDevice>(kOverrideMount, root, runtime.game_data_root() / "Game");
-  auto* vfs = runtime.file_system();
   if (!vfs || !device->Initialize() || !vfs->RegisterDevice(std::move(device)) ||
       !vfs->RegisterSymbolicLink(kGuestFolder, std::string(kOverrideMount) + "\\database")) {
     REXLOG_ERROR("F.E.A.R.: look tuning: could not redirect the game database");
     return;
   }
-  if (ps3_copied &&
+  if (ps3_ready &&
       !vfs->RegisterSymbolicLink(kGuestAnimFolder, std::string(kOverrideMount) + "\\database_anim")) {
     REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not redirect the animation files");
-  }
-  if (ps3_copied) {
-    const int replaced =
-        PatchCatalog(runtime.game_data_root() / "Game" / "uberCatalog.cat",
-                     ps3_anims.parent_path(), ps3_anims / "anim.anmtree", root / "uberCatalog.cat");
-    if (replaced < 0 || !SwapCatalogEntry(*vfs, root / "uberCatalog.cat")) {
-      REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not put the PS3 animation tree into "
-                   "a copy of uberCatalog.cat");
-    } else {
-      REXLOG_INFO("F.E.A.R.: Recompilation Settings: a copy of uberCatalog.cat with {} PS3 "
-                  "entries (the animation tree, then the Watson's models)",
-                  replaced);
-    }
   }
   REXLOG_INFO("F.E.A.R.: look tuning: stick edge boost '{}', soft lock {} (patched copy of {})",
               ramp, softlock ? "on" : "off", source.string());
