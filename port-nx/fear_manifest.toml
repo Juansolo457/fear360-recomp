@@ -402,6 +402,17 @@ name = "FearModelLodScale"
 address = 0x823B9110
 registers = ["f1"]
 
+# fear_fov (src/look_tuning.h): the forward camera push fades out as the player aims.
+[[entrypoint.midasm_hook]]
+name = "FearZoomFov"
+address = 0x823B6684
+registers = ["f0", "f28", "f29"]
+
+[[entrypoint.midasm_hook]]
+name = "FearCameraOffsetZ"
+address = 0x823B4B00
+registers = ["r28", "f30"]
+
 # For #19: CInterfaceMgr::ChangeState (sub_82366558) at its entry, logged once per change asked.
 [[entrypoint.midasm_hook]]
 name = "FearLogStateChange"

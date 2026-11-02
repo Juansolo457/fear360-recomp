@@ -25,10 +25,13 @@
 #include <fmt/format.h>
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/devices/host_path_entry.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
+#include <rex/string/utf8.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xmemory.h>
 
@@ -77,6 +80,10 @@ REXCVAR_DEFINE_BOOL(fear_auto_shotgun, false, "F.E.A.R.",
                     "The automatic shotgun the 360 disc has but never places (#127; not the PS3 "
                     "version's): every VK-12 becomes one. F.E.A.R. only")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_STRING(fear_ps3_game, "", "F.E.A.R.",
+                      "The player's own PS3 F.E.A.R. data (PS3_GAME/USRDIR/game), for its "
+                      "content; with fear_auto_shotgun, the shotgun's own animations (#127)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_STRING(fear_intro_videos, "all", "F.E.A.R.",
                       "Videos at startup: all (as shipped: ESRB, Sierra, Day 1, Monolith), "
                       "monolith (Monolith's logo only), none (#19). F.E.A.R. only for now")
@@ -110,9 +117,11 @@ namespace {
 
 constexpr const char* kDatabase = "Game/database/Loki.gamedb";
 // The game opens a file by resolving its folder and then looking the name up in it, so the
-// redirect is the folder. That prefix also matches Game\database_anim, which the override
-// device hands to the original folder.
+// redirect is the folder. The PS3 animation files get a link of their own, though the game reads
+// the tree from uberCatalog.cat (PatchCatalog).
 constexpr const char* kGuestFolder = "\\Device\\Harddisk0\\Partition1\\Game\\database";
+constexpr const char* kGuestAnimFolder = "\\Device\\Harddisk0\\Partition1\\Game\\database_anim";
+constexpr const char* kGuestGame = "\\Device\\Harddisk0\\Partition1\\Game";
 constexpr const char* kOverrideMount = "\\Device\\FearOverride";
 constexpr uint32_t kTypeFloat = 2;
 constexpr uint32_t kTypeString = 4;
@@ -190,13 +199,14 @@ std::vector<std::pair<std::string, float>> OptionChanges() {
 // A change to every value of an attribute, in the records of a category ("*": all of them).
 struct DbChange {
   // kScale: a float times `number`. kReplaceWord: a value equal to `from` becomes `word`.
-  enum class Kind { kFloat, kWord, kBlankStrings, kScale, kReplaceWord };
+  enum class Kind { kFloat, kWord, kBlankStrings, kScale, kReplaceWord, kStringOffset };
   std::string category, record, attribute;
   Kind kind = Kind::kFloat;
   float number = 0.0f;              // kFloat, kScale
   uint32_t word = 0;                // kWord, kReplaceWord
   std::vector<std::string> blank;   // kBlankStrings: values containing one of these become ""
   uint32_t from = 0;                // kReplaceWord
+  // kStringOffset: a string value becomes `word`, an offset into the string table.
   // Instead of category and record: every record whose "category/record" path starts with this.
   std::string prefix;
   int index = -1;  // only this value of the attribute (-1: every value)
@@ -454,6 +464,9 @@ bool PatchAttributes(std::vector<uint8_t>& data, std::vector<DbChange>& changes)
                          type != kTypeString) {
                 put(at, change.word);
                 ++change.applied;
+              } else if (change.kind == DbChange::Kind::kStringOffset && type == kTypeString) {
+                put(at, change.word);
+                ++change.applied;
               } else if (change.kind == DbChange::Kind::kBlankStrings && type == kTypeString) {
                 const uint32_t offset = ReadWord(data, at);
                 const std::string value = text(offset);
@@ -475,6 +488,183 @@ bool PatchAttributes(std::vector<uint8_t>& data, std::vector<DbChange>& changes)
     return false;
   }
   return true;
+}
+
+// Adds a string at the end of the string table and returns its offset there. Values hold offsets
+// into the table and the records follow it in order, so nothing else moves; the header's table
+// size (word 2) grows by the string's 4-byte aligned length.
+uint32_t AppendString(std::vector<uint8_t>& data, const std::string& text) {
+  const uint32_t string_size = ReadWord(data, 8);
+  std::vector<uint8_t> bytes(text.begin(), text.end());
+  bytes.resize((bytes.size() + 4) & ~size_t(3), 0);  // NUL-terminated, 4-byte aligned
+  data.insert(data.begin() + 0x1C + string_size, bytes.begin(), bytes.end());
+  const uint32_t grown = std::byteswap(string_size + uint32_t(bytes.size()));
+  std::memcpy(data.data() + 8, &grown, 4);
+  return string_size;
+}
+
+// fear_auto_shotgun with fear_ps3_game: the PS3 version's animation tree, which hooks the first-
+// person watson_* animations (already in the 360's chars\models\player_watson.mdl) up as
+// WEAP_AUTOSHOTGUN. The 360's tree lacks them, so its weapon record borrows WEAP_NailGun. The
+// same format on both (LTNA, GADB); the PS3's adds the Watson's entries and renames the 360's
+// unused WEAP_watson property. Returns the folder holding anim.anmtree and anim.gamedb, if found.
+std::filesystem::path Ps3AnimFolder() {
+  const std::string root = REXCVAR_GET(fear_ps3_game);
+  if (!REXCVAR_GET(fear_auto_shotgun) || root.empty()) return {};
+  std::error_code error;
+  for (const char* folder : {"database_anim", "Database_Anim"}) {
+    const auto path = std::filesystem::path(root) / folder;
+    if (std::filesystem::exists(path / "anim.anmtree", error) &&
+        std::filesystem::exists(path / "anim.gamedb", error)) {
+      return path;
+    }
+  }
+  REXLOG_WARN("F.E.A.R.: Recompilation Settings: no database_anim/anim.anmtree and anim.gamedb "
+              "under fear_ps3_game ({}); the automatic shotgun keeps the nail gun's animations",
+              root);
+  return {};
+}
+
+// A catalogue (uberCatalog.cat, the same version 3 layout on both discs): a big-endian header
+// (count at +8, name table offset and size at +12 and +16), then 16-byte entries (name offset,
+// data offset, size, compressed size; zlib, or stored when the compressed size is the size).
+struct Catalog {
+  std::vector<uint8_t> entries, names;
+  uint32_t count = 0;
+};
+
+uint32_t ReadBe(const uint8_t* p) { return uint32_t(p[0]) << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+
+bool ReadCatalog(std::istream& in, Catalog& catalog) {
+  uint8_t header[32];
+  if (!in.seekg(0) || !in.read(reinterpret_cast<char*>(header), sizeof(header))) return false;
+  catalog.count = ReadBe(header + 8);
+  catalog.entries.resize(size_t(catalog.count) * 16);
+  catalog.names.resize(ReadBe(header + 16));
+  in.read(reinterpret_cast<char*>(catalog.entries.data()), std::streamsize(catalog.entries.size()));
+  in.seekg(ReadBe(header + 12));
+  in.read(reinterpret_cast<char*>(catalog.names.data()), std::streamsize(catalog.names.size()));
+  return bool(in);
+}
+
+// The index of the entry named name (lower case), or -1.
+int FindEntry(const Catalog& catalog, std::string_view name) {
+  for (uint32_t i = 0; i < catalog.count; ++i) {
+    const uint32_t at = ReadBe(&catalog.entries[size_t(i) * 16]);
+    if (at >= catalog.names.size()) continue;
+    std::string text(reinterpret_cast<const char*>(&catalog.names[at]));
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](char c) { return char(std::tolower(uint8_t(c))); });
+    if (text == name) return int(i);
+  }
+  return -1;
+}
+
+// The game reads the animation tree from uberCatalog.cat (database_anim\Anim.anmtree, never the
+// loose file: a run on 2026-11-01 never opened Game\database_anim). target becomes a copy of the
+// catalogue with the PS3 tree appended, stored (compressed size = size, as 9 of the 360's entries
+// are), and the Watson's first-person animations and gun model taken from the PS3 catalogue as
+// they are (both zlib, the same model format), each entry pointed at its new data. A model the
+// PS3 catalogue lacks keeps the 360's. The copy is kept while the sources are unchanged (a stamp
+// next to it), since the catalogue is 428 MB. Returns the number of entries replaced, or -1.
+int PatchCatalog(const std::filesystem::path& catalog, const std::filesystem::path& ps3_game,
+                 const std::filesystem::path& tree, const std::filesystem::path& target) {
+  static constexpr const char* kModels[] = {"chars\\models\\player_watson.mdl",
+                                            "guns\\models_hh\\watsonsas.mdl"};
+  std::error_code error;
+  auto ps3_catalog = ps3_game / "ubercatalog.cat";
+  if (!std::filesystem::exists(ps3_catalog, error)) ps3_catalog = ps3_game / "uberCatalog.cat";
+  const auto describe = [&](const std::filesystem::path& path) {
+    return fmt::format("{} {}", std::filesystem::file_size(path, error),
+                       std::filesystem::last_write_time(path, error).time_since_epoch().count());
+  };
+  const std::string stamp =
+      fmt::format("2 {} {} {}", describe(catalog), describe(tree), describe(ps3_catalog));
+  auto stamp_path = target;
+  stamp_path += ".stamp";
+  {
+    std::ifstream in(stamp_path);
+    std::string old, replaced;
+    std::getline(in, old);
+    std::getline(in, replaced);
+    if (old == stamp && std::filesystem::exists(target, error)) return std::atoi(replaced.c_str());
+  }
+  std::filesystem::remove(stamp_path, error);
+  if (!std::filesystem::copy_file(catalog, target,
+                                  std::filesystem::copy_options::overwrite_existing, error)) {
+    return -1;
+  }
+  std::fstream file(target, std::ios::binary | std::ios::in | std::ios::out);
+  Catalog ours;
+  if (!ReadCatalog(file, ours)) return -1;
+  // Appends data (size bytes once unpacked) and points entry i at it.
+  const auto replace = [&](int i, const std::vector<char>& data, uint32_t size) {
+    file.seekp(0, std::ios::end);
+    const uint32_t at = uint32_t(file.tellp());
+    file.write(data.data(), std::streamsize(data.size()));
+    const uint32_t words[3] = {std::byteswap(at), std::byteswap(size),
+                               std::byteswap(uint32_t(data.size()))};
+    file.seekp(32 + std::streamoff(i) * 16 + 4);
+    file.write(reinterpret_cast<const char*>(words), sizeof(words));
+  };
+  const int tree_entry = FindEntry(ours, "database_anim\\anim.anmtree");
+  std::ifstream tree_in(tree, std::ios::binary);
+  std::vector<char> tree_data((std::istreambuf_iterator<char>(tree_in)), {});
+  if (tree_entry < 0 || tree_data.empty()) return -1;
+  replace(tree_entry, tree_data, uint32_t(tree_data.size()));
+  int replaced = 1;
+  std::ifstream ps3(ps3_catalog, std::ios::binary);
+  Catalog theirs;
+  if (ps3 && ReadCatalog(ps3, theirs)) {
+    for (const char* model : kModels) {
+      const int from = FindEntry(theirs, model), to = FindEntry(ours, model);
+      if (from < 0 || to < 0) {
+        REXLOG_WARN("F.E.A.R.: Recompilation Settings: {} not in both catalogues; the 360's kept",
+                    model);
+        continue;
+      }
+      const uint8_t* entry = &theirs.entries[size_t(from) * 16];
+      const uint32_t size = ReadBe(entry + 8), stored = ReadBe(entry + 12);
+      std::vector<char> data(stored ? stored : size);
+      ps3.seekg(ReadBe(entry + 4));
+      if (!ps3.read(data.data(), std::streamsize(data.size()))) return -1;
+      replace(to, data, size);
+      ++replaced;
+    }
+  } else {
+    REXLOG_WARN("F.E.A.R.: Recompilation Settings: no PS3 uberCatalog.cat in {}; the shotgun "
+                "keeps the 360's models",
+                ps3_game.string());
+  }
+  file.close();
+  if (!file) return -1;
+  std::ofstream(stamp_path) << stamp << "\n" << replaced << "\n";
+  return replaced;
+}
+
+// The game opens D:\Game\uberCatalog.cat as a name looked up in the Game folder's entry (the VFS
+// resolves only the parent path, so a link on the file's own path never applies). The folder's
+// uberCatalog.cat child becomes an entry for the patched copy instead; children_ is protected, so
+// it is reached through a member pointer taken in a derived class.
+struct EntryChildren : rex::filesystem::Entry {
+  static std::vector<std::unique_ptr<Entry>>& Of(Entry& entry) {
+    return entry.*(&EntryChildren::children_);
+  }
+};
+
+bool SwapCatalogEntry(rex::filesystem::VirtualFileSystem& vfs, const std::filesystem::path& copy) {
+  rex::filesystem::Entry* game = vfs.ResolvePath(kGuestGame);
+  rex::filesystem::FileInfo info;
+  if (!game || !rex::filesystem::GetInfo(copy, &info)) return false;
+  for (auto& child : EntryChildren::Of(*game)) {
+    if (!rex::string::utf8_equal_case(child->name(), "uberCatalog.cat")) continue;
+    info.name = rex::to_path(child->name());
+    child.reset(rex::filesystem::HostPathEntry::Create(game->device(), game, copy, info));
+    REXLOG_INFO("F.E.A.R.: Recompilation Settings: D:\\Game\\{} now opens {}", info.name.string(),
+                copy.string());
+    return true;
+  }
+  return false;
 }
 
 // Calls visit(category, record, attribute, type, count, offset of the first value) for every
@@ -557,8 +747,8 @@ bool CopyRecords(std::vector<uint8_t>& data, std::vector<RecordCopy>& copies) {
   return true;
 }
 
-// The override device, logging the first time the game opens the patched database, so a run
-// shows the tuning was really used.
+// The override device, logging each path the game resolves through it once (patched or the
+// original's), so a run shows the tuning, and which animation files, were really used.
 class OverrideDevice final : public rex::filesystem::HostPathDevice {
  public:
   OverrideDevice(std::string_view mount_path, const std::filesystem::path& overrides,
@@ -567,20 +757,24 @@ class OverrideDevice final : public rex::filesystem::HostPathDevice {
         original_(std::string(mount_path) + "Original", original, true) {}
   bool Initialize() override { return HostPathDevice::Initialize() && original_.Initialize(); }
   rex::filesystem::Entry* ResolvePath(const std::string_view path) override {
-    if (rex::filesystem::Entry* entry = HostPathDevice::ResolvePath(path)) {
-      if (!logged_.exchange(true)) {
-        REXLOG_INFO("F.E.A.R.: look tuning: the game reached the patched database folder ({})",
-                    path);
+    rex::filesystem::Entry* entry = HostPathDevice::ResolvePath(path);
+    const bool patched = entry != nullptr;
+    if (!patched) entry = original_.ResolvePath(path);
+    {
+      std::lock_guard lock(mutex_);
+      if (logged_.insert(std::string(path)).second) {
+        REXLOG_INFO("F.E.A.R.: look tuning: the game opened {} from the {} folder{}", path,
+                    patched ? "patched" : "original", entry ? "" : " (not there)");
       }
-      return entry;
     }
-    return original_.ResolvePath(path);
+    return entry;
   }
 
  private:
   // The player's own Game folder, for everything the override folder doesn't have.
   rex::filesystem::HostPathDevice original_;
-  std::atomic<bool> logged_{false};
+  std::mutex mutex_;
+  std::set<std::string> logged_;
 };
 
 void WriteFloat(std::vector<uint8_t>& data, size_t pos, float value) {
@@ -613,6 +807,16 @@ void Apply(rex::Runtime& runtime) {
   }
   std::ifstream in(source, std::ios::binary);
   std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)), {});
+  const auto ps3_anims = Ps3AnimFolder();
+  if (!ps3_anims.empty() && data.size() >= 0x1C && !std::memcmp(data.data(), "BDAG", 4)) {
+    const uint32_t property = AppendString(data, "WEAP_AUTOSHOTGUN");
+    for (const char* category :
+         {"Arsenal/Weapons/Default", "Arsenal/Weapons/AI", "Arsenal/Weapons/Multiplayer"}) {
+      options.push_back({.category = category, .record = "AutoShotgun",
+                         .attribute = "AnimationProperty",
+                         .kind = DbChange::Kind::kStringOffset, .word = property});
+    }
+  }
   if (!changes.empty()) {
     std::map<std::string, size_t> at;
     for (const auto& [name, value] : changes) at[DatabasePath(name)] = 0;
@@ -673,6 +877,30 @@ void Apply(rex::Runtime& runtime) {
       return;
     }
   }
+  // The PS3 animation files go next to the database, under the 360's names, with a redirect of
+  // their own (kGuestAnimFolder, below).
+  std::filesystem::remove_all(root / "database_anim", error);
+  bool ps3_copied = !ps3_anims.empty();
+  if (ps3_copied) {
+    std::filesystem::create_directories(root / "database_anim", error);
+    std::error_code copy_error;
+    std::filesystem::copy_file(ps3_anims / "anim.anmtree", root / "database_anim" / "Anim.anmtree",
+                               copy_error);
+    if (!copy_error) {
+      std::filesystem::copy_file(ps3_anims / "anim.gamedb", root / "database_anim" / "Anim.gamedb",
+                                 copy_error);
+    }
+    if (copy_error) {
+      REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not copy the PS3 animation files: {}",
+                   copy_error.message());
+      std::filesystem::remove_all(root / "database_anim", error);
+      ps3_copied = false;
+    } else {
+      REXLOG_INFO("F.E.A.R.: Recompilation Settings: the automatic shotgun's animations from the "
+                  "PS3 data in {}",
+                  ps3_anims.string());
+    }
+  }
   auto device =
       std::make_unique<OverrideDevice>(kOverrideMount, root, runtime.game_data_root() / "Game");
   auto* vfs = runtime.file_system();
@@ -680,6 +908,23 @@ void Apply(rex::Runtime& runtime) {
       !vfs->RegisterSymbolicLink(kGuestFolder, std::string(kOverrideMount) + "\\database")) {
     REXLOG_ERROR("F.E.A.R.: look tuning: could not redirect the game database");
     return;
+  }
+  if (ps3_copied &&
+      !vfs->RegisterSymbolicLink(kGuestAnimFolder, std::string(kOverrideMount) + "\\database_anim")) {
+    REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not redirect the animation files");
+  }
+  if (ps3_copied) {
+    const int replaced =
+        PatchCatalog(runtime.game_data_root() / "Game" / "uberCatalog.cat",
+                     ps3_anims.parent_path(), ps3_anims / "anim.anmtree", root / "uberCatalog.cat");
+    if (replaced < 0 || !SwapCatalogEntry(*vfs, root / "uberCatalog.cat")) {
+      REXLOG_ERROR("F.E.A.R.: Recompilation Settings: could not put the PS3 animation tree into "
+                   "a copy of uberCatalog.cat");
+    } else {
+      REXLOG_INFO("F.E.A.R.: Recompilation Settings: a copy of uberCatalog.cat with {} PS3 "
+                  "entries (the animation tree, then the Watson's models)",
+                  replaced);
+    }
   }
   REXLOG_INFO("F.E.A.R.: look tuning: stick edge boost '{}', soft lock {} (patched copy of {})",
               ramp, softlock ? "on" : "off", source.string());
@@ -754,6 +999,33 @@ void FearModelLodScale(PPCRegister& f1) {
   // EchoPatch's value: small enough that every model stays on its first LOD, and 0 (which the
   // game may mean as "off") is left alone.
   if (full && f1.f64 > 0.0) f1.f64 = 0.003;
+}
+
+namespace {
+
+// How far the current zoom has gone, 0 (the normal view) to 1 (fully zoomed). Only the camera's
+// update touches it.
+float g_zoom_amount = 0.0f;
+
+}  // namespace
+
+void FearZoomFov(PPCRegister& f0, PPCRegister& f28, PPCRegister& f29) {
+  const double range = f29.f64 - f28.f64;
+  g_zoom_amount = range > 0.0 ? float(std::clamp((f29.f64 - f0.f64) / range, 0.0, 1.0)) : 0.0f;
+}
+
+void FearCameraOffsetZ(PPCRegister& r28, PPCRegister& f30) {
+  switch (GuestWord(r28.u32 + 368)) {
+    case 0:  // zooming in
+    case 2:  // zooming out
+      f30.f64 *= 1.0 - g_zoom_amount;
+      break;
+    case 1:  // zoomed
+      f30.f64 = 0.0;
+      break;
+    default:  // 3: not zoomed
+      break;
+  }
 }
 
 void FearSplashMovieCount(PPCRegister& r23, PPCRegister& r31) {
