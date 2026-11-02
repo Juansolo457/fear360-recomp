@@ -213,6 +213,12 @@ std::vector<Setting> BuildSettings() {
                         false,
                         "Toggle infinite ammo, dual pistols, faster movement and a SlowMo meter "
                         "that never runs out."});
+    settings.push_back({"Automatic shotgun",
+                        "fear_auto_shotgun",
+                        {{"false", "Off"}, {"true", "On"}},
+                        false,
+                        "Toggle the automatic shotgun left unused on the Xbox 360 disc. It "
+                        "replaces the VK-12 wherever one is found."});
     settings.push_back({"Flashlight battery",
                         "fear_infinite_flashlight",
                         {{"false", "Normal"}, {"true", "Unlimited"}},

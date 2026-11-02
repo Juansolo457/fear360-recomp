@@ -251,8 +251,8 @@ RELEASE_LAUNCHER = ('@echo off\r\n'
                     'rem F.E.A.R. 360 Recompiled: starts the game from this folder.\r\n'
                     'cd /d "%~dp0fear"\r\n'
                     'if not exist "assets\\default.xex" (\r\n'
-                    '  echo Your game files are missing: unpack your F.E.A.R. disc into the'
-                    ' fear\\assets folder.\r\n'
+                    '  echo Your game files are missing: default.xex and the Game folder from your'
+                    ' F.E.A.R. disc go directly in fear\\assets, not in another folder inside it.\r\n'
                     '  echo See README.txt.\r\n'
                     '  pause\r\n'
                     '  exit /b 1\r\n'
@@ -260,7 +260,8 @@ RELEASE_LAUNCHER = ('@echo off\r\n'
                     'start "" fear.exe --game_data_root assets --user_data_root user'
                     ' --cache_root cache\r\n')
 RELEASE_ASSETS_NOTE = ('Unpack your F.E.A.R. disc image here, so that this folder holds default.xex'
-                       ' and a Game folder. See the README one folder up.\n')
+                       ' and a Game folder directly, not in another folder inside it. xdvdfs.py'
+                       ' stays where it came, two folders up. See the README there.\n')
 
 
 def build_version(header):
