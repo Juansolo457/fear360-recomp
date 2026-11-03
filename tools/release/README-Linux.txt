@@ -8,7 +8,7 @@ This package holds the game's program only. It contains no game data: you need y
 disc of F.E.A.R., and the game reads its files from it.
 
 What you need
-  - A Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU and a CPU with AVX2 and FMA,
+  - A Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU and an x86-64-v3 CPU (AVX2, FMA and BMI),
     glibc 2.35 or newer and a libstdc++ with GLIBCXX_3.4.32 (GCC 13's; SteamOS has it)
   - Your own F.E.A.R. disc for Xbox 360, as a disc image (ISO). A PC drive can't read Xbox 360
     discs: https://github.com/Juansolo457/fear360-recomp/blob/master/docs/RIPPING.md

@@ -37,8 +37,8 @@ gun in F.E.A.R.
 
 ## Requirements
 
-- **Windows:** Windows 10 or 11 64-bit, a CPU with AVX2, a Direct3D 12 GPU.
-- **Linux:** a Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU, a CPU with AVX2 and FMA,
+- **Windows:** Windows 10 or 11 64-bit, an x86-64-v3 CPU (AVX2, FMA and BMI), a Direct3D 12 GPU.
+- **Linux:** a Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU, an x86-64-v3 CPU (AVX2, FMA and BMI),
   glibc 2.35 or newer and a libstdc++ with `GLIBCXX_3.4.32` (GCC 13's; Ubuntu 22.04 needs a newer
   libstdc++6, SteamOS has it).
 - Your own F.E.A.R. disc (Xbox 360) as a disc image, and Python 3 to unpack it.
