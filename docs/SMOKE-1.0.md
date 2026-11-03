@@ -49,10 +49,10 @@ a problem filed.
 | 06 | `Hives` | | | | | |
 | 07 | `Alice` | | | | | |
 | 07 | `Getting_Out` | | | | | |
-| 08 | `Wades` | | | | | |
-| 08 | `FactoryA` | | | | | |
-| 08 | `FactoryB` | | | | | |
-| 09 | `Facility_Upper` | | | | | |
+| 08 | `Wades` | ✅ | 2026-11-02 | 1.5.1+6 6b36c10 | fear_148 | Deck: 4 frames over 50 ms, the longest 90 ms |
+| 08 | `FactoryA` | ✅ | 2026-11-02 | 1.5.1+6 6b36c10 | fear_148 | Deck: 3 frames over 50 ms, the longest 186 ms |
+| 08 | `FactoryB` | ✅ | 2026-11-02 | 1.5.1+6 6b36c10 | fear_148 | Deck: 3 frames over 50 ms, the longest 96 ms |
+| 09 | `Facility_Upper` | ✅ | 2026-11-02 | 1.5.1+6 6b36c10 | fear_148 | Deck: 6 frames over 50 ms, the longest 216 ms |
 | 09 | `Facility_Bypass` | | | | | |
 | 10 | `Vault` | | | | | |
 | 11 | `Alma` | | 2026-10-29 | 0.9.0 cc266c5 | fear_135 | Deck, partly played: 0.02% below 60 fps |
