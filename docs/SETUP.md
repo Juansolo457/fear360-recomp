@@ -1,6 +1,6 @@
 # Build and play from your own disc
 
-**To just play:** 1.5's release has ready-built zips for Windows and for Linux and the Steam
+**To just play:** the latest release has ready-built zips for Windows and for Linux and the Steam
 Deck; unpack your disc into one and play (its README.txt says how). This page is for building the
 game yourself. *F.E.A.R. Files* (Extraction Point + Perseus Mandate) comes in a later release: its
 steps below still build, but it isn't tested or supported yet.

@@ -1,4 +1,4 @@
-F.E.A.R. 360 Recompiled 1.5 for Windows
+F.E.A.R. 360 Recompiled 1.6 for Windows
 =======================================
 
 The Xbox 360 version of F.E.A.R., statically recompiled to run natively on Windows: up to 4K and

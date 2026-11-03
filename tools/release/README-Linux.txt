@@ -1,4 +1,4 @@
-F.E.A.R. 360 Recompiled 1.5 for Linux and the Steam Deck
+F.E.A.R. 360 Recompiled 1.6 for Linux and the Steam Deck
 ========================================================
 
 The Xbox 360 version of F.E.A.R., statically recompiled to run natively on Linux: no Proton, no
