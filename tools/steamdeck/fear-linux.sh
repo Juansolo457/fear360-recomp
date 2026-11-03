@@ -86,8 +86,13 @@ elif [ -n "$FEAR_START" ]; then
   start=(--fear_collection_start fear)
 fi
 if [ ! -f assets/default.xex ]; then
-  echo "No $program/assets/default.xex: unpack your disc so that it and the Game folder are directly in $program/assets, not in another folder inside it (see the README)" \
-    | tee -a "$info" >&2
+  if [ -d assets/VIDEO_TS ]; then
+    echo "$program/assets holds the disc image's video section, not the game: archivers such as Ark, WinRAR and 7-Zip can't unpack an Xbox 360 disc image. Delete what they put there, then follow step 2 of the README, which uses xdvdfs.py" \
+      | tee -a "$info" >&2
+  else
+    echo "No $program/assets/default.xex: unpack your disc so that it and the Game folder are directly in $program/assets, not in another folder inside it (see the README)" \
+      | tee -a "$info" >&2
+  fi
   exit 1
 fi
 "./$program" "${args[@]}" --fear_collection ../collection-linux.toml "${start[@]}" "$@" \

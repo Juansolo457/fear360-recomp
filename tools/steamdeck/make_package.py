@@ -251,9 +251,16 @@ RELEASE_LAUNCHER = ('@echo off\r\n'
                     'rem F.E.A.R. 360 Recompiled: starts the game from this folder.\r\n'
                     'cd /d "%~dp0fear"\r\n'
                     'if not exist "assets\\default.xex" (\r\n'
-                    '  echo Your game files are missing: default.xex and the Game folder from your'
+                    '  if exist "assets\\VIDEO_TS" (\r\n'
+                    '    echo fear\\assets holds the disc image\'s video section, not the game: WinRAR'
+                    ' and 7-Zip can\'t unpack an Xbox 360 disc image.\r\n'
+                    '    echo Delete what they put in fear\\assets, then follow step 2 of README.txt,'
+                    ' which uses xdvdfs.py.\r\n'
+                    '  ) else (\r\n'
+                    '    echo Your game files are missing: default.xex and the Game folder from your'
                     ' F.E.A.R. disc go directly in fear\\assets, not in another folder inside it.\r\n'
-                    '  echo See README.txt.\r\n'
+                    '    echo See README.txt.\r\n'
+                    '  )\r\n'
                     '  pause\r\n'
                     '  exit /b 1\r\n'
                     ')\r\n'
@@ -261,7 +268,8 @@ RELEASE_LAUNCHER = ('@echo off\r\n'
                     ' --cache_root cache\r\n')
 RELEASE_ASSETS_NOTE = ('Unpack your F.E.A.R. disc image here, so that this folder holds default.xex'
                        ' and a Game folder directly, not in another folder inside it. xdvdfs.py'
-                       ' stays where it came, two folders up. See the README there.\n')
+                       ' stays where it came, two folders up. See the README there: WinRAR and'
+                       ' 7-Zip can\'t unpack an Xbox 360 disc image.\n')
 
 
 def build_version(header):
