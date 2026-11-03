@@ -6,7 +6,7 @@ The Xbox 360 F.E.A.R., running natively on Windows, Linux and the Steam Deck. Up
 
 ▶ **[Video: running natively on the Steam Deck](https://youtu.be/6rP_icfY-sM)**
 
-**Latest release: [v1.5.1](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, ready to play on **Windows** and **Linux / the Steam Deck**: download the zip for your system, unpack your own F.E.A.R. disc into it and play ([docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)). 1.5 adds the Windows build with keyboard and mouse, 4K, the PC texture pack with sharper text, and John Wick mode. **Next:** *F.E.A.R. Files* ([After 1.0](#after-10)).
+**Latest release: [v1.6.0](https://github.com/Juansolo457/fear360-recomp/releases/latest)**, ready to play on **Windows** and **Linux / the Steam Deck**: download the zip for your system, unpack your own F.E.A.R. disc into it and play ([docs/RELEASE-1.6.md](docs/RELEASE-1.6.md)). 1.6 adds an optional automatic shotgun, fixes the sights at a wide field of view and makes setup harder to get wrong. 1.5 added the Windows build with keyboard and mouse, 4K, the PC texture pack with sharper text, and John Wick mode. **Next:** *F.E.A.R. Files* ([After 1.0](#after-10)).
 
 ## Why
 
@@ -46,18 +46,17 @@ A **static recompilation**: the game's PowerPC code is translated to native x86-
 | ⏳ Windows on ARM64 | scoped, not started ([#73](https://github.com/Juansolo457/fear360-recomp/issues/73)) |
 | ⏳ Android (ARM64) | scoped, not started; needs a renderer path, since the games are Direct3D 12 only ([#44](https://github.com/Juansolo457/fear360-recomp/issues/44)) |
 
-## After 1.0
+## What's next
 
-**1.0 is F.E.A.R. on Linux and the Steam Deck**, play-tested on the Deck (the smoke test so far: [docs/SMOKE-1.0.md](docs/SMOKE-1.0.md); what's in it: [docs/RELEASE-1.0.md](docs/RELEASE-1.0.md)). Next:
+**1.6 is F.E.A.R. on Windows, Linux and the Steam Deck** (what's in it: [docs/RELEASE-1.6.md](docs/RELEASE-1.6.md); the 1.0 smoke test on the Deck: [docs/SMOKE-1.0.md](docs/SMOKE-1.0.md)). Next:
 
 | | |
 |---|---|
-| ⏳ Bugs reported against 1.0 | a sweep of the issue board |
-| ⏳ 1.5: Windows | the same renderer; resolution scaling (4K) and the PC texture pack back on it, then a Windows test pass |
+| ⏳ Bugs reported against 1.6 | a sweep of the issue board |
 | ⏳ *F.E.A.R. Files* [#57](https://github.com/Juansolo457/fear360-recomp/issues/57) | both campaigns (37 levels) and Instant Action (8 maps), each to the end; its menu entry says "coming later" until then |
 | ⏳ More performance | the water's screen copies in the biggest water fights ([#103](https://github.com/Juansolo457/fear360-recomp/issues/103)) |
 
-**Known issues** in v1.0: Interval 03's biggest water fight can dip into the 50s for a second or two ([#103](https://github.com/Juansolo457/fear360-recomp/issues/103)); the renderer draws at 1280×720 for now and can't use the PC texture pack yet ([NATIVE_RENDERER](docs/NATIVE_RENDERER.md#native-punch-list)); slow-mo firefights can drop below 120 fps; no blood marks on the Steam Deck yet; a GPU load spike in Interval 2's closing sequence ([#41](https://github.com/Juansolo457/fear360-recomp/issues/41)); docked at 120 Hz not retested yet ([#89](https://github.com/Juansolo457/fear360-recomp/issues/89)); the 360-only Holiday bonus mission not checked yet ([#39](https://github.com/Juansolo457/fear360-recomp/issues/39)); on the Steam Deck, the controller drops for about a second at story autosaves ([#36](https://github.com/Juansolo457/fear360-recomp/issues/36)).
+**Known issues** in 1.6: [the release notes](docs/RELEASE-1.6.md#known-issues).
 
 **Other open work:** performance (the Steam Deck [#40](https://github.com/Juansolo457/fear360-recomp/issues/40), the renderer's GPU cost [#37](https://github.com/Juansolo457/fear360-recomp/issues/37), lower-end PCs [#58](https://github.com/Juansolo457/fear360-recomp/issues/58)); PC parity with EchoPatch ([#2](https://github.com/Juansolo457/fear360-recomp/issues/2)); keyboard and mouse ([#59](https://github.com/Juansolo457/fear360-recomp/issues/59)); rumble and gyro aiming ([#26](https://github.com/Juansolo457/fear360-recomp/issues/26)); Instant Action extras ([#60](https://github.com/Juansolo457/fear360-recomp/issues/60), [#61](https://github.com/Juansolo457/fear360-recomp/issues/61)); visual checks against the 360 ([#45](https://github.com/Juansolo457/fear360-recomp/issues/45) to [#52](https://github.com/Juansolo457/fear360-recomp/issues/52)); upscaling ([#72](https://github.com/Juansolo457/fear360-recomp/issues/72)); Windows on ARM64, Linux and Android ([#73](https://github.com/Juansolo457/fear360-recomp/issues/73), [#74](https://github.com/Juansolo457/fear360-recomp/issues/74), [#44](https://github.com/Juansolo457/fear360-recomp/issues/44)). [All open issues](https://github.com/Juansolo457/fear360-recomp/issues).
 

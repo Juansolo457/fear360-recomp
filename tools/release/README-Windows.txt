@@ -1,4 +1,4 @@
-F.E.A.R. 360 Recompiled 1.5 for Windows
+F.E.A.R. 360 Recompiled 1.6 for Windows
 =======================================
 
 The Xbox 360 version of F.E.A.R., statically recompiled to run natively on Windows: up to 4K and
@@ -9,7 +9,7 @@ disc of F.E.A.R., and the game reads its files from it.
 
 What you need
   - Windows 10 or 11, 64-bit
-  - A CPU with AVX2 (Intel Haswell / AMD Excavator or newer)
+  - An x86-64-v3 CPU, with AVX2, FMA and BMI (Intel Haswell / AMD Excavator or newer)
   - A Direct3D 12 graphics card
   - Your own F.E.A.R. disc for Xbox 360, as a disc image (ISO). A PC drive can't read Xbox 360
     discs: https://github.com/Juansolo457/fear360-recomp/blob/master/docs/RIPPING.md
