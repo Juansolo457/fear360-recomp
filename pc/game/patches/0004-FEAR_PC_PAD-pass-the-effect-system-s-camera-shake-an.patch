@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Fri, 6 Nov 2026 15:48:30 -0800
+Subject: [PATCH 4/4] FEAR_PC_PAD: pass the effect system's camera shake and
+ motors to the pad
+
+---
+ Game/ClientShellDLL/PlayerCamera.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/Game/ClientShellDLL/PlayerCamera.cpp b/Game/ClientShellDLL/PlayerCamera.cpp
+index f37aea9..3134835 100644
+--- a/Game/ClientShellDLL/PlayerCamera.cpp
++++ b/Game/ClientShellDLL/PlayerCamera.cpp
+@@ -37,6 +37,9 @@
+ extern ILTRenderer *g_pLTRenderer;
+ 
+ #include "iltinput.h"
++#if defined(FEAR_PC_PAD)
++#include "fear_pad.h"
++#endif
+ static ILTInput *g_pLTInput = NULL;
+ define_holder(ILTInput, g_pLTInput);
+ 
+@@ -1035,6 +1038,10 @@ void CPlayerCamera::UpdateFirstPerson( )
+ 	{
+ 		g_pLTInput->SetDeviceObjectValue(ILTInput::eDC_Gamepad, ILTInput::eDOC_Rumble + nCurrMotor, fControllerMotors[nCurrMotor]);
+ 	}
++#if defined(FEAR_PC_PAD)
++	// The engine drops these on the PC; the game controller takes them, with the shake (fear_pad.h).
++	FearPadCameraEffects(tEffectTrans, fControllerMotors);
++#endif
+ 
+ 	if( g_vtCameraSmoothingEnabled.GetFloat( ) <= 0.0f )
+ 	{
