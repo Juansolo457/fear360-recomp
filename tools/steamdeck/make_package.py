@@ -14,18 +14,20 @@
         the native Linux package, standalone (default private/steamdeck/FEAR360-SteamDeck-linux.zip):
         F.E.A.R.'s program from tools/build-deck.sh and its libraries, its assets/ (game data)
         and user/settings.toml (LINUX_SETTINGS), fear-linux.sh (the launcher, no Proton) and
-        README-SteamDeck-Linux.txt. No saves. 1.0 is F.E.A.R. alone: only its disc is needed
+        README-SteamDeck-Linux.txt. No saves. F.E.A.R. alone: only its disc is needed
     python3 -I tools/steamdeck/make_package.py --linux --programs [out.zip]
         just the Linux programs, their libraries, the launcher and the README (default
         private/steamdeck/FEAR360-SteamDeck-linux-update.zip), to unpack over an existing install:
         data, saves and settings untouched
-    --linux --files (development): F.E.A.R. Files too, from tools/build-deck.sh --project
-        port-files and port-files/assets; FEAR_FILES=1 ./fear-linux.sh lists it to play
+    --linux --files: F.E.A.R. Files too, from tools/build-deck.sh --project port-files and
+        port-files/assets; fear-linux.sh lists it to play
     python -I tools/steamdeck/make_package.py --release [out.zip]
     python3 -I tools/steamdeck/make_package.py --release --linux [out.zip]     (on Linux: WSL)
         the public release zip (default private/release/FEAR360-Recompiled-<VERSION>-<system>.zip):
         F.E.A.R.'s program and libraries, the launcher, tools/release's README and
-        tools/xdvdfs.py. No game data: the player unpacks their own disc into fear/assets
+        tools/xdvdfs.py; on Linux F.E.A.R. Files' program too (tools/build-deck.sh --project
+        port-files). No game data: the player unpacks their own discs into fear/assets and
+        fearfiles/assets
 
 Layout (FEAR360-SteamDeck/):
   README-SteamDeck.txt   setup on the Deck (tools/steamdeck/README-SteamDeck.txt)
@@ -63,7 +65,7 @@ SETTINGS_ONLY = '--settings' in sys.argv[1:]
 WINDOWS = '--windows' in sys.argv[1:]
 # --linux: the native Linux build (tools/build-deck.sh), no Proton (docs/LINUX_NATIVE.md).
 LINUX = '--linux' in sys.argv[1:]
-# --files, with --linux: F.E.A.R. Files too (development; 1.0 ships F.E.A.R. alone).
+# --files, with --linux: F.E.A.R. Files too (the Linux release zip always has its program).
 FILES = '--files' in sys.argv[1:]
 # --nolto (or FEAR_LTO=OFF): the programs of FEAR_LTO=OFF tools/build-deck.sh, without ThinLTO.
 NO_LTO = '--nolto' in sys.argv[1:] or os.environ.get('FEAR_LTO') == 'OFF'
@@ -270,6 +272,10 @@ RELEASE_ASSETS_NOTE = ('Unpack your F.E.A.R. disc image here, so that this folde
                        ' and a Game folder directly, not in another folder inside it. xdvdfs.py'
                        ' stays where it came, two folders up. See the README there: WinRAR and'
                        ' 7-Zip can\'t unpack an Xbox 360 disc image.\n')
+# F.E.A.R. Files' folder in the Linux release zip: a second disc, and optional.
+RELEASE_FILES_ASSETS_NOTE = RELEASE_ASSETS_NOTE.replace('your F.E.A.R. disc',
+                                                        'your F.E.A.R. Files disc')
+assert RELEASE_FILES_ASSETS_NOTE != RELEASE_ASSETS_NOTE
 
 
 def build_version(header):
@@ -284,7 +290,8 @@ def build_version(header):
 def main_release():
     """The public release zip, Windows or (--linux) Linux: F.E.A.R.'s program and its libraries,
     the launcher, the README, tools/xdvdfs.py to unpack the player's disc, and on Linux the Deck
-    baseline settings. No game data: the player unpacks their own disc into fear/assets."""
+    baseline settings and F.E.A.R. Files' program beside F.E.A.R.'s. No game data: the player
+    unpacks their own discs into fear/assets and (Linux, optional) fearfiles/assets."""
     number = open(os.path.join(REPO, 'VERSION'), encoding='utf-8').read().strip()
     system = 'Linux' if LINUX else 'Windows'
     out = ARGV[0] if ARGV else os.path.join(REPO, 'private', 'release',
@@ -305,6 +312,17 @@ def main_release():
         files.append((os.path.join(REPO, 'tools', 'release', 'README-Linux.txt'), 'README.txt',
                       None, False))
         files.append((None, 'fear/user/settings.toml', LINUX_SETTINGS, False))
+        # F.E.A.R. Files: playable from the menu once its disc is in fearfiles/assets.
+        files_build = os.path.join(REPO, 'port-files', 'out', 'build', 'deck-amd64-release')
+        if not os.path.exists(os.path.join(files_build, 'fearfiles')):
+            raise SystemExit(f'{files_build}/fearfiles is missing: run tools/build-deck.sh '
+                             '--project port-files')
+        files.append((os.path.join(files_build, 'fearfiles'), 'fearfiles/fearfiles', None, True))
+        for lib in sorted(glob.glob(os.path.join(files_build, '*.so*'))):
+            files.append((lib, f'fearfiles/{os.path.basename(lib)}', None, True))
+        files.append((None, 'fearfiles/user/settings.toml', LINUX_SETTINGS, False))
+        files.append((None, 'fearfiles/assets/PUT YOUR DISC HERE.txt', RELEASE_FILES_ASSETS_NOTE,
+                      False))
     else:
         build = os.path.join(REPO, 'port-nx', 'out', 'build', 'win-amd64-relwithdebinfo')
         crt = crt_folder()
@@ -327,7 +345,12 @@ def main_release():
     files.append((os.path.join(build, indexer), f'fear/{indexer}', None, LINUX))
     files.append((None, 'fear/assets/PUT YOUR DISC HERE.txt', RELEASE_ASSETS_NOTE, False))
     version = build_version(os.path.join(build, 'fear_version', 'fear_version_info.h'))
-    files.append((None, 'VERSION.txt', f'F.E.A.R. 360 Recompiled {version} ({system})\n', False))
+    text = f'F.E.A.R. 360 Recompiled {version} ({system})\n'
+    if LINUX:
+        files_version = build_version(os.path.join(files_build, 'fear_version',
+                                                   'fear_version_info.h'))
+        text += f'F.E.A.R. Files {files_version} ({system})\n'
+    files.append((None, 'VERSION.txt', text, False))
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
         for src, arc, text, executable in files:
             if src:
