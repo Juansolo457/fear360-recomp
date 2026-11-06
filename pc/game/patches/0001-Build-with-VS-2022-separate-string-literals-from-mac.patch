@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Fri, 6 Nov 2026 14:53:47 -0800
+Subject: [PATCH 1/3] Build with VS 2022: separate string literals from macros,
+ L'\0'
+
+---
+ Game/ClientFxDLL/dynalightfx.cpp     | 2 +-
+ Game/ClientShellDLL/HUDChatInput.cpp | 2 +-
+ Game/ObjectDLL/AI.cpp                | 4 ++--
+ Game/ObjectDLL/ServerSpecialFX.cpp   | 2 +-
+ 4 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/Game/ClientFxDLL/dynalightfx.cpp b/Game/ClientFxDLL/dynalightfx.cpp
+index 4fa9a0f..f8827fb 100644
+--- a/Game/ClientFxDLL/dynalightfx.cpp
++++ b/Game/ClientFxDLL/dynalightfx.cpp
+@@ -173,7 +173,7 @@ void fxGetDynaLightProps(CFastList<CEffectPropertyDesc> *pList)
+ 	fxProp.SetupFloatMin("Radius", 100.0f, 0.0f, eCurve_Linear, "The radius of the light (Point,Spot,Cubic)");
+ 	pList->AddTail(fxProp);
+ 
+-	fxProp.SetupPath("Texture", "", "Texture Files (*.dds)|*.dds|Texture Animation Files (*."RESEXT_TEXTUREANIM")|*."RESEXT_TEXTUREANIM"|All Files (*.*)|*.*||", eCurve_None, "The texture associated with this light (Ambient,Spot,Cubic)");
++	fxProp.SetupPath("Texture", "", "Texture Files (*.dds)|*.dds|Texture Animation Files (*." RESEXT_TEXTUREANIM ")|*." RESEXT_TEXTUREANIM "|All Files (*.*)|*.*||", eCurve_None, "The texture associated with this light (Ambient,Spot,Cubic)");
+ 	pList->AddTail(fxProp);
+ 
+ 	fxProp.SetupFloatMinMax("Intensity", 1.0f, 0.0f, 2.0f, eCurve_Linear, "The intensity of this light 0-1 (All)");
+diff --git a/Game/ClientShellDLL/HUDChatInput.cpp b/Game/ClientShellDLL/HUDChatInput.cpp
+index 49ecb33..c719a4a 100644
+--- a/Game/ClientShellDLL/HUDChatInput.cpp
++++ b/Game/ClientShellDLL/HUDChatInput.cpp
+@@ -40,7 +40,7 @@ bool CHUDChatInput::Init()
+ {
+ 	for (int i = 0; i < kMaxChatHistory; i++)
+ 	{
+-		m_szChatHistory[i][0] = L'';
++		m_szChatHistory[i][0] = L'\0';
+ 	}
+ 
+ 	UpdateLayout();
+diff --git a/Game/ObjectDLL/AI.cpp b/Game/ObjectDLL/AI.cpp
+index 66bf495..d2f995c 100644
+--- a/Game/ObjectDLL/AI.cpp
++++ b/Game/ObjectDLL/AI.cpp
+@@ -1213,7 +1213,7 @@ void CAI::PostReadProp(ObjectCreateStruct *pStruct)
+ 			LTStrCpy( pStruct->m_Materials[BODY_MATERIAL_INDEX] + pos-1, pszBodyMaterialExtension, LTARRAYSIZE(pStruct->m_Materials[BODY_MATERIAL_INDEX]) - (pos - 1));
+ 
+ 			// put back the file extension.
+-			LTStrCpy( (pStruct->m_Materials[BODY_MATERIAL_INDEX]) + pos + (LTStrLen(pszBodyMaterialExtension)-1), "."RESEXT_MATERIAL, LTARRAYSIZE(pStruct->m_Materials[BODY_MATERIAL_INDEX]) - (pos + (LTStrLen(pszBodyMaterialExtension)-1)));
++			LTStrCpy( (pStruct->m_Materials[BODY_MATERIAL_INDEX]) + pos + (LTStrLen(pszBodyMaterialExtension)-1), "." RESEXT_MATERIAL, LTARRAYSIZE(pStruct->m_Materials[BODY_MATERIAL_INDEX]) - (pos + (LTStrLen(pszBodyMaterialExtension)-1)));
+ 		}
+ 	}
+ 
+@@ -1255,7 +1255,7 @@ void CAI::PostReadProp(ObjectCreateStruct *pStruct)
+ 			// add the headextension.
+ 			LTStrCpy( pStruct->m_Materials[HEAD_MATERIAL_INDEX] +pos -1, pszHeadExtension, LTARRAYSIZE(pStruct->m_Materials[BODY_MATERIAL_INDEX]) - (pos - 1));
+ 			// put back the file extension.
+-			LTStrCpy( (pStruct->m_Materials[HEAD_MATERIAL_INDEX]) + pos + (LTStrLen(pszHeadExtension)-1), "."RESEXT_MATERIAL, LTARRAYSIZE(pStruct->m_Materials[BODY_MATERIAL_INDEX]) - (pos + (LTStrLen(pszHeadExtension)-1)));
++			LTStrCpy( (pStruct->m_Materials[HEAD_MATERIAL_INDEX]) + pos + (LTStrLen(pszHeadExtension)-1), "." RESEXT_MATERIAL, LTARRAYSIZE(pStruct->m_Materials[BODY_MATERIAL_INDEX]) - (pos + (LTStrLen(pszHeadExtension)-1)));
+ 		}
+ 	}
+ 
+diff --git a/Game/ObjectDLL/ServerSpecialFX.cpp b/Game/ObjectDLL/ServerSpecialFX.cpp
+index 1e80e3f..15db9c2 100644
+--- a/Game/ObjectDLL/ServerSpecialFX.cpp
++++ b/Game/ObjectDLL/ServerSpecialFX.cpp
+@@ -523,7 +523,7 @@ LTRESULT SpecialFXPlugin::PopulateStringList( const char *szRezPath,
+ 	LTFINDFILEINFO fcfFile;
+ 
+ 	// Build the search spec path
+-	LTSNPrintF( szFile, LTARRAYSIZE(szFile), "%s\\ClientFX\\*."RESEXT_EFFECT_PACKED, szRezPath );
++	LTSNPrintF( szFile, LTARRAYSIZE(szFile), "%s\\ClientFX\\*." RESEXT_EFFECT_PACKED, szRezPath );
+ 
+ 	LTFINDFILEHANDLE handle;
+ 	if(!LTFileOperations::FindFirst( szFile, handle, &fcfFile ))

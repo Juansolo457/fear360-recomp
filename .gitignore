@@ -10,6 +10,8 @@
 # test packages (tools/steamdeck/make_package.py: game data, never upload them anywhere).
 private/
 game/
+# pc/game is our build of the PC game code (CMake, patches, adapters), not game files.
+!/pc/game/
 /port*/assets
 *.iso
 *.xex

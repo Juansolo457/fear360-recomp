@@ -6,3 +6,5 @@
 # checkout's core.autocrlf, or bash and podman can't read them.
 *.sh text eol=lf
 *.Containerfile text eol=lf
+# Patches against the public tools source keep its CRLF line endings byte for byte.
+pc/game/patches/*.patch -text

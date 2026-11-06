@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Fri, 6 Nov 2026 15:18:49 -0800
+Subject: [PATCH 3/3] FEAR_PC_PAD: game controllers through CBindMgr,
+ CPlayerMgr and CGameClientShell::Update
+
+---
+ Game/ClientShellDLL/BindMgr.cpp         | 24 +++++++++++++++++++++++-
+ Game/ClientShellDLL/GameClientShell.cpp |  8 ++++++++
+ Game/ClientShellDLL/PlayerMgr.cpp       | 15 +++++++++++++++
+ 3 files changed, 46 insertions(+), 1 deletion(-)
+
+diff --git a/Game/ClientShellDLL/BindMgr.cpp b/Game/ClientShellDLL/BindMgr.cpp
+index 076fadb..689d6aa 100644
+--- a/Game/ClientShellDLL/BindMgr.cpp
++++ b/Game/ClientShellDLL/BindMgr.cpp
+@@ -13,6 +13,9 @@
+ #include "BindMgr.h"
+ #include "iltinput.h"
+ #include "GameClientShell.h" // For OnCommandOn/Off
++#if defined(FEAR_PC_PAD)
++#include "fear_pad.h"
++#endif
+ 
+ static ILTInput *g_pLTInput;
+ define_holder(ILTInput, g_pLTInput);
+@@ -197,6 +200,16 @@ float CBindMgr::GetExtremalCommandValue(uint32 nCommand) const
+ 		}
+ 	}
+ 
++#if defined(FEAR_PC_PAD)
++	// The game controller, a device the engine doesn't list (fear_pad.h).
++	if (m_bInputEnabled)
++	{
++		float fPadValue = FearPadCommandValue(nCommand);
++		if (fabsf(fPadValue) > fabsf(fResult))
++			fResult = fPadValue;
++	}
++#endif
++
+ 	return fResult;
+ }
+ 
+@@ -261,8 +274,17 @@ void CBindMgr::Update()
+ 		// The command is "on" if the binding is between the minimum and maximum values
+ 		bool bOn = ((fCurValue >= iCurBinding->m_fCommandMin) && (fCurValue <= iCurBinding->m_fCommandMax));
+ 		// Or this with the current state to allow multiple bindings to affect the same command
+-		m_aCommandStates[iCurBinding->m_nCommand] = m_aCommandStates[iCurBinding->m_nCommand] || bOn; 
++		m_aCommandStates[iCurBinding->m_nCommand] = m_aCommandStates[iCurBinding->m_nCommand] || bOn;
++	}
++
++#if defined(FEAR_PC_PAD)
++	// The game controller's buttons, alongside the bindings (fear_pad.h).
++	for (uint32 nCommand = 0; nCommand < m_aCommandStates.size(); ++nCommand)
++	{
++		if (FearPadCommandOn(nCommand))
++			m_aCommandStates[nCommand] = true;
+ 	}
++#endif
+ 
+ 	// Clear any commands which are marked to be cleared.  This must be done
+ 	// after looping over all bindings so that a command bound by 2 keys is
+diff --git a/Game/ClientShellDLL/GameClientShell.cpp b/Game/ClientShellDLL/GameClientShell.cpp
+index 3389068..7995835 100644
+--- a/Game/ClientShellDLL/GameClientShell.cpp
++++ b/Game/ClientShellDLL/GameClientShell.cpp
+@@ -98,6 +98,9 @@
+ 
+ #if !defined(PLATFORM_XENON)
+ #include "iltgameutil.h"
++#if defined(FEAR_PC_PAD)
++#include "fear_pad.h"
++#endif
+ static ILTGameUtil *g_pLTGameUtil;
+ define_holder(ILTGameUtil, g_pLTGameUtil);
+ #endif // !defined(PLATFORM_XENON)
+@@ -1955,6 +1958,11 @@ void CGameClientShell::Update()
+ 		FirstUpdate( );
+ 	}
+ 
++#if defined(FEAR_PC_PAD)
++	// Read the game controller before anything uses this frame's input (fear_pad.h).
++	FearPadFrame();
++#endif
++
+ 	// Synchronize our server timer with the actual time on the server...
+ 	if( m_fLastServerRealTime < g_pLTClient->GetServerRealTime( ))
+ 	{
+diff --git a/Game/ClientShellDLL/PlayerMgr.cpp b/Game/ClientShellDLL/PlayerMgr.cpp
+index 9b22875..7986c4f 100644
+--- a/Game/ClientShellDLL/PlayerMgr.cpp
++++ b/Game/ClientShellDLL/PlayerMgr.cpp
+@@ -69,6 +69,9 @@
+ #include "SurfaceFunctions.h"
+ #include "PolyGridFX.h"
+ #include "AccuracyVisualization.h"
++#if defined(FEAR_PC_PAD)
++#include "fear_pad.h"
++#endif
+ 
+ class CTFFlagSFX;
+ 
+@@ -5037,6 +5040,18 @@ void CPlayerMgr::CalculateAxisOffsets()
+ 	fYawDelta += fMouseYawDelta;
+ 	// END: GAMEPAD CONTROLLER CODE...
+ 
++#if defined(FEAR_PC_PAD)
++	// The game controller's right stick, turning as the 360 version does (fear_pad.h).
++	{
++		float fPadYaw = 0.0f, fPadPitch = 0.0f;
++		if (FearPadLook(RealTimeTimer::Instance( ).GetTimerElapsedS( ), &fPadYaw, &fPadPitch))
++		{
++			fYawDelta += fPadYaw / fVal;
++			fPitchDelta += fPadPitch / fVal;
++		}
++	}
++#endif
++
+ 
+ 	// Check varying degrees of strafe and look...
+ 	ObjectContextTimer objectContextTimer( g_pMoveMgr->GetServerObject( ));

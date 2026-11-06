@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Fri, 6 Nov 2026 14:53:47 -0800
+Subject: [PATCH 2/3] FEAR_PC_NO_GAMESPY: skip the engine's GameSpy objects
+ (std::string across the DLL boundary)
+
+---
+ Game/ClientShellDLL/ClientConnectionMgr.cpp | 5 +++++
+ Game/ClientShellDLL/InterfaceMgr.cpp        | 7 +++++++
+ Game/ObjectDLL/GameServerShell.cpp          | 6 ++++++
+ 3 files changed, 18 insertions(+)
+
+diff --git a/Game/ClientShellDLL/ClientConnectionMgr.cpp b/Game/ClientShellDLL/ClientConnectionMgr.cpp
+index 7a4bae4..bad5c70 100644
+--- a/Game/ClientShellDLL/ClientConnectionMgr.cpp
++++ b/Game/ClientShellDLL/ClientConnectionMgr.cpp
+@@ -1558,6 +1558,11 @@ static bool SetupGameSpyBrowser( IGameSpyBrowser& gameSpyBrowser )
+ // ----------------------------------------------------------------------- //
+ bool ClientConnectionMgr::CreateServerBrowser( )
+ {
++#if defined(FEAR_PC_NO_GAMESPY)
++	// No GameSpy in this build (see CInterfaceMgr::UpdatePatchInfo).
++	return false;
++#endif
++
+ #if !defined(PLATFORM_XENON)
+ 
+ 	if( m_pGameSpyBrowser  )
+diff --git a/Game/ClientShellDLL/InterfaceMgr.cpp b/Game/ClientShellDLL/InterfaceMgr.cpp
+index ce409ff..11b8dd9 100644
+--- a/Game/ClientShellDLL/InterfaceMgr.cpp
++++ b/Game/ClientShellDLL/InterfaceMgr.cpp
+@@ -984,6 +984,13 @@ void CInterfaceMgr::UpdateScreenState()
+ 
+ void CInterfaceMgr::UpdatePatchInfo()
+ {
++#if defined(FEAR_PC_NO_GAMESPY)
++	// The engine's GameSpy objects take std::string laid out by the VS .NET 2003 library, which
++	// this build doesn't use, and GameSpy is offline. Report the patch check as finished.
++	m_bHasRequestedPatchInfo = true;
++	return;
++#endif
++
+ // XENON: Currently disabled in Xenon builds
+ #if !defined(PLATFORM_XENON)
+ 
+diff --git a/Game/ObjectDLL/GameServerShell.cpp b/Game/ObjectDLL/GameServerShell.cpp
+index b38777f..a3e2cac 100644
+--- a/Game/ObjectDLL/GameServerShell.cpp
++++ b/Game/ObjectDLL/GameServerShell.cpp
+@@ -488,6 +488,12 @@ LTRESULT CGameServerShell::OnServerInitialized()
+ 		return LT_ERROR;
+ 	}
+ 
++#if defined(FEAR_PC_NO_GAMESPY)
++	// No GameSpy in this build (see CInterfaceMgr::UpdatePatchInfo).
++	pNetGameInfo->m_eServerStartResult = eServerStartResult_NetworkError;
++	return LT_ERROR;
++#endif
++
+ 	// Create a gamespy server.
+ 	IGameSpyServer::StartupInfo startupInfo;
+ 	startupInfo.m_bPublic = !GameModeMgr::Instance( ).m_ServerSettings.m_bLANOnly;
