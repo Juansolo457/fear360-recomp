@@ -20,6 +20,7 @@
 
 namespace fear::hook_guard {
 
+// Whether the check held; a failed one is logged the first time (logged is that check's own flag).
 inline bool Holds(bool holds, std::atomic<bool>& logged, const char* hook, const char* expected) {
   if (holds) return true;
   if (!logged.exchange(true)) {

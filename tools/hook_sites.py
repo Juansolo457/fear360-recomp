@@ -52,6 +52,7 @@ ROW = re.compile(r'^FEAR_HOOK_SITE\(0x([0-9A-F]{8}), 0x([0-9A-F]{16})ull, "([^"]
 
 
 def manifest_hooks(title):
+    """The (address, name) of every [[entrypoint.midasm_hook]] in this game's manifest."""
     with open(os.path.join(ROOT, TITLES[title]['manifest']), 'rb') as file:
         manifest = tomllib.load(file)
     return {(hook['address'], hook['name']) for hook in manifest['entrypoint']['midasm_hook']}
@@ -108,10 +109,12 @@ def source_hooks(title):
 
 
 def all_hooks(title):
+    """Every hook of this game: the manifest's and the source's, as (address, name)."""
     return manifest_hooks(title) | source_hooks(title)
 
 
 def fnv1a64(data):
+    """FNV-1a, 64 bits: image_check.cpp's Hash computes the same over the loaded image."""
     value = 0xCBF29CE484222325
     for byte in data:
         value = ((value ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
@@ -119,6 +122,7 @@ def fnv1a64(data):
 
 
 def read_table(title):
+    """The (address, name) rows of this game's table, or None when the file is missing."""
     path = os.path.join(ROOT, TITLES[title]['table'])
     rows = set()
     if not os.path.exists(path):
@@ -136,6 +140,7 @@ def read_table(title):
 
 
 def write_table(title, image_path):
+    """Write this game's table: one row per hook, hashed from the dumped image."""
     with open(image_path, 'rb') as file:
         image = file.read()
     lines = [
@@ -159,6 +164,7 @@ def write_table(title, image_path):
 
 
 def check(title):
+    """Whether this game's table lists exactly its hooks; prints each difference."""
     hooks = all_hooks(title)
     rows = read_table(title)
     table = TITLES[title]['table']
@@ -173,6 +179,7 @@ def check(title):
 
 
 def main():
+    """Write both tables, or with --check compare them with the hooks (exit 1 on a difference)."""
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--check', action='store_true')
     for title, info in TITLES.items():
