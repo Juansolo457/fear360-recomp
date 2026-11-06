@@ -287,6 +287,18 @@ def build_version(header):
     return 'unknown'
 
 
+def program_version(build, program):
+    """build_version for a program going into a release zip, checked against the program: a
+    build that stopped after writing the header leaves the last program there, and that one
+    doesn't hold the header's text."""
+    version = build_version(os.path.join(build, 'fear_version', 'fear_version_info.h'))
+    path = os.path.join(build, program)
+    if version == 'unknown' or version.encode('utf-8') not in open(path, 'rb').read():
+        raise SystemExit(f'{path} is not the build its version header records ({version}): '
+                         'build it again')
+    return version
+
+
 def main_release():
     """The public release zip, Windows or (--linux) Linux: F.E.A.R.'s program and its libraries,
     the launcher, the README, tools/xdvdfs.py to unpack the player's disc, and on Linux the Deck
@@ -344,14 +356,13 @@ def main_release():
         raise SystemExit(f'{build}/{indexer} is missing: build the game first')
     files.append((os.path.join(build, indexer), f'fear/{indexer}', None, LINUX))
     files.append((None, 'fear/assets/PUT YOUR DISC HERE.txt', RELEASE_ASSETS_NOTE, False))
-    version = build_version(os.path.join(build, 'fear_version', 'fear_version_info.h'))
+    version = program_version(build, 'fear' if LINUX else 'fear.exe')
     text = f'F.E.A.R. 360 Recompiled {version} ({system})\n'
     if LINUX:
         # Both programs from one commit: a Files build left from before a version change would
         # otherwise go out beside the new F.E.A.R.
-        files_version = build_version(os.path.join(files_build, 'fear_version',
-                                                   'fear_version_info.h'))
-        if files_version != version or version == 'unknown':
+        files_version = program_version(files_build, 'fearfiles')
+        if files_version != version:
             raise SystemExit(f'F.E.A.R. is {version} and F.E.A.R. Files is {files_version}: '
                              'build both from the same commit (tools/build-deck.sh, then '
                              'with --project port-files)')
