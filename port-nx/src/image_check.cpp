@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 
 #include <rex/logging.h>
 #include <rex/system/kernel_state.h>
