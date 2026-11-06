@@ -35,6 +35,7 @@
 #include "fear_settings.h"
 #include "fear_title.h"
 #include "fear_version.h"
+#include "image_check.h"
 #include "look_tuning.h"
 #include "native/native_system.h"
 #include "d3d12/renderer.h"  // RendererApi
@@ -112,6 +113,9 @@ class FearApp : public rex::ReXApp {
     }
     return std::nullopt;
   }
+
+  // The loaded executable against the hooks' fingerprints (image_check.h), before it runs.
+  void OnPostLoadXexImage() override { fear::image_check::Run(); }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
     fear::crash_report::InstallCrashReporter();

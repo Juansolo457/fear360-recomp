@@ -76,3 +76,21 @@ splats, debris and shell casings that stay. Each fix logs one "high frame rate f
 its own) line the first time it acts. Left: items 18 and 19 (walk/idle animation, Havok ragdolls,
 both long), the SetVelocity half of #8 (in the engine), the save write buffering of item 7, and
 the weapon checks #14, #15 and #17.
+
+**Weapon cycling, to play (#16, #132):** the slot choice has unit tests now
+(`port-nx/tests/weapon_cycle_test.cpp`), but nothing has cycled weapons in the game yet. With
+"Weapon slots" at 3, then 5, then 10:
+
+- [ ] Next weapon steps through every weapon held, and from the last goes to the first.
+- [ ] Previous weapon does the same downwards, and from the first goes to the last.
+- [ ] With an empty slot between two weapons (pick up three, drop the middle one), both
+      directions skip it.
+- [ ] With one weapon, both directions keep it.
+- [ ] Dropping or swapping a weapon right after cycling removes the right one (#132).
+- [ ] The log has "weapon cycling skips empty slots" once and no "hook found what its function
+      shouldn't have" line (`port-nx/src/hook_guard.h`).
+
+Seen in play before these tests, not reproduced and not filed: with 5 slots, cycling sometimes
+picked the wrong weapon, and repeated melee sometimes put the weapon away. If either happens
+again, note the slot setting, which slots were empty and the direction, and try once with
+`--no-fear_weapon_cycle_fix`.

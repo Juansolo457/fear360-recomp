@@ -105,6 +105,9 @@ Reporting is off on the user's PC, so this is the only record.
 | `port-nx/src/fear_collection.*` | the collection menu before any game loads (`OnFinalizePaths`), `collection.toml`, Switch Game |
 | `port-nx/src/fear_panel.*`, `fear_process.*`, `fear_title.h` | the panels' look and input (ImGui, pad via XInput); starting the game again or the other one (waits for this run to exit); which game this program is |
 | `port-nx/src/fx_debug.*` | `fear_debug_model_fx`: logs ClientFX effects created (by type) and model effects' lifetime, color and scale |
+| `port-nx/src/image_check.*`, `hook_sites_*.inc`, `tools/hook_sites.py` | at startup, the loaded executable's code against a hash at every hook's address (a wrong executable is logged and noted on the version badge); the script writes the tables from a dumped image, and `--check` (CI) fails on a hook with no row |
+| `port-nx/src/hook_guard.h` | tripwires in the hooks that replace a whole function: a check that fails logs once and the hook runs the game's function unchanged |
+| `port-nx/tests/`, `tools/test.ps1` | unit tests of host code that runs without the game (Catch2; CI runs them on Linux) |
 | `port-files/` | *F.E.A.R. Files*: port-nx's host code with its own manifest and translation (`docs/FILES.md`) |
 | `tools/find_missed_functions.py`, `tools/find_anim_sites.py`, `tools/xexinfo.py` | function entries the analyser missed (from a dumped image); this engine's animation-time sites in a translation; XEX headers |
 | `port-nx/src/native/UPSTREAM.md` | upstream commit and the list of local changes; keep diffs small |

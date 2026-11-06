@@ -10,6 +10,7 @@
 
 #include "fear_panel.h"
 #include "fear_version_info.h"  // generated: port-nx/cmake/fear_version.cmake
+#include "image_check.h"
 
 REXCVAR_DEFINE_STRING(fear_version_badge, "launch", "F.E.A.R.",
                       "The build's version in a corner of the screen: launch (the first 30 "
@@ -30,8 +31,10 @@ class Badge final : public rex::ui::ImGuiDialog {
   void OnDraw(ImGuiIO& io) override {
     if (closing_) return;
     // Gone once its time is up: an open dialog keeps the ImGui overlay drawing every frame.
+    // It stays, with a notice, over an executable the hooks weren't written for (image_check.h).
     static const bool always = REXCVAR_GET(fear_version_badge) == "always";
-    if (!always && std::chrono::steady_clock::now() - shown_ > kLaunchTime) {
+    const bool mismatch = fear::image_check::Mismatch();
+    if (!always && !mismatch && std::chrono::steady_clock::now() - shown_ > kLaunchTime) {
       closing_ = true;
       Close();
       return;
@@ -47,6 +50,10 @@ class Badge final : public rex::ui::ImGuiDialog {
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
                          ImGuiWindowFlags_AlwaysAutoResize)) {
       ImGui::TextUnformatted(fear::version::Title().c_str());
+      if (mismatch) {
+        ImGui::TextUnformatted(
+            "Not the supported game executable: fixes may misbehave (see the log)");
+      }
     }
     ImGui::End();
     fear::panel::PopFont();

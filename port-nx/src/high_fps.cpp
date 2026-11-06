@@ -7,6 +7,7 @@
 #include <atomic>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -20,6 +21,7 @@
 #include <rex/system/xmemory.h>
 
 #include "fear_title.h"
+#include "hook_guard.h"
 
 REXCVAR_DEFINE_BOOL(fear_ai_every_frame, true, "F.E.A.R.",
                     "Update enemies every frame (EchoPatch's AI fix). Off = as shipped: above "
@@ -84,6 +86,12 @@ void OnGroundUpdate(PPCContext& ctx, uint8_t* base, GuestFn original) {
     original(ctx, base);
     return;
   }
+  const uint32_t jumped = ctx.r3.u32 + kJumpedOffset;
+  // m_bJumped is a bool: the function only stores 0 or 1 there.
+  if (!FEAR_HOOK_HOLDS("UpdateOnGround", ctx.r3.u32 != 0 && base[jumped] <= 1)) {
+    original(ctx, base);
+    return;
+  }
   static bool was_jumped = false;
   static double held = -1.0;  // how long the jump state has been kept, -1 when not
   static Clock::time_point last{};
@@ -93,7 +101,6 @@ void OnGroundUpdate(PPCContext& ctx, uint8_t* base, GuestFn original) {
           ? 0.0
           : std::clamp(std::chrono::duration<double>(now - last).count(), 0.0, 0.1);
   last = now;
-  const uint32_t jumped = ctx.r3.u32 + kJumpedOffset;
   if (!was_jumped && base[jumped]) held = 0.0;
   original(ctx, base);
   if (held >= 0.0) {
@@ -111,7 +118,8 @@ void OnGroundUpdate(PPCContext& ctx, uint8_t* base, GuestFn original) {
   was_jumped = base[jumped] != 0;
 }
 
-// CPolyGridFX::UpdateWaveProp (#5): the per-frame call steps the waves at 60 Hz.
+// CPolyGridFX::UpdateWaveProp (#5): the per-frame call steps the waves at 60 Hz. No tripwire: it
+// only acts on the call that FearWaveFrameCall marks, and the frame time in f1 has no fixed range.
 void WaveUpdate(PPCContext& ctx, uint8_t* base, GuestFn original) {
   const bool frame_call = std::exchange(t_wave_frame_call, false);
   if (!frame_call || !Fixes()) {
@@ -143,6 +151,11 @@ void WaveUpdate(PPCContext& ctx, uint8_t* base, GuestFn original) {
 // CPolyGridFX::CollisionHandlerCB (#6): each pair of bodies splashes at most every 1/60 s.
 void SplashContact(PPCContext& ctx, uint8_t* base, GuestFn original) {
   if (!Fixes()) {
+    original(ctx, base);
+    return;
+  }
+  // bIgnoreCollision is a reference: the callback writes through it, and so does a skip below.
+  if (!FEAR_HOOK_HOLDS("CollisionHandlerCB", ctx.r8.u32 != 0)) {
     original(ctx, base);
     return;
   }
@@ -195,6 +208,12 @@ void SlowMoMessage(PPCContext& ctx, uint8_t* base, GuestFn original) {
   const uint32_t state_at = ctx.r3.u32 + kSlowMoStateOffset;
   const double old_charge = LoadDouble(base, charge_at);
   const uint32_t old_state = LoadWord(base, state_at);
+  // The state is an EffectState, 0 to 3, and the charge a time in seconds.
+  if (!FEAR_HOOK_HOLDS("HandleMsgSlowMo",
+                       ctx.r3.u32 != 0 && old_state <= kSlowMoOut && std::isfinite(old_charge))) {
+    original(ctx, base);
+    return;
+  }
   original(ctx, base);
   double charge = LoadDouble(base, charge_at);
   const uint32_t state = LoadWord(base, state_at);
@@ -210,7 +229,7 @@ void SlowMoMessage(PPCContext& ctx, uint8_t* base, GuestFn original) {
 }
 
 // CGameServerShell::UpdateSlowMo (#13): slow-mo ends once the client's charge, seen above 0 since
-// this slow-mo began, is spent.
+// this slow-mo began, is spent. No tripwire: m_hSlowMoRecord is a handle, any value or none.
 void ServerSlowMoUpdate(PPCContext& ctx, uint8_t* base, GuestFn original, GuestFn exit_slowmo) {
   if (!Fixes()) {
     original(ctx, base);
@@ -300,7 +319,15 @@ void FearSlowMoUpdate(PPCRegister& r3) {
   g_client_charge = LoadDouble(Membase(), r3.u32 + kSlowMoChargeOffset);
 }
 
-// The functions these replace, by game (high_fps.h): each hook runs the original as above.
+// The functions these replace, by game (high_fps.h): each hook runs the original as above. Why
+// each is believed to be that function, from the translated code of both games:
+//  - UpdateOnGround: reads the byte at +120 of its object and stores 0 or 1 there.
+//  - UpdateWaveProp: two callers, both in one function, each passing a time in f1; the second is
+//    the per-frame call that FearWaveFrameCall marks (fear_manifest.toml).
+//  - CollisionHandlerCB: keeps r8 and stores 1 to the byte it points to before returning.
+//  - HandleMsgSlowMo: reads the state word and stores the charge (a double) at the offsets above.
+//  - UpdateSlowMo: reads the record at kServerSlowMoRecordOffset of its object and calls
+//    ExitSlowMo.
 #define FEAR_HIGH_FPS_HOOK(sub, fix)  \
   REX_EXTERN(__imp__##sub);           \
   REX_HOOK_RAW(sub) { fix(ctx, base, __imp__##sub); }
