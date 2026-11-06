@@ -98,6 +98,21 @@ TEST_CASE("no weapons at all is left to the game") {
   CHECK(Answer(Slots{}, 10, kNext) == std::nullopt);
 }
 
+// #132: weapon removal asks GetWeaponSlot too, and must get the slot the weapon is in.
+TEST_CASE("only the first slot lookup of a cycle takes its direction") {
+  fear::weapon_cycle::Direction cycle;
+  CHECK(cycle.Take() == 0);  // outside a cycle
+  for (int direction : {kNext, kPrevious}) {
+    cycle.Set(direction);  // NextWeapon or PreviousWeapon starts
+    CHECK(cycle.Take() == direction);  // its own lookup
+    CHECK(cycle.Take() == 0);  // a later one in the same cycle
+    cycle.Set(0);  // it returns
+  }
+  cycle.Set(kNext);  // a cycle that made no lookup
+  cycle.Set(0);
+  CHECK(cycle.Take() == 0);
+}
+
 // Every way of filling up to 10 slots (the largest "Weapon slots" setting), from every current
 // weapon and from none, in both directions.
 TEST_CASE("every arrangement of up to 10 slots lands on the neighbouring weapon") {

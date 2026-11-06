@@ -6,10 +6,24 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 
 namespace fear::weapon_cycle {
 
 inline constexpr uint8_t kNoSlot = 255;  // WDB_INVALID_WEAPON_INDEX
+
+// Which way the cycle under way goes: +1 set by NextWeapon, -1 by PreviousWeapon, 0 outside one.
+// Only the first GetWeaponSlot call of a cycle takes it. A later caller in the same cycle
+// (CPlayerStats' weapon removal, which clears the slot it is told) gets 0, so the game's own
+// answer (#132).
+class Direction {
+ public:
+  void Set(int direction) { direction_ = direction; }
+  int Take() { return std::exchange(direction_, 0); }
+
+ private:
+  int direction_ = 0;
+};
 
 // What GetWeaponSlot answers during a cycle, so that the game's own step lands on the next
 // (direction > 0) or previous weapon that is there, wrapping past either end:

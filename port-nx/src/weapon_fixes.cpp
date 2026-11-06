@@ -64,7 +64,7 @@ constexpr uint32_t kMaxSlots = 32;
 // each makes one, before anything else asks. A later caller in the same cycle gets the game's own
 // answer: CPlayerStats' weapon removal (sub_823E6730, sub_823C3C40 in F.E.A.R. Files) clears the
 // slot GetWeaponSlot names.
-thread_local int t_cycle = 0;
+thread_local fear::weapon_cycle::Direction t_cycle;
 
 uint32_t LoadWord(const uint8_t* base, uint32_t address) {
   uint32_t value;
@@ -73,16 +73,15 @@ uint32_t LoadWord(const uint8_t* base, uint32_t address) {
 }
 
 void CycleWeapon(PPCContext& ctx, uint8_t* base, GuestFn original, int direction) {
-  t_cycle = direction;
+  t_cycle.Set(direction);
   original(ctx, base);
-  t_cycle = 0;
+  t_cycle.Set(0);
 }
 
 // GetWeaponSlot, answering for the cycle: the slot the game's +1 (or -1) turns into the next (or
 // previous) weapon that is there.
 void WeaponSlot(PPCContext& ctx, uint8_t* base, GuestFn original) {
-  const int direction = t_cycle;
-  t_cycle = 0;
+  const int direction = t_cycle.Take();
   if (!direction || !REXCVAR_GET(fear_weapon_cycle_fix)) {
     original(ctx, base);
     return;
