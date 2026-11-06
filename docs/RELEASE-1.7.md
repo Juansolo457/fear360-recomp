@@ -25,9 +25,10 @@ Only the cycle's own lookup is changed now.
 
 **A check that the game is the supported one.** Every fix in this build is written for one
 version of the game's executable. At startup the game now compares the code at each of them with
-what the fix was written for. On another version of the disc it says so in the log and on the
-main menu instead of misbehaving without a word. A few fixes also check what they find as the game
-runs, and stand aside when it isn't what they expect.
+what the fix was written for. On another version of the disc it says so in the log instead of
+misbehaving without a word, and beside the build's version in the corner of the screen while that
+is showing (the first 30 seconds after the program starts, unless set to always). A few fixes also
+check what they find as the game runs, and stand aside when it isn't what they expect.
 
 ## Requirements
 

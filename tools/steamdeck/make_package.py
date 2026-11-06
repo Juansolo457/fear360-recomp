@@ -347,8 +347,14 @@ def main_release():
     version = build_version(os.path.join(build, 'fear_version', 'fear_version_info.h'))
     text = f'F.E.A.R. 360 Recompiled {version} ({system})\n'
     if LINUX:
+        # Both programs from one commit: a Files build left from before a version change would
+        # otherwise go out beside the new F.E.A.R.
         files_version = build_version(os.path.join(files_build, 'fear_version',
                                                    'fear_version_info.h'))
+        if files_version != version or version == 'unknown':
+            raise SystemExit(f'F.E.A.R. is {version} and F.E.A.R. Files is {files_version}: '
+                             'build both from the same commit (tools/build-deck.sh, then '
+                             'with --project port-files)')
         text += f'F.E.A.R. Files {files_version} ({system})\n'
     files.append((None, 'VERSION.txt', text, False))
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
