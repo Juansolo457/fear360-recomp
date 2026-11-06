@@ -1133,6 +1133,15 @@ void FearMkbCommands(PPCRegister& r30) {
 }
 
 #if !defined(FEAR_TITLE_FILES)
+// The two functions replaced whole. Neither has a tripwire (hook_guard.h): the first uses none of
+// its arguments, and the second's command is any of the game's command numbers. Why each is
+// believed to be that function, from the translated code:
+//  - sub_8237DC88, CPlayerMgr's turn update: one caller, and it asks sub_82336938 for a command's
+//    value four times.
+//  - sub_82336938, CBindMgr's largest-magnitude value: walks the binding records at +4 to +8 of
+//    its object for the ones whose command (the word at +8 of a record) is r4, and returns a float
+//    in f1.
+
 // CPlayerMgr's turn update: this frame's mouse movement, for its two reads below.
 REX_EXTERN(__imp__sub_8237DC88);
 REX_HOOK_RAW(sub_8237DC88) {

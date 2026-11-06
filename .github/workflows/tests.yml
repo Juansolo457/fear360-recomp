@@ -1,0 +1,25 @@
+# The unit tests (port-nx/tests/): host code that runs without the game, the SDK or the
+# translated code. Catch2 is fetched at the tag in port-nx/tests/CMakeLists.txt.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      # The steps below build and run the pull request's code: no token left in the checkout.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: cmake -S port-nx/tests -B out/tests -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build out/tests --parallel
+      - name: Run
+        run: ctest --test-dir out/tests --output-on-failure

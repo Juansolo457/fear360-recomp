@@ -61,6 +61,7 @@ set(FEAR_SOURCES
     src/bloom.cpp
     src/fear_version.cpp
     src/high_fps.cpp
+    src/image_check.cpp
     src/weapon_fixes.cpp
     src/profiler.cpp
     src/cpu_check.cpp
