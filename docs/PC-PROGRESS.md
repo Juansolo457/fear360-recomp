@@ -49,6 +49,8 @@ Console variables (in the game's console, or `+Name value` on the command line t
 
 Not in the first pass (decided 2026-11-06): the goal is the 360's controller, and EchoPatch has its own SDL controller support with the PC's layout and stick code, which would double every input alongside ours. Briefly tried in the dev copy with `SDLGamepadSupport = 0`, then taken out again. It may come back later as a toggle, with its controller support off whenever ours is on.
 
+PlayStation controllers are later too (noted 2026-11-06). SDL3 already reads DualShock and DualSense pads and reports them as `PadFamily::kPlayStation`; what's missing is their prompts. The 360 game's database has a PS3 controller-layout screen (`Interface/Screens/ScreenShowControlsPS3`, `ps3_controller_*.tex`), a reference for the layout and the glyph set.
+
 ## Steam Deck
 
 There is no native Linux build of the PC version: the engine (`FEAR.exe`, with the renderer) is a closed 32-bit Windows program, and our work is the game DLLs it loads. On the Deck the Steam F.E.A.R. runs under Proton and loads our DLLs as on Windows.
