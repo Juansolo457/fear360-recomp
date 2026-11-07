@@ -8,6 +8,7 @@
 #include "CommandIDs.h"
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"
+#include "MsgIDs.h"
 #include "PlayerCamera.h"
 #include "PlayerMgr.h"
 #include "TargetMgr.h"
@@ -159,6 +160,16 @@ void ReleaseGameInputs(const fearpc::PadState& s)
 		g_bHeld[i] = g_bHeld[i] && s.value[i] >= 0.5f;
 }
 
+// Something in front of you to use: a door, a switch, a weapon on the floor. The target
+// manager says "can activate" even with nothing there, so the activation target decides.
+bool CanUseTarget()
+{
+	CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
+	return pTargetMgr && pTargetMgr->CanActivateTarget() &&
+		pTargetMgr->GetActivationData().m_hTarget != NULL &&
+		!pTargetMgr->IsActivationType(MID_ACTIVATE_SURFACESND);
+}
+
 bool EnemyUnderCrosshair()
 {
 	CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
@@ -293,10 +304,7 @@ void FearPadFrame()
 	// X uses what's in front of you, or reloads; the choice holds until it is let go, so holding
 	// it on a weapon picks the weapon up.
 	if (Down(g_State, PadAction::kUseOrReload) && !Down(g_LastState, PadAction::kUseOrReload))
-	{
-		CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
-		g_nUseOrReload = (pTargetMgr && pTargetMgr->CanActivateTarget()) ? COMMAND_ID_ACTIVATE : COMMAND_ID_RELOAD;
-	}
+		g_nUseOrReload = CanUseTarget() ? COMMAND_ID_ACTIVATE : COMMAND_ID_RELOAD;
 }
 
 bool FearPadCommandOn(uint32 nCommand)

@@ -11,9 +11,16 @@ Milestone 1 of [PC-PLAN.md](PC-PLAN.md): the 360's controller on Windows PC F.E.
 | 3. Unmodified rebuild | Done. VS 2022, x86. Needed two small source fixes and GameSpy compiled out (patches 0001, 0002). |
 | 4. Loading | Done. `pc/tools/launch.ps1`: `-archcfg` plus a folder of our DLLs, `-userdirectory` for saves. The game folder is not written. Checked: the menu, Interval 01's opening and Interval 02 load and play with our DLLs; autosaves are written. Not checked: an interval played to the end. |
 | 5. Input path | Done, in PC-FINDINGS.md. |
-| 6. Pad input | Built, not yet tried with a pad in hand. SDL3 (static), the 360's Normal and Lean layouts, menus by pad, X as use-or-reload, Start for the menu. No rumble yet. |
+| 6. Pad input | Play-tested with an Xbox Series X controller (Bluetooth): good, except X never reloaded (fixed, not yet re-tested). SDL3 (static), the 360's Normal and Lean layouts, menus by pad, X as use-or-reload, Start for the menu. No rumble yet. |
 | 7. 360 look | Done and measured: turn rates in the running game match the 360's curve at every deflection tested. The edge ramp, soft lock and sensitivity are console variables. Not measured: the recomp with the same scripted stick. |
-| 8. Play test | Yours: see below. |
+| 8. Play test | First pass done (2026-11-06), see below. |
+
+### Play test 1 (2026-11-06)
+
+- Good overall.
+- **X never reloaded.** `CTargetMgr::CanActivateTarget()` is true by default, with nothing in front of you, so X always chose Use. It now uses only when the activation target is set (something usable in reach; surface sounds don't count), otherwise reloads.
+- **No vibration** (none was built). A first try sent the pad's motors a rumble command every frame (shots, damage, the effects' camera shake); the game then stopped responding (Windows closed it, "Application Hang", 16:17) and it was reverted. Suspected: per-frame rumble writes blocking over Bluetooth. Not confirmed. A retry should send only on change, at most a few times a second.
+- The build before the fixes also crashed once (15:44): access violation in `FEAR.exe` itself, offset `0x4abd6`. Cause unknown; when it happened in the session not recorded.
 
 ## Running it
 
