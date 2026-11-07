@@ -115,21 +115,34 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
   int count = 0;
   SDL_JoystickID* ids = SDL_GetGamepads(&count);
   PadState first, last_used, in_use;
+  SDL_JoystickID first_id = 0, in_use_id = 0;
   for (int i = 0; ids && i < count; ++i) {
     SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
     if (!pad) pad = SDL_OpenGamepad(ids[i]);
     if (!pad) continue;
     PadState s;
     Read(pad, dead_zones, &s);
-    if (!first.connected) first = s;
+    if (!first.connected) {
+      first = s;
+      first_id = ids[i];
+    }
     if (ids[i] == g_active) last_used = s;
     if (!in_use.connected && AnyInput(s)) {
       in_use = s;
-      g_active = ids[i];
+      in_use_id = ids[i];
     }
   }
   SDL_free(ids);
-  g_state = in_use.connected ? in_use : (last_used.connected ? last_used : first);
+  // g_active is the pad the state came from, so rumble goes to it.
+  if (in_use.connected) {
+    g_state = in_use;
+    g_active = in_use_id;
+  } else if (last_used.connected) {
+    g_state = last_used;
+  } else {
+    g_state = first;
+    g_active = first_id;
+  }
   return g_state;
 }
 

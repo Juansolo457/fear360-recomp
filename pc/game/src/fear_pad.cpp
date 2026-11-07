@@ -5,12 +5,15 @@
 
 #include <stdio.h>
 
+#include "ClientWeapon.h"
+#include "ClientWeaponMgr.h"
 #include "CommandIDs.h"
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"
 #include "MsgIDs.h"
 #include "PlayerCamera.h"
 #include "PlayerMgr.h"
+#include "PlayerStats.h"
 #include "TargetMgr.h"
 #include "VarTrack.h"
 #include "ltfileoperations.h"
@@ -29,6 +32,21 @@ VarTrack g_vtPadLookRamp;
 VarTrack g_vtPadLookSensitivity;
 VarTrack g_vtPadSoftLock;
 VarTrack g_vtPadMeasure;
+VarTrack g_vtPadRumble;
+
+// Vibration, per motor (0 the large low-frequency one, 1 the small high-frequency one).
+float g_fFxMotors[2] = {};    // from rumble effects, this camera update
+float g_fShake = 0.0f;        // the camera's effect shake, 0..1
+float g_fKick[2] = {};        // shots and damage, fading out
+float g_fSent[2] = {};        // what the pad was last told
+double g_fSentAt = -1.0;      // when, real time
+const CClientWeapon* g_pLastWeapon = NULL;
+int32 g_nLastClip = -1;
+int32 g_nLastHealth = -1;
+const float kKickFade = 10.0f;         // per second: a kick is mostly gone in a tenth of a second
+const float kRumbleChange = 0.05f;     // a change smaller than this waits for the refresh
+const double kRumbleRefresh = 0.1;     // seconds between sends while the strength holds
+const uint32 kRumbleDurationMs = 250;  // each send's motor time, so a stall can't leave it on
 
 // PadMeasure 1: holds the right stick at each deflection in turn (no pad needed), measures how
 // fast the camera actually turns, and writes pad_measure.txt to the user directory. This checks
@@ -160,6 +178,68 @@ void ReleaseGameInputs(const fearpc::PadState& s)
 		g_bHeld[i] = g_bHeld[i] && s.value[i] >= 0.5f;
 }
 
+void Kick(float fLow, float fHigh)
+{
+	g_fKick[0] = LTMAX(g_fKick[0], LTMIN(fLow, 1.0f));
+	g_fKick[1] = LTMAX(g_fKick[1], LTMIN(fHigh, 1.0f));
+}
+
+// Tells the pad, but only on a real change or when the last send is about to run out.
+void SendRumble(float fLow, float fHigh)
+{
+	const double fNow = RealTimeTimer::Instance().GetTimerAccumulatedS();
+	const bool bOff = fLow <= 0.01f && fHigh <= 0.01f;
+	const bool bWasOff = g_fSent[0] <= 0.01f && g_fSent[1] <= 0.01f;
+	if (bOff && bWasOff)
+		return;
+	const bool bChanged = fabsf(fLow - g_fSent[0]) >= kRumbleChange || fabsf(fHigh - g_fSent[1]) >= kRumbleChange || bOff;
+	if (!bChanged && fNow - g_fSentAt < kRumbleRefresh)
+		return;
+	if (bOff)
+		fearpc::PadRumble(0.0f, 0.0f, 0);
+	else
+		fearpc::PadRumble(fLow, fHigh, kRumbleDurationMs);
+	g_fSent[0] = bOff ? 0.0f : fLow;
+	g_fSent[1] = bOff ? 0.0f : fHigh;
+	g_fSentAt = fNow;
+}
+
+void StopRumble()
+{
+	g_fKick[0] = g_fKick[1] = g_fFxMotors[0] = g_fFxMotors[1] = g_fShake = 0.0f;
+	g_nLastHealth = -1;
+	g_pLastWeapon = NULL;
+	SendRumble(0.0f, 0.0f);
+}
+
+// Shots (the clip going down) and damage (health plus armour going down) start kicks; the
+// motors run at the strongest of the kicks, the effects' motors and the camera shake.
+void UpdateRumble(float fFrameTime)
+{
+	CClientWeapon* pWeapon = g_pClientWeaponMgr ? g_pClientWeaponMgr->GetCurrentClientWeapon() : NULL;
+	const int32 nClip = pWeapon ? pWeapon->GetAmmoInClips() : -1;
+	if (pWeapon && pWeapon == g_pLastWeapon && nClip >= 0 && nClip < g_nLastClip)
+		Kick(0.3f, 0.6f);
+	g_pLastWeapon = pWeapon;
+	g_nLastClip = nClip;
+
+	const int32 nHealth = g_pPlayerStats ? (int32)(g_pPlayerStats->GetHealth() + g_pPlayerStats->GetArmor()) : -1;
+	if (g_nLastHealth >= 0 && nHealth >= 0 && nHealth < g_nLastHealth)
+	{
+		const float fDamage = (float)(g_nLastHealth - nHealth);
+		Kick(0.35f + fDamage / 40.0f, fDamage / 60.0f);
+	}
+	g_nLastHealth = nHealth;
+
+	const float fStrength = LTCLAMP(g_vtPadRumble.GetFloat(), 0.0f, 1.0f);
+	const float fLow = LTMIN(LTMAX(LTMAX(g_fKick[0], g_fFxMotors[0]), g_fShake), 1.0f) * fStrength;
+	const float fHigh = LTMIN(LTMAX(LTMAX(g_fKick[1], g_fFxMotors[1]), g_fShake * 0.5f), 1.0f) * fStrength;
+	const float fFade = expf(-kKickFade * LTMAX(fFrameTime, 0.0f));
+	g_fKick[0] *= fFade;
+	g_fKick[1] *= fFade;
+	SendRumble(fLow, fHigh);
+}
+
 // Something in front of you to use: a door, a switch, a weapon on the floor. The target
 // manager says "can activate" even with nothing there, so the activation target decides.
 bool CanUseTarget()
@@ -270,6 +350,7 @@ void FearPadFrame()
 		g_vtPadLookSensitivity.Init(g_pLTClient, "PadLookSensitivity", NULL, 1.0f);
 		g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 1.0f);
 		g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);
+		g_vtPadRumble.Init(g_pLTClient, "PadRumble", NULL, 1.0f);
 		if (!fearpc::PadInit())
 			g_pLTClient->CPrint("Pads: SDL could not start; controllers disabled.");
 		g_bStarted = true;
@@ -283,6 +364,7 @@ void FearPadFrame()
 	g_bPlaying = g_pInterfaceMgr && g_pInterfaceMgr->GetGameState() == GS_PLAYING;
 	if (!g_bPlaying)
 	{
+		StopRumble();
 		if (bWasPlaying)
 			HoldMenuKeys(g_State);
 		g_Look.Reset();
@@ -305,6 +387,21 @@ void FearPadFrame()
 	// it on a weapon picks the weapon up.
 	if (Down(g_State, PadAction::kUseOrReload) && !Down(g_LastState, PadAction::kUseOrReload))
 		g_nUseOrReload = CanUseTarget() ? COMMAND_ID_ACTIVATE : COMMAND_ID_RELOAD;
+
+	if (g_State.connected)
+		UpdateRumble(RealTimeTimer::Instance().GetTimerElapsedS());
+	else
+		StopRumble();
+}
+
+void FearPadCameraEffects(const LTRigidTransform& tEffect, const float* pMotors)
+{
+	g_fFxMotors[0] = pMotors[0];
+	g_fFxMotors[1] = pMotors[1];
+	// The shake's size: how far the view is pushed (game units) and turned (the quaternion's
+	// angle), scaled so a nearby grenade reads near full strength.
+	const float fAngle = 2.0f * acosf(LTMIN(fabsf(tEffect.m_rRot.m_Quat[LTRotation::QW]), 1.0f));
+	g_fShake = LTMIN(tEffect.m_vPos.Mag() / 6.0f + RAD2DEG(fAngle) / 2.0f, 1.0f);
 }
 
 bool FearPadCommandOn(uint32 nCommand)
