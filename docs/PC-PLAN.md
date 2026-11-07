@@ -29,6 +29,17 @@ What it means here:
 - Running both is the thing to make work: it needs EchoPatch loaded and its archive mounted, we need our DLLs mounted through `-archcfg` and EchoPatch's own controller support off (#138). From its source (2026-11-07, commit `9ea7671`): its hook patches the retail `GameClient.dll`, `GameServer.dll`, `GameDatabase.dll` and `StringEditRuntime.dll` at fixed addresses (the objective HUD, the bonus-mission menu, the player body, Instant Action's results, MedKits, the 360 HUD), and checks the bytes there first, turning a feature off when they differ. Its installer also checks `GameClient.dll` against the retail 1.08 hash (`38604fbf…`). With our rebuilt client and server DLLs those features would switch themselves off. So the two can't simply be stacked: either our controller runs on the retail DLLs (a hook, like theirs, instead of a source build), or our source build carries the same changes (which we can't take from them: their hook's source isn't published). Not tried in game yet.
 
 Built and tested here (2026-11-07, Go 1.24.7): the build is clean and reproducible; with our 360 disc and the GOG copy as reference data, 314 tests pass, the 360 golden tests (Holiday world, SM15 models, sound banks, Instant Action) included; 76 skip for want of the PS3 disc and their shipped mod folder; 2 fail only because the dev copy has no EchoPatch. Its checker accepts our 360 disc image as is.
+
+Installed and run here (2026-11-07), in a separate copy of the GOG base game with EchoPatch 4.5.1, driving its installer's back end without the window (needs both disc folders; it built 185 files in about 5 s):
+
+- **Retail DLLs + the mod:** works; the main menu gains Instant action and Bonus mission.
+- **Our DLLs + the mod** (EchoPatch's `SDLGamepadSupport = 0`): the game runs, Docks and Intro load and play. But:
+  - EchoPatch can't find its patterns in our `GameClient.dll` and shows a box for each at startup (`SurfaceJumpImpulse`, `HeightOffset`, `UpdateWaveProp`, `PolyGridFXCollisionHandlerCB`, `TurningPerturbRate`, `Decal`, `HUDTerminate`, `HUDRender`): those fixes are off with our build.
+  - The mod's hook reports "Unsupported" and turns off the objective HUD, the bonus-mission menu and screen, the Instant Action menu and results, the player body and MedKit fixes; only the 360 HUD layout and the results fonts apply. No Instant Action or Bonus mission in the menu.
+  - `+runworld Worlds\Release\InstantAction1` was still a black screen after 90 s (not followed up).
+  - One unexplained exit while loading Intro from the menu (no crash logged); a second load of Intro was fine.
+
+So stacking a source-built `GameClient.dll` under both EchoPatch and this mod costs most of what each does. The way to have both is our controller code on the retail DLLs.
 - The ownership table below still holds for what we turn on; the console content rows are now its rows.
 
 ### What a player needs to own (to state plainly in the README)
