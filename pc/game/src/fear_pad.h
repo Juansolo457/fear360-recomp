@@ -12,21 +12,11 @@
 //   PadLookRamp         3   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
 //   PadLookSensitivity  1   scales the 360's turn rates
 //   PadSoftLock         1   slow turning with an enemy under the crosshair, as the 360 does
-//   PadRumble           1   vibration strength, 0 to 1 (0 off)
-//
-// Vibration: the PC game computes motor strengths from rumble effects but sends them nowhere,
-// and its effect files have none, so the pad also rumbles for your shots, damage you take and
-// the camera shakes the game plays (explosions, heavy impacts).
 #pragma once
 
 #include "ltbasedefs.h"
 
-class LTRigidTransform;
-
 void FearPadFrame();
-// Once a camera update (CPlayerCamera): the effect system's camera offset, whose size is how
-// hard the view is shaking, and its two motor strengths.
-void FearPadCameraEffects(const LTRigidTransform& tEffect, const float* pMotors);
 bool FearPadCommandOn(uint32 nCommand);
 float FearPadCommandValue(uint32 nCommand);
 // The turn for this frame in radians (yaw positive right, pitch positive down); false when no

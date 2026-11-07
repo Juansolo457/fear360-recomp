@@ -5,15 +5,11 @@
 
 #include <stdio.h>
 
-#include "ClientWeapon.h"
-#include "ClientWeaponMgr.h"
 #include "CommandIDs.h"
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"
-#include "MsgIDs.h"
 #include "PlayerCamera.h"
 #include "PlayerMgr.h"
-#include "PlayerStats.h"
 #include "TargetMgr.h"
 #include "VarTrack.h"
 #include "ltfileoperations.h"
@@ -32,18 +28,6 @@ VarTrack g_vtPadLookRamp;
 VarTrack g_vtPadLookSensitivity;
 VarTrack g_vtPadSoftLock;
 VarTrack g_vtPadMeasure;
-VarTrack g_vtPadRumble;
-
-// Vibration, per motor (0 the large low-frequency one, 1 the small high-frequency one).
-float g_fFxMotors[2] = {};    // from rumble effects, this camera update
-float g_fShake = 0.0f;        // the camera's effect shake, 0..1
-float g_fKick[2] = {};        // shots and damage, fading out
-bool g_bRumbling = false;
-const CClientWeapon* g_pLastWeapon = NULL;
-int32 g_nLastClip = -1;
-int32 g_nLastHealth = -1;
-const float kKickFade = 10.0f;  // per second: a kick is mostly gone in a tenth of a second
-const uint32 kRumbleRefreshMs = 150;  // each update's motor time, so a stall can't leave it on
 
 // PadMeasure 1: holds the right stick at each deflection in turn (no pad needed), measures how
 // fast the camera actually turns, and writes pad_measure.txt to the user directory. This checks
@@ -175,64 +159,6 @@ void ReleaseGameInputs(const fearpc::PadState& s)
 		g_bHeld[i] = g_bHeld[i] && s.value[i] >= 0.5f;
 }
 
-void Kick(float fLow, float fHigh)
-{
-	g_fKick[0] = LTMAX(g_fKick[0], LTMIN(fLow, 1.0f));
-	g_fKick[1] = LTMAX(g_fKick[1], LTMIN(fHigh, 1.0f));
-}
-
-void StopRumble()
-{
-	g_fKick[0] = g_fKick[1] = g_fFxMotors[0] = g_fFxMotors[1] = g_fShake = 0.0f;
-	if (g_bRumbling)
-		fearpc::PadRumble(0.0f, 0.0f, 0);
-	g_bRumbling = false;
-}
-
-// Shots (the clip going down) and damage (health plus armour going down) start kicks; the
-// motors run at the strongest of the kicks, the effects' motors and the camera shake.
-void UpdateRumble(float fFrameTime)
-{
-	CClientWeapon* pWeapon = g_pClientWeaponMgr ? g_pClientWeaponMgr->GetCurrentClientWeapon() : NULL;
-	const int32 nClip = pWeapon ? pWeapon->GetAmmoInClips() : -1;
-	if (pWeapon && pWeapon == g_pLastWeapon && nClip < g_nLastClip && nClip >= 0)
-		Kick(0.3f, 0.6f);
-	g_pLastWeapon = pWeapon;
-	g_nLastClip = nClip;
-
-	const int32 nHealth = g_pPlayerStats ? (int32)(g_pPlayerStats->GetHealth() + g_pPlayerStats->GetArmor()) : -1;
-	if (g_nLastHealth >= 0 && nHealth >= 0 && nHealth < g_nLastHealth)
-	{
-		const float fDamage = (float)(g_nLastHealth - nHealth);
-		Kick(0.35f + fDamage / 40.0f, fDamage / 60.0f);
-	}
-	g_nLastHealth = nHealth;
-
-	const float fFade = expf(-kKickFade * fFrameTime);
-	const float fStrength = LTCLAMP(g_vtPadRumble.GetFloat(), 0.0f, 1.0f);
-	float fLow = LTMAX(LTMAX(g_fKick[0], g_fFxMotors[0]), g_fShake);
-	float fHigh = LTMAX(LTMAX(g_fKick[1], g_fFxMotors[1]), g_fShake * 0.5f);
-	g_fKick[0] *= fFade;
-	g_fKick[1] *= fFade;
-	fLow = LTMIN(fLow, 1.0f) * fStrength;
-	fHigh = LTMIN(fHigh, 1.0f) * fStrength;
-
-	const bool bOn = fLow > 0.01f || fHigh > 0.01f;
-	if (bOn || g_bRumbling)
-		fearpc::PadRumble(bOn ? fLow : 0.0f, bOn ? fHigh : 0.0f, bOn ? kRumbleRefreshMs : 0);
-	g_bRumbling = bOn;
-}
-
-// Something in front of you to use: a door, a switch, a weapon on the floor. The target
-// manager says "can activate" even with nothing there, so the activation target decides.
-bool CanUseTarget()
-{
-	CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
-	return pTargetMgr && pTargetMgr->CanActivateTarget() &&
-		pTargetMgr->GetActivationData().m_hTarget != NULL &&
-		!pTargetMgr->IsActivationType(MID_ACTIVATE_SURFACESND);
-}
-
 bool EnemyUnderCrosshair()
 {
 	CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
@@ -333,7 +259,6 @@ void FearPadFrame()
 		g_vtPadLookSensitivity.Init(g_pLTClient, "PadLookSensitivity", NULL, 1.0f);
 		g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 1.0f);
 		g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);
-		g_vtPadRumble.Init(g_pLTClient, "PadRumble", NULL, 1.0f);
 		if (!fearpc::PadInit())
 			g_pLTClient->CPrint("Pads: SDL could not start; controllers disabled.");
 		g_bStarted = true;
@@ -347,9 +272,6 @@ void FearPadFrame()
 	g_bPlaying = g_pInterfaceMgr && g_pInterfaceMgr->GetGameState() == GS_PLAYING;
 	if (!g_bPlaying)
 	{
-		StopRumble();
-		g_nLastHealth = -1;
-		g_pLastWeapon = NULL;
 		if (bWasPlaying)
 			HoldMenuKeys(g_State);
 		g_Look.Reset();
@@ -371,22 +293,10 @@ void FearPadFrame()
 	// X uses what's in front of you, or reloads; the choice holds until it is let go, so holding
 	// it on a weapon picks the weapon up.
 	if (Down(g_State, PadAction::kUseOrReload) && !Down(g_LastState, PadAction::kUseOrReload))
-		g_nUseOrReload = CanUseTarget() ? COMMAND_ID_ACTIVATE : COMMAND_ID_RELOAD;
-
-	if (g_State.connected)
-		UpdateRumble(RealTimeTimer::Instance().GetTimerElapsedS());
-	else
-		StopRumble();
-}
-
-void FearPadCameraEffects(const LTRigidTransform& tEffect, const float* pMotors)
-{
-	g_fFxMotors[0] = pMotors[0];
-	g_fFxMotors[1] = pMotors[1];
-	// The shake's size: how far the view is pushed (game units) and turned (the quaternion's
-	// angle), scaled so a nearby grenade reads near full strength.
-	const float fAngle = 2.0f * acosf(LTMIN(fabsf(tEffect.m_rRot.m_Quat[LTRotation::QW]), 1.0f));
-	g_fShake = LTMIN(tEffect.m_vPos.Mag() / 6.0f + RAD2DEG(fAngle) / 2.0f, 1.0f);
+	{
+		CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
+		g_nUseOrReload = (pTargetMgr && pTargetMgr->CanActivateTarget()) ? COMMAND_ID_ACTIVATE : COMMAND_ID_RELOAD;
+	}
 }
 
 bool FearPadCommandOn(uint32 nCommand)

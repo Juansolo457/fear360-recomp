@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: fear-pc <fear-pc@localhost>
 Date: Fri, 6 Nov 2026 15:18:49 -0800
-Subject: [PATCH 3/4] FEAR_PC_PAD: game controllers through CBindMgr,
+Subject: [PATCH 3/3] FEAR_PC_PAD: game controllers through CBindMgr,
  CPlayerMgr and CGameClientShell::Update
 
 ---
