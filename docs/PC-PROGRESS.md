@@ -45,6 +45,10 @@ Console variables (in the game's console, or `+Name value` on the command line t
 | `PadRumble` | 1 | vibration strength, 0 to 1 (0 off) |
 | `PadMeasure` | 0 | 1 runs the turn-rate measurement into `<user dir>\pad_measure.txt`; N > 1 waits N seconds into play first |
 
+## EchoPatch
+
+Not in the first pass (decided 2026-11-06): the goal is the 360's controller, and EchoPatch has its own SDL controller support with the PC's layout and stick code, which would double every input alongside ours. Briefly tried in the dev copy with `SDLGamepadSupport = 0`, then taken out again. It may come back later as a toggle, with its controller support off whenever ours is on.
+
 ## Steam Deck
 
 There is no native Linux build of the PC version: the engine (`FEAR.exe`, with the renderer) is a closed 32-bit Windows program, and our work is the game DLLs it loads. On the Deck the Steam F.E.A.R. runs under Proton and loads our DLLs as on Windows.
