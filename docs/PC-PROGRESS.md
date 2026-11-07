@@ -45,6 +45,22 @@ Console variables (in the game's console, or `+Name value` on the command line t
 | `PadRumble` | 1 | vibration strength, 0 to 1 (0 off) |
 | `PadMeasure` | 0 | 1 runs the turn-rate measurement into `<user dir>\pad_measure.txt`; N > 1 waits N seconds into play first |
 
+## Steam Deck
+
+There is no native Linux build of the PC version: the engine (`FEAR.exe`, with the renderer) is a closed 32-bit Windows program, and our work is the game DLLs it loads. On the Deck the Steam F.E.A.R. runs under Proton and loads our DLLs as on Windows.
+
+```
+pwsh -NoProfile -File pc/tools/deploy-deck.ps1
+```
+
+copies the three DLLs to `~/fear-pc/overlay` on the Deck (over SSH, host `deck-ts`), writes `~/fear-pc/fearpc.archcfg` (the Deck install's archives, then the overlay, as Proton `Z:` paths) and prints the launch option to set in Steam (F.E.A.R. > Properties > Launch Options):
+
+```
+%command% -archcfg "Z:\home\deck\fear-pc\fearpc.archcfg" -userdirectory "Z:\home\deck\fear-pc\user"
+```
+
+Clearing the launch option plays the game as shipped; the game folder isn't changed. The Deck's install (2026-11-06) is byte-identical to the Windows Steam copy (`FEAR.exe` with the Steam wrapper, build 15017) and has no EchoPatch. First deployed 2026-11-06; not yet run there. Untested so far: the Steam `FEAR.exe` with our DLLs (Windows tests used the GOG one), and SDL3 reading the Deck's controls through Proton (Steam Input presents them as an Xbox pad).
+
 ## Play-test checklist (step 8)
 
 Turn the controller on, check `fearpc_pad_probe.exe` sees it, then `launch.ps1`. Play Intervals 01 and 02, and the same stretch in the recomp (`tools/launch.ps1 -Nx -Extra '--nx_renderer native'`).
