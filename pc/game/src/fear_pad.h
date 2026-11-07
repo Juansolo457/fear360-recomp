@@ -9,7 +9,7 @@
 // Console variables (also settable as +Name value on the command line):
 //   PadEnabled          1   0 ignores pads
 //   PadLayout           0   0 the 360's Normal layout, 1 its Lean layout (pc/core layout.h)
-//   PadLookRamp         3   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
+//   PadLookRamp         0   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
 //   PadLookSensitivity  1   scales the 360's turn rates
 //   PadSoftLock         1   slow turning with an enemy under the crosshair, as the 360 does
 //   PadRumble           1   vibration strength, 0 to 1 (0 off)
@@ -23,6 +23,20 @@
 #include "ltbasedefs.h"
 
 class LTRigidTransform;
+
+// The controller settings, as the Controller screen shows them (fear_pad_screen.cpp). Saved to
+// fearpc_pad.txt in the user directory and read back at startup.
+struct FearPadSettings
+{
+	bool	bEnabled;
+	uint8	nLayout;		// 0 Normal, 1 Lean
+	uint8	nLookRamp;		// PadLookRamp: 0 as shipped, 1 no delay, 2 instant, 3 off
+	int		nSensitivity;	// percent of the 360's turn rates
+	bool	bSoftLock;
+	int		nRumble;		// percent
+};
+FearPadSettings FearPadGetSettings();
+void FearPadSetSettings(const FearPadSettings& settings);
 
 void FearPadFrame();
 // Once a camera update (CPlayerCamera): the effect system's camera offset, whose size is how

@@ -66,7 +66,7 @@ fear_target(Game_ClientFX SHARED)
 
 # FEAR_PC_PAD: game controllers (src/fear_pad.h), patched into CBindMgr, CPlayerMgr and
 # CGameClientShell::Update.
-target_sources(Game_ClientShell PRIVATE src/fear_pad.cpp)
+target_sources(Game_ClientShell PRIVATE src/fear_pad.cpp src/fear_pad_screen.cpp)
 target_include_directories(Game_ClientShell PRIVATE src)
 target_compile_definitions(Game_ClientShell PRIVATE FEAR_PC_PAD)
 target_link_libraries(Game_ClientShell PRIVATE fearpc_core)

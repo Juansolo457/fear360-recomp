@@ -338,23 +338,106 @@ void UpdateMeasure()
 	g_Look.Reset();
 }
 
+// The settings the Controller screen changes, in fearpc_pad.txt in the user directory: one
+// "Name value" line each, read at startup over the defaults (and over a +Name on the command line).
+struct SavedVar
+{
+	VarTrack* pVar;
+	const char* szName;
+};
+const SavedVar kSavedVars[] = {
+	{ &g_vtPadEnabled, "PadEnabled" },
+	{ &g_vtPadLayout, "PadLayout" },
+	{ &g_vtPadLookRamp, "PadLookRamp" },
+	{ &g_vtPadLookSensitivity, "PadLookSensitivity" },
+	{ &g_vtPadSoftLock, "PadSoftLock" },
+	{ &g_vtPadRumble, "PadRumble" },
+};
+
+void SettingsPath(char* szPath, uint32 nSize)
+{
+	LTFileOperations::GetUserDirectory(szPath, nSize);
+	LTStrCat(szPath, "fearpc_pad.txt", nSize);
+}
+
+void LoadSettings()
+{
+	char szPath[MAX_PATH * 2];
+	SettingsPath(szPath, LTARRAYSIZE(szPath));
+	FILE* pFile = fopen(szPath, "r");
+	if (!pFile)
+		return;
+	char szName[64];
+	float fValue;
+	while (fscanf(pFile, "%63s %f", szName, &fValue) == 2)
+	{
+		for (const SavedVar& var : kSavedVars)
+			if (LTStrIEquals(var.szName, szName))
+				var.pVar->SetFloat(fValue);
+	}
+	fclose(pFile);
+}
+
+void SaveSettings()
+{
+	char szPath[MAX_PATH * 2];
+	SettingsPath(szPath, LTARRAYSIZE(szPath));
+	FILE* pFile = fopen(szPath, "w");
+	if (!pFile)
+		return;
+	for (const SavedVar& var : kSavedVars)
+		fprintf(pFile, "%s %g\n", var.szName, var.pVar->GetFloat());
+	fclose(pFile);
+}
+
+void Start()
+{
+	if (g_bStarted)
+		return;
+	g_vtPadEnabled.Init(g_pLTClient, "PadEnabled", NULL, 1.0f);
+	g_vtPadLayout.Init(g_pLTClient, "PadLayout", NULL, 0.0f);
+	// Look acceleration starts as the 360 shipped it (play test 2: turning felt slow without it).
+	g_vtPadLookRamp.Init(g_pLTClient, "PadLookRamp", NULL, 0.0f);
+	g_vtPadLookSensitivity.Init(g_pLTClient, "PadLookSensitivity", NULL, 1.0f);
+	g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 1.0f);
+	g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);
+	g_vtPadRumble.Init(g_pLTClient, "PadRumble", NULL, 1.0f);
+	LoadSettings();
+	if (!fearpc::PadInit())
+		g_pLTClient->CPrint("Pads: SDL could not start; controllers disabled.");
+	g_bStarted = true;
+}
+
 }  // namespace
+
+FearPadSettings FearPadGetSettings()
+{
+	Start();
+	FearPadSettings s;
+	s.bEnabled = g_vtPadEnabled.GetFloat() >= 0.5f;
+	s.nLayout = (uint8)LTCLAMP((int)(g_vtPadLayout.GetFloat() + 0.5f), 0, 1);
+	s.nLookRamp = (uint8)LTCLAMP((int)(g_vtPadLookRamp.GetFloat() + 0.5f), 0, 3);
+	s.nSensitivity = (int)(g_vtPadLookSensitivity.GetFloat() * 100.0f + 0.5f);
+	s.bSoftLock = g_vtPadSoftLock.GetFloat() >= 0.5f;
+	s.nRumble = (int)(LTCLAMP(g_vtPadRumble.GetFloat(), 0.0f, 1.0f) * 100.0f + 0.5f);
+	return s;
+}
+
+void FearPadSetSettings(const FearPadSettings& s)
+{
+	Start();
+	g_vtPadEnabled.SetFloat(s.bEnabled ? 1.0f : 0.0f);
+	g_vtPadLayout.SetFloat((float)s.nLayout);
+	g_vtPadLookRamp.SetFloat((float)s.nLookRamp);
+	g_vtPadLookSensitivity.SetFloat(s.nSensitivity / 100.0f);
+	g_vtPadSoftLock.SetFloat(s.bSoftLock ? 1.0f : 0.0f);
+	g_vtPadRumble.SetFloat(s.nRumble / 100.0f);
+	SaveSettings();
+}
 
 void FearPadFrame()
 {
-	if (!g_bStarted)
-	{
-		g_vtPadEnabled.Init(g_pLTClient, "PadEnabled", NULL, 1.0f);
-		g_vtPadLayout.Init(g_pLTClient, "PadLayout", NULL, 0.0f);
-		g_vtPadLookRamp.Init(g_pLTClient, "PadLookRamp", NULL, 3.0f);
-		g_vtPadLookSensitivity.Init(g_pLTClient, "PadLookSensitivity", NULL, 1.0f);
-		g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 1.0f);
-		g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);
-		g_vtPadRumble.Init(g_pLTClient, "PadRumble", NULL, 1.0f);
-		if (!fearpc::PadInit())
-			g_pLTClient->CPrint("Pads: SDL could not start; controllers disabled.");
-		g_bStarted = true;
-	}
+	Start();
 
 	g_LastState = g_State;
 	const fearpc::PadState& polled = fearpc::PadUpdate();

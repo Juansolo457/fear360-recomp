@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Fri, 6 Nov 2026 17:29:32 -0800
+Subject: [PATCH 5/5] FEAR_PC_PAD: the Joystick screen becomes the Controller
+ screen
+
+---
+ Game/ClientShellDLL/ScreenJoystick.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/Game/ClientShellDLL/ScreenJoystick.cpp b/Game/ClientShellDLL/ScreenJoystick.cpp
+index 0a05362..4d97f08 100644
+--- a/Game/ClientShellDLL/ScreenJoystick.cpp
++++ b/Game/ClientShellDLL/ScreenJoystick.cpp
+@@ -19,6 +19,9 @@
+ #include "iltinput.h"
+ #include "CommandIDs.h"
+ 
++// FEAR_PC_PAD: this screen is the Controller screen instead (pc/game/src/fear_pad_screen.cpp).
++#if !defined(FEAR_PC_PAD)
++
+ namespace
+ {
+ 	int kGap = 200;
+@@ -257,4 +260,6 @@ void CScreenJoystick::SaveBindings()
+ 			CBindMgr::GetSingleton().SetBinding(sBinding);
+ 		}
+   	}
+-}
+\ No newline at end of file
++}
++
++#endif // !FEAR_PC_PAD

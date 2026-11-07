@@ -15,6 +15,16 @@ Milestone 1 of [PC-PLAN.md](PC-PLAN.md): the 360's controller on Windows PC F.E.
 | 7. 360 look | Done and measured: turn rates in the running game match the 360's curve at every deflection tested. The edge ramp, soft lock and sensitivity are console variables. Not measured: the recomp with the same scripted stick. |
 | 8. Play test | First pass done (2026-11-06), see below. |
 
+### Controller screen
+
+Options > Controls > Configure joystick/gamepad is the Controller screen when the pad code is built in (`pc/game/src/fear_pad_screen.cpp`, patch 0005 compiles the PC's DirectInput joystick page out): Controller on/off, Button layout (Normal, Lean), Look sensitivity (25 to 200%), Look acceleration (Off, Xbox 360, Immediate, Full speed, named as in the recomp's settings), Aim assist, Vibration (0 to 100%). Leaving the screen applies the settings and saves them to `fearpc_pad.txt` in the user directory, read at the next start. Checked in game: values shown, saved on leaving. It is the first piece of the recomp's settings menu; the other options come later.
+
+### Play test 2 (2026-11-06)
+
+- Played well (Interval 04), with the controller.
+- **Turning felt slow.** With the edge ramp off, the stick tops out at the curve's 90 degrees a second. Look acceleration now starts at Xbox 360 (`PadLookRamp 0`): held at the edge for 0.3 s, turning ramps to 360 a second, as the 360 shipped. Off is still on the Controller screen.
+- **Quitting to the menu crashed the game** (Leave game, after a longer session). Caught with a debugger attached: an access violation in `FEAR.exe` at offset `0x4abd6`, the same as the 15:44 crash in play test 1. The stack is all engine code: `0x44C900` drops a reference count and at zero frees the object (`0x44ABA0`), which reads a pointer (`[esi+10h]`, then `+8`) whose target is already gone. Level teardown freeing a resource twice, or after its owner. A short run (Docks, Leave game) didn't reproduce it. Open: whether the retail DLLs do the same, and which resource it is; suspect memory created on one side of the DLL boundary and freed on the other, since our DLLs use a different C runtime heap from the engine's.
+
 ### Play test 1 (2026-11-06)
 
 - Good overall.
@@ -39,7 +49,7 @@ Console variables (in the game's console, or `+Name value` on the command line t
 | --- | --- | --- |
 | `PadEnabled` | 1 | 0 ignores pads |
 | `PadLayout` | 0 | 0 the 360's Normal layout, 1 its Lean layout |
-| `PadLookRamp` | 3 | 0 the 360's edge ramp as shipped, 1 ramp without the wait, 2 full boost at the edge, 3 off (the recomp's default) |
+| `PadLookRamp` | 0 | 0 the 360's edge ramp as shipped, 1 ramp without the wait, 2 full boost at the edge, 3 off (the recomp's default) |
 | `PadLookSensitivity` | 1 | multiplies the 360's turn rates |
 | `PadSoftLock` | 1 | slow turning with an enemy under the crosshair |
 | `PadRumble` | 1 | vibration strength, 0 to 1 (0 off) |
@@ -74,7 +84,7 @@ Turn the controller on, check `fearpc_pad_probe.exe` sees it, then `launch.ps1`.
 - Menus: D-pad and left stick move, A picks, B backs out, Start picks. The A that starts a level doesn't also jump.
 - Every button in the Normal layout does what the 360 does (table in `pc/core/include/fearpc/layout.h`). X opens doors and picks up weapons when aimed at them (hold it), otherwise reloads.
 - Start opens the menu in play, and the Start that opens it doesn't also pick an item.
-- Looking: does it feel like the 360? Try `PadLookRamp 0` (as shipped) and `3` (off), and `PadSoftLock 0` against `1` in a fight.
+- Looking: does it feel like the 360? Try Look acceleration Xbox 360 (as shipped) and Off on the Controller screen, and Aim assist on and off in a fight.
 - Keyboard and mouse still work at the same time.
 - Note anything that differs from the recomp in PC-PROGRESS.md.
 
