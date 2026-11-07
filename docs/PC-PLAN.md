@@ -4,6 +4,17 @@ Status: milestone 1 built, waiting on its play test (2026-11-06): [PC-PROGRESS.m
 
 [Issue #133](https://github.com/Juansolo457/fear360-recomp/issues/133) asks for the Xbox 360's Instant Action mode in the original PC game. This plan covers that plus the rest of what you listed: controller support, Xbox and PlayStation glyphs, the game switcher and the Recompilation Settings, across F.E.A.R., Extraction Point and Perseus Mandate.
 
+## Direction (2026-11-06, after the first play tests)
+
+The PC version is the one to build on: it has more going on than the 360 (its AI is more fluid and harder; the 360's was tuned down). The goal is the definitive F.E.A.R. on PC, a free fan project, by porting the console versions' features to it. In order, as players on Reddit and YouTube ask most:
+
+1. **Controller support** from the 360 version (in progress: `pc-controller` branch, issues #137 to #140).
+2. **Instant Action** from the 360 version.
+3. **The console-only content**: the weapons the 360 and PS3 versions added.
+4. Later: **multiplayer** back in working order, and **leaderboards**, starting with a local, single-player time attack for Instant Action (personal best times, kept by a small local service, perhaps a lightweight Rust program started with the game).
+
+Open: what a player needs to own for which content. The PC game always; the 360 disc for Instant Action and the 360's content; the PS3 disc for the PS3's. How to explain that to players is undecided.
+
 ## What I found first (it changes the plan)
 
 1. **This is not a recompilation.** The PC game already runs natively. The work is a mod of the PC game code: rebuilt game DLLs where we have source, hooks where we don't. I'd call it "F.E.A.R. PC Enhanced" (name open) rather than a recomp, so nobody expects a new executable.
