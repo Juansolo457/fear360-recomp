@@ -13,7 +13,27 @@ The PC version is the one to build on: it has more going on than the 360 (its AI
 3. **The console-only content**: the weapons the 360 and PS3 versions added.
 4. Later: **multiplayer** back in working order, and **leaderboards**, starting with a local, single-player time attack for Instant Action (personal best times, kept by a small local service, perhaps a lightweight Rust program started with the game).
 
-Open: what a player needs to own for which content. The PC game always; the 360 disc for Instant Action and the 360's content; the PS3 disc for the PS3's. How to explain that to players is undecided.
+### What a player needs to own (to state plainly in the README)
+
+We ship our code only; each piece of content turns on when the player's own copy of the version that has it is found (disc image or extracted files, checked against known hashes). How players get their copies is up to them.
+
+| The player owns | They get |
+| --- | --- |
+| The PC game (required) | 360 controller support, settings, fixes; F.E.A.R., Extraction Point, Perseus Mandate |
+| + the F.E.A.R. 360 disc | + 360 Instant Action, its bonus mission, its weapons |
+| + the F.E.A.R. Files 360 disc | + Files' Instant Action maps (its campaigns are the PC's Extraction Point and Perseus Mandate) |
+| + the PS3 disc | + the PS3's exclusive mission and weapons |
+| All of them | Everything |
+
+To check: whether the PS3 version has Instant Action too (then either console disc would supply its maps). Anything converted from a disc is converted on the player's machine. Before release, the review in issue #143.
+
+### EchoPatch
+
+EchoPatch stays: players credit it for much of what the PC version needs, and this project should say so. What it doesn't give is the console's controller as the developers' port had it (no vibration, its own dead zones and stick handling, the PC layout), which is what this project adds. It comes back as an option with its controller support off (#138).
+
+### Publishing
+
+The `pc-controller` branch stays local until the PC version is ready to release (decided 2026-11-06); the issues track the work in the meantime.
 
 ## What I found first (it changes the plan)
 
