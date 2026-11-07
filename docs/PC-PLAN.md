@@ -1,6 +1,6 @@
 # Plan: 360 features on the PC version of F.E.A.R. (issue #133)
 
-Status: milestone 1 built, waiting on its play test (2026-11-06): [PC-PROGRESS.md](PC-PROGRESS.md), findings in [PC-FINDINGS.md](PC-FINDINGS.md).
+Status: milestone 1 built and play-tested three times; refocused on the controller side on 2026-11-07, after F.E.A.R. Exclusive Console Content shipped the console content (see Direction): [PC-PROGRESS.md](PC-PROGRESS.md), findings in [PC-FINDINGS.md](PC-FINDINGS.md).
 
 [Issue #133](https://github.com/Juansolo457/fear360-recomp/issues/133) asks for the Xbox 360's Instant Action mode in the original PC game. This plan covers that plus the rest of what you listed: controller support, Xbox and PlayStation glyphs, the game switcher and the Recompilation Settings, across F.E.A.R., Extraction Point and Perseus Mandate.
 
@@ -8,10 +8,26 @@ Status: milestone 1 built, waiting on its play test (2026-11-06): [PC-PROGRESS.m
 
 The PC version is the one to build on: it has more going on than the 360 (its AI is more fluid and harder; the 360's was tuned down). The goal is the definitive F.E.A.R. on PC, a free fan project, by porting the console versions' features to it. In order, as players on Reddit and YouTube ask most:
 
-1. **Controller support** from the 360 version (in progress: `pc-controller` branch, issues #137 to #140).
-2. **Instant Action** from the 360 version.
-3. **The console-only content**: the weapons the 360 and PS3 versions added.
-4. Later: **multiplayer** back in working order, and **leaderboards**, starting with a local, single-player time attack for Instant Action (personal best times, kept by a small local service, perhaps a lightweight Rust program started with the game).
+1. **Controller support** from the 360 version (in progress: `pc-controller` branch, issues #137 to #140), then **glyphs** (Xbox, PlayStation) and the **recomp's settings**.
+2. **Works alongside F.E.A.R. Exclusive Console Content** (below), which already brings the console content to PC: our controller with their content in the same game.
+3. Later: **multiplayer** back in working order, and **leaderboards**, starting with a local, single-player time attack for Instant Action (personal best times, kept by a small local service, perhaps a lightweight Rust program started with the game).
+
+Instant Action and the console-only content were items 2 and 3 here until the mod below shipped them (2026-11-07). We don't build them a second time; what's left of them for us is fitting around it (Instant Action's best times, the expansions' Instant Action maps from the F.E.A.R. Files disc, which it doesn't cover).
+
+### F.E.A.R. Exclusive Console Content (another project, found 2026-11-07)
+
+[ProwonderGamer/FEAR-Exclusive-Console-Content](https://github.com/ProwonderGamer/FEAR-Exclusive-Console-Content), first released 2026-11-06 (0.1.0). It restores to the PC game the PS3's SFOD-D mission and Watson SAS-12, and the 360's Holiday mission, SM15, Instant Action maps and HUD, with fixes to bugs the consoles shipped with. How it works, from its README:
+
+- A Go installer (Windows) reads the player's PC game, a decrypted PS3 disc folder and an extracted 360 disc folder, builds every converted file (worlds, models, textures, sounds, game databases) on the player's machine and mounts them as `FEAR_ConsoleRestoration` in `Default.archcfg`. No game files in its download: the same ownership model as ours.
+- Its in-game code is a `dinput8_hook.dll` that **EchoPatch** loads (EchoPatch is required). That DLL's source isn't published; it ships with the values taken from the game blanked and the installer fills them in from the player's copies.
+- It doesn't rebuild the game DLLs and has no controller support (no pad, rumble or glyph code).
+- Licence: free, never sold, no re-uploading as is; forks and reused code must credit it and keep its licence. So we don't copy its code; we link to it.
+
+What it means here:
+
+- Our part is the controller and the source-built game DLLs; its part is the console content. #133 (Instant Action) can point to its release.
+- Running both is the thing to make work: it needs EchoPatch loaded and its archive mounted, we need our DLLs mounted through `-archcfg` and EchoPatch's own controller support off (#138). Not tried yet: whether its hook DLL expects the retail `GameClient.dll` (its safety checks compare bytes in the game's program files before patching), in which case ours would make it refuse or misbehave.
+- The ownership table below still holds for what we turn on; the console content rows are now its rows.
 
 ### What a player needs to own (to state plainly in the README)
 
@@ -20,9 +36,9 @@ We ship our code only; each piece of content turns on when the player's own copy
 | The player owns | They get |
 | --- | --- |
 | The PC game (required) | 360 controller support, settings, fixes; F.E.A.R., Extraction Point, Perseus Mandate |
-| + the F.E.A.R. 360 disc | + 360 Instant Action, its bonus mission, its weapons |
-| + the F.E.A.R. Files 360 disc | + Files' Instant Action maps (its campaigns are the PC's Extraction Point and Perseus Mandate) |
-| + the PS3 disc | + the PS3's exclusive mission and weapons |
+| + the F.E.A.R. 360 disc | + 360 Instant Action, its bonus mission, its weapons (through F.E.A.R. Exclusive Console Content) |
+| + the F.E.A.R. Files 360 disc | + Files' Instant Action maps (its campaigns are the PC's Extraction Point and Perseus Mandate; not covered by anyone yet) |
+| + the PS3 disc | + the PS3's exclusive mission and weapons (through F.E.A.R. Exclusive Console Content) |
 | All of them | Everything |
 
 To check: whether the PS3 version has Instant Action too (then either console disc would supply its maps). Anything converted from a disc is converted on the player's machine. Before release, the review in issue #143.
@@ -42,7 +58,7 @@ The `pc-controller` branch stays local until the PC version is ready to release 
 3. **The expansions share the base game's folder on both stores.** Steam lists three apps (21090 F.E.A.R., 21110 Extraction Point, 21120 Perseus Mandate), but all three install into `FEAR Ultimate Shooter Edition`, and the expansion apps are 0-byte entries: their files (`FEARXP\`, `FEARXP2\`) come with the base app. GOG's Platinum Collection is one product with the same `FEARXP\` and `FEARXP2\` subfolders. Every Steam and GOG owner therefore has all three, so "must own all three" costs users nothing, and one path locates all three games. "F.E.A.R. Files" exists only as the 360 disc.
 4. **Instant Action content is 360-only.** The maps (`InstantAction1`-`4`, five `IA_*` maps for Extraction Point, three for Perseus Mandate) are 360-built world files, and the rules live in `PitFight*` classes that exist only in the 360 executables. Neither has been analysed yet. `docs/PROGRESS.md` already flagged world conversion as the unknown.
 5. **Toolchain.** Every PC binary is 32-bit x86 built with MSVC 7.1 (`msvcr71`/`msvcp71`). `FEAR.exe` has the Steam wrapper; `FEARXP.exe` and `FEARXP2.exe` are SecuROM-wrapped. The game DLLs themselves are unprotected and stored uncompressed in the `FEARE*.Arch00` archives.
-6. **EchoPatch already gives PC users** controller support, HUD scaling and high-frame-rate fixes through a proxy DLL. What nobody offers is Instant Action, proper glyphs, the switcher and the 360 tuning (aim assist, look acceleration, bloom, enemy AI).
+6. **EchoPatch already gives PC users** controller support, HUD scaling and high-frame-rate fixes through a proxy DLL. What nobody offered at the time was Instant Action (F.E.A.R. Exclusive Console Content has since, 2026-11-06), proper glyphs, the switcher and the 360 tuning (aim assist, look acceleration, bloom, enemy AI).
 
 ## What a user has to own
 
