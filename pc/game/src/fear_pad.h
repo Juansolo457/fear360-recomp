@@ -9,7 +9,7 @@
 // Console variables (also settable as +Name value on the command line):
 //   PadEnabled          1   0 ignores pads
 //   PadLayout           0   0 the 360's Normal layout, 1 its Lean layout (pc/core layout.h)
-//   PadLookRamp         0   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
+//   PadLookRamp         2   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
 //   PadLookSensitivity  1   scales the 360's turn rates
 //   PadSoftLock         1   slow turning with an enemy under the crosshair, as the 360 does
 //   PadRumble           1   vibration strength, 0 to 1 (0 off)

@@ -19,6 +19,13 @@ Milestone 1 of [PC-PLAN.md](PC-PLAN.md): the 360's controller on Windows PC F.E.
 
 Options > Controls > Configure joystick/gamepad is the Controller screen when the pad code is built in (`pc/game/src/fear_pad_screen.cpp`, patch 0005 compiles the PC's DirectInput joystick page out): Controller on/off, Button layout (Normal, Lean), Look sensitivity (25 to 200%), Look acceleration (Off, Xbox 360, Immediate, Full speed, named as in the recomp's settings), Aim assist, Vibration (0 to 100%). Leaving the screen applies the settings and saves them to `fearpc_pad.txt` in the user directory, read at the next start. Checked in game: values shown, saved on leaving. It is the first piece of the recomp's settings menu; the other options come later.
 
+### Play test 3 (2026-11-06)
+
+- Interval 04 played through well; vibration and reload good.
+- **Holding X on a weapon didn't pick it up.** Weapons and items on the floor aren't crosshair targets: the game finds them with `CPlayerMgr::GetPickupObjectDetector()`, which Use acts on first. X now uses when that detector has an object too.
+- **Wind-up on the stick** (the 360's, still there). Two causes: the stick went through the PC's mouse smoothing (each frame averaged with the last, by the profile's input rate), which delays starting and stopping; and the 360's edge ramp (0.3 s wait, then 0.4 s to full speed). The stick's turn is now added after the smoothing (patch 0006; invert and the slow-mo, melee and aiming dampers still apply), and Look acceleration starts at Full speed: past 95% of the stick's travel, 360 degrees a second at once. Measured again in Docks at 110% sensitivity: 16.5, 33, 49.5, 74.25 deg/s at 0.25 to 0.85, 396 at 0.95 and 1.0. Not yet re-tested by feel. Moving (left stick) is the game's own movement acceleration, not changed.
+- The quit-to-menu crash happened again at the end of the session (`FEAR.exe+0x4abd6`, three times in this session by the event log).
+
 ### Play test 2 (2026-11-06)
 
 - Played well (Interval 04), with the controller.
@@ -49,7 +56,7 @@ Console variables (in the game's console, or `+Name value` on the command line t
 | --- | --- | --- |
 | `PadEnabled` | 1 | 0 ignores pads |
 | `PadLayout` | 0 | 0 the 360's Normal layout, 1 its Lean layout |
-| `PadLookRamp` | 0 | 0 the 360's edge ramp as shipped, 1 ramp without the wait, 2 full boost at the edge, 3 off (the recomp's default) |
+| `PadLookRamp` | 2 | 0 the 360's edge ramp as shipped, 1 ramp without the wait, 2 full boost at the edge, 3 off (the recomp's default) |
 | `PadLookSensitivity` | 1 | multiplies the 360's turn rates |
 | `PadSoftLock` | 1 | slow turning with an enemy under the crosshair |
 | `PadRumble` | 1 | vibration strength, 0 to 1 (0 off) |

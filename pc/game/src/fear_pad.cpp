@@ -240,11 +240,16 @@ void UpdateRumble(float fFrameTime)
 	SendRumble(fLow, fHigh);
 }
 
-// Something in front of you to use: a door, a switch, a weapon on the floor. The target
-// manager says "can activate" even with nothing there, so the activation target decides.
+// Something in front of you to use: a door or a switch (the target manager's activation
+// target; it says "can activate" even with nothing there, so the target decides), or a weapon
+// or item on the floor (the pickup detector, which Use acts on first).
 bool CanUseTarget()
 {
-	CTargetMgr* pTargetMgr = g_pPlayerMgr ? g_pPlayerMgr->GetTargetMgr() : NULL;
+	if (!g_pPlayerMgr)
+		return false;
+	if (g_pPlayerMgr->GetPickupObjectDetector().GetObject())
+		return true;
+	CTargetMgr* pTargetMgr = g_pPlayerMgr->GetTargetMgr();
 	return pTargetMgr && pTargetMgr->CanActivateTarget() &&
 		pTargetMgr->GetActivationData().m_hTarget != NULL &&
 		!pTargetMgr->IsActivationType(MID_ACTIVATE_SURFACESND);
@@ -396,8 +401,9 @@ void Start()
 		return;
 	g_vtPadEnabled.Init(g_pLTClient, "PadEnabled", NULL, 1.0f);
 	g_vtPadLayout.Init(g_pLTClient, "PadLayout", NULL, 0.0f);
-	// Look acceleration starts as the 360 shipped it (play test 2: turning felt slow without it).
-	g_vtPadLookRamp.Init(g_pLTClient, "PadLookRamp", NULL, 0.0f);
+	// Look acceleration starts at Full speed: the edge's fast turning at once. Off was too slow
+	// (play test 2) and the 360's wait-then-ramp felt like wind-up (play test 3).
+	g_vtPadLookRamp.Init(g_pLTClient, "PadLookRamp", NULL, 2.0f);
 	g_vtPadLookSensitivity.Init(g_pLTClient, "PadLookSensitivity", NULL, 1.0f);
 	g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 1.0f);
 	g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);

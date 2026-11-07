@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: fear-pc <fear-pc@localhost>
 Date: Fri, 6 Nov 2026 15:48:30 -0800
-Subject: [PATCH 4/5] FEAR_PC_PAD: pass the effect system's camera shake and
+Subject: [PATCH 4/6] FEAR_PC_PAD: pass the effect system's camera shake and
  motors to the pad
 
 ---

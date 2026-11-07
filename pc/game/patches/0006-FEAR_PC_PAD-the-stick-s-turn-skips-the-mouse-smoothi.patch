@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Fri, 6 Nov 2026 17:51:59 -0800
+Subject: [PATCH 6/6] FEAR_PC_PAD: the stick's turn skips the mouse smoothing
+
+---
+ Game/ClientShellDLL/PlayerMgr.cpp | 36 +++++++++++++++++++++----------
+ 1 file changed, 25 insertions(+), 11 deletions(-)
+
+diff --git a/Game/ClientShellDLL/PlayerMgr.cpp b/Game/ClientShellDLL/PlayerMgr.cpp
+index 7986c4f..0113fd8 100644
+--- a/Game/ClientShellDLL/PlayerMgr.cpp
++++ b/Game/ClientShellDLL/PlayerMgr.cpp
+@@ -5041,14 +5041,17 @@ void CPlayerMgr::CalculateAxisOffsets()
+ 	// END: GAMEPAD CONTROLLER CODE...
+ 
+ #if defined(FEAR_PC_PAD)
+-	// The game controller's right stick, turning as the 360 version does (fear_pad.h).
+-	{
+-		float fPadYaw = 0.0f, fPadPitch = 0.0f;
+-		if (FearPadLook(RealTimeTimer::Instance( ).GetTimerElapsedS( ), &fPadYaw, &fPadPitch))
+-		{
+-			fYawDelta += fPadYaw / fVal;
+-			fPitchDelta += fPadPitch / fVal;
+-		}
++	// The game controller's right stick, turning as the 360 version does (fear_pad.h). It is
++	// added after the mouse smoothing below, which would delay every stick movement.
++	float fPadYaw = 0.0f, fPadPitch = 0.0f;
++	if (FearPadLook(RealTimeTimer::Instance( ).GetTimerElapsedS( ), &fPadYaw, &fPadPitch))
++	{
++		fPadYaw /= fVal;
++		fPadPitch /= fVal;
++		if( pSettings->MouseInvertY() )
++			fPadPitch *= -1;
++		fPadYaw *= fSloMoDampen * fMeleeDampen * fDeathDampen * fAimDampen;
++		fPadPitch *= fSloMoDampen * fMeleeDampen * fDeathDampen * fAimDampen;
+ 	}
+ #endif
+ 
+@@ -5086,7 +5089,14 @@ void CPlayerMgr::CalculateAxisOffsets()
+ 
+ 	// Apply mouse smoothing
+ 	LTVector2 vSmoothDelta( fPitchDelta, fYawDelta );
+-	
++#if defined(FEAR_PC_PAD)
++	// The smoothing averages with the last frame's mouse turn only, not the stick's.
++	static LTVector2 s_vLastMouseDelta( 0.0f, 0.0f );
++	LTVector2& vLastDelta = s_vLastMouseDelta;
++#else
++	LTVector2& vLastDelta = m_v2AxisOffsets;
++#endif
++
+ 	CUserProfile *pProfile = g_pProfileMgr->GetCurrentProfile();
+ 	if (pProfile)
+ 	{
+@@ -5104,10 +5114,14 @@ void CPlayerMgr::CalculateAxisOffsets()
+ 		float fTimeSmoothing = 1.0f - LTCLAMP((fTime - k_fMinTime) / (k_fMaxTime - k_fMinTime), 0.0f, 1.0f);
+ 
+ 		// Take the average between the current delta and the previous axis value
+-		vSmoothDelta = vSmoothDelta.Lerp((vSmoothDelta + m_v2AxisOffsets) * 0.5f, fSmoothing * fTimeSmoothing);
++		vSmoothDelta = vSmoothDelta.Lerp((vSmoothDelta + vLastDelta) * 0.5f, fSmoothing * fTimeSmoothing);
+ 	}
+-	
++
+ 	m_v2AxisOffsets = vSmoothDelta;
++#if defined(FEAR_PC_PAD)
++	s_vLastMouseDelta = vSmoothDelta;
++	m_v2AxisOffsets += LTVector2( fPadPitch, fPadYaw );
++#endif
+ }
+ 
+ // ----------------------------------------------------------------------- //
