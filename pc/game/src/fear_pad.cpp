@@ -32,6 +32,7 @@ VarTrack g_vtPadLookRamp;
 VarTrack g_vtPadLookSensitivity;
 VarTrack g_vtPadSoftLock;
 VarTrack g_vtPadMeasure;
+VarTrack g_vtPadLookLog;
 VarTrack g_vtPadRumble;
 
 // Vibration, per motor (0 the large low-frequency one, 1 the small high-frequency one).
@@ -76,6 +77,69 @@ fearpc::PadState g_LastState;  // the previous frame
 // let go, so they don't jump or fire on arrival.
 bool g_bHeld[(int)PadInput::kCount] = {};
 fearpc::LookModel g_Look;
+
+// PadLookLog 1: once a second, a line in pad_look_log.txt in the user directory about the look
+// updates of that second: how many and their frame times, the stick, the turn, and how much of
+// it the soft lock was on and how often it switched. For "jerky" and "dropped input" reports.
+struct LookLog
+{
+	FILE* pFile = NULL;
+	double fSince = -1.0;
+	int nCalls = 0, nZeroDt = 0, nSoftLockOn = 0, nSoftLockSwitches = 0;
+	bool bLastSoftLock = false;
+	float fMinDt = 1e9f, fMaxDt = 0.0f, fMaxStick = 0.0f, fYaw = 0.0f, fMaxYawStep = 0.0f;
+};
+LookLog g_LookLog;
+
+void LogLook(float fDt, float fStickX, float fStickY, bool bSoftLock, float fYawDegrees)
+{
+	LookLog& l = g_LookLog;
+	if (g_vtPadLookLog.GetFloat() < 0.5f)
+	{
+		if (l.pFile)
+		{
+			fclose(l.pFile);
+			l = LookLog();
+		}
+		return;
+	}
+	const double fNow = RealTimeTimer::Instance().GetTimerAccumulatedS();
+	if (!l.pFile)
+	{
+		char szPath[MAX_PATH * 2];
+		LTFileOperations::GetUserDirectory(szPath, LTARRAYSIZE(szPath));
+		LTStrCat(szPath, "pad_look_log.txt", LTARRAYSIZE(szPath));
+		l = LookLog();
+		l.pFile = fopen(szPath, "w");
+		if (!l.pFile)
+			return;
+		fprintf(l.pFile, "# time calls zero_dt min_dt_ms max_dt_ms max_stick yaw_deg max_yaw_step_deg softlock_on_pct softlock_switches (PadLookRamp %g, sensitivity %g, PadSoftLock %g)\n",
+			g_vtPadLookRamp.GetFloat(), g_vtPadLookSensitivity.GetFloat(), g_vtPadSoftLock.GetFloat());
+		l.fSince = fNow;
+	}
+	++l.nCalls;
+	if (fDt <= 0.0f) ++l.nZeroDt;
+	l.fMinDt = LTMIN(l.fMinDt, fDt);
+	l.fMaxDt = LTMAX(l.fMaxDt, fDt);
+	l.fMaxStick = LTMAX(l.fMaxStick, sqrtf(fStickX * fStickX + fStickY * fStickY));
+	l.fYaw += fYawDegrees;
+	l.fMaxYawStep = LTMAX(l.fMaxYawStep, fabsf(fYawDegrees));
+	if (bSoftLock) ++l.nSoftLockOn;
+	if (l.nCalls > 1 && bSoftLock != l.bLastSoftLock) ++l.nSoftLockSwitches;
+	l.bLastSoftLock = bSoftLock;
+	if (fNow - l.fSince < 1.0)
+		return;
+	fprintf(l.pFile, "%.1f %d %d %.2f %.2f %.2f %.1f %.2f %.0f %d\n", fNow, l.nCalls, l.nZeroDt,
+		l.fMinDt * 1000.0f, l.fMaxDt * 1000.0f, l.fMaxStick, l.fYaw, l.fMaxYawStep,
+		100.0f * l.nSoftLockOn / l.nCalls, l.nSoftLockSwitches);
+	fflush(l.pFile);
+	FILE* pFile = l.pFile;
+	const bool bLast = l.bLastSoftLock;
+	l = LookLog();
+	l.pFile = pFile;
+	l.fSince = fNow;
+	l.bLastSoftLock = bLast;
+}
 uint32 g_nUseOrReload = COMMAND_ID_RELOAD;  // what X chose when it went down
 
 // Menu keys: each direction or button that is down, and when it repeats next.
@@ -324,7 +388,8 @@ void UpdateMeasure()
 	const float fDeflection = kMeasureDeflections[m.nStep];
 	const double fRate = (m.fYaw - m.fWindowStartYaw) / kMeasureWindow;
 	const fearpc::LookTuning tuning = Tuning();
-	const float fExpected = fearpc::CurveRate(tuning, fDeflection) * tuning.sensitivity;
+	const float fExpected = fearpc::CurveRate(tuning, fearpc::AxisDeadZone(tuning, fDeflection)) *
+		tuning.aim_sensitivity * tuning.sensitivity * (0.01744f / (MATH_PI / 180.0f));
 	if (m.pFile)
 		fprintf(m.pFile, "%.2f %.2f %.2f\n", fDeflection, fRate, fExpected);
 	g_pLTClient->CPrint("PadMeasure: %.2f -> %.1f deg/s (360: %.1f)", fDeflection, fRate, fExpected);
@@ -401,12 +466,16 @@ void Start()
 		return;
 	g_vtPadEnabled.Init(g_pLTClient, "PadEnabled", NULL, 1.0f);
 	g_vtPadLayout.Init(g_pLTClient, "PadLayout", NULL, 0.0f);
-	// Look acceleration starts at Full speed: the edge's fast turning at once. Off was too slow
-	// (play test 2) and the 360's wait-then-ramp felt like wind-up (play test 3).
-	g_vtPadLookRamp.Init(g_pLTClient, "PadLookRamp", NULL, 2.0f);
+	// Look acceleration starts Off, as the recomp ships it. Off felt too slow in play test 2 only
+	// because the 360's aim sensitivity (x2.04 at Medium) was missing; Full speed's jump to 360
+	// degrees a second at the stick's edge felt jerky (play test 4).
+	g_vtPadLookRamp.Init(g_pLTClient, "PadLookRamp", NULL, 3.0f);
 	g_vtPadLookSensitivity.Init(g_pLTClient, "PadLookSensitivity", NULL, 1.0f);
-	g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 1.0f);
+	// The slowdown on enemies is not what the 360 does (its soft lock pulls toward the target), and
+	// it may switch on and off from frame to frame: off by default.
+	g_vtPadSoftLock.Init(g_pLTClient, "PadSoftLock", NULL, 0.0f);
 	g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);
+	g_vtPadLookLog.Init(g_pLTClient, "PadLookLog", NULL, 0.0f);
 	g_vtPadRumble.Init(g_pLTClient, "PadRumble", NULL, 1.0f);
 	LoadSettings();
 	if (!fearpc::PadInit())
@@ -446,7 +515,10 @@ void FearPadFrame()
 	Start();
 
 	g_LastState = g_State;
-	const fearpc::PadState& polled = fearpc::PadUpdate();
+	// The right stick comes raw: the look applies the 360's own per-axis dead zone.
+	fearpc::PadDeadZones deadZones;
+	deadZones.right_stick = 0.0f;
+	const fearpc::PadState& polled = fearpc::PadUpdate(deadZones);
 	g_State = (g_vtPadEnabled.GetFloat() >= 0.5f && GameInFront()) ? polled : fearpc::PadState();
 
 	const bool bWasPlaying = g_bPlaying;
@@ -552,6 +624,7 @@ bool FearPadLook(float fFrameTime, float* pYaw, float* pPitch)
 
 	float fYawDegrees = 0.0f, fPitchDegrees = 0.0f;
 	g_Look.Update(Tuning(), fStickX, fStickY, fFrameTime, bSoftLock, &fYawDegrees, &fPitchDegrees);
+	LogLook(fFrameTime, fStickX, fStickY, bSoftLock, fYawDegrees);
 	*pYaw = DEG2RAD(fYawDegrees);
 	*pPitch = DEG2RAD(fPitchDegrees);
 	return true;

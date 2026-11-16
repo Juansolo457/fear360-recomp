@@ -61,4 +61,22 @@ All of it is in the 360's `Game/database/Loki.gamedb` (read with `tools/gamedb.p
 | 0.95 | 90.0 | 90.0 |
 | 1.00 | 90.0 | 90.0 |
 
-This checks our path (zoom, input smoothing, the engine's rotation) against the 360's data. It does not measure the 360 game itself, which would need the same scripted stick in the recomp.
+This checks our path (zoom, input smoothing, the engine's rotation) against the 360's data. It does not measure the 360 game itself, which would need the same scripted stick in the recomp. These numbers are from before the stick followed the 360's code (next section), which multiplies every rate by 2.04 at Medium and moves the dead zone to each axis.
+
+## The 360's right stick, from its code
+
+From `default.xex` SHA-256 `e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fca879aaea2792`: `sub_8237DC88` is `CPlayerMgr::CalculateAxisOffsets`. `CPlayerMgr*` is a big-endian u32 at `0x833708DC`; the frame's yaw delta (radians, big-endian float) is at `+504`, pitch at `+500`, final when the function returns.
+
+- **Dead zone, per axis.** The pad binding maps n = short / 32768 to 1.35 n and takes 0.35 off, so v = sign(n) (1.35 |n| - 0.35), zero below |n| = 0.2593. Not radial.
+- **Curve, per axis.** `AimInputCurve` ((0, 0), (0.75, 45), (0.95, 90), (1, 90) deg/s) is applied to each axis on its own, keeping its sign.
+- **Sensitivity.** `GPadAimSensitivity` = the profile's sensitivity x 0.0255: Low 60 is 1.53, Medium 80 (the default) 2.04, High 100 2.55. So full stick turns 90 x 2.04 = 183.45 deg/s of yaw at Medium, not 90.
+- **Degrees to radians** with 0.01744, not pi / 180 (0.08% slower); kept in our code.
+- **Pitch** times `GPadAimAspectRatio` 0.5: 91.7 deg/s at full stick.
+- **Edge boost, yaw only.** When the stick's magnitude is over 0.95 and |y| under 0.5: after 0.3 s, blended over 0.4 s toward 360 x dt (not times the sensitivity).
+- **Zoom** divides the input before the curve.
+- **No smoothing and no frame-time clamp**; dt is the real-time timer's elapsed time.
+- **Dampers:** melee 0.6, death 0. `MouseAimDampen` 0.8 applies to the mouse only.
+- **A 0.5 s input blackout** after an event not yet identified (`0x833721C8`).
+- **Soft lock is not a slowdown.** `TurningSoftLock*Factor` only switch on a turning target manager (`CPlayerMgr+0x5B4`). Its effect is an added yaw toward the target, from the weapon's `TargetAssistance` inner and outer angles, strength and rate.
+
+The PC build's look (`pc/core/src/look.cpp`) follows this since 2026-11-15, except for the target-assist pull, zoom before the curve and the blackout. `fear_stick_measure=N` in the recomp (`port-nx/src/fear_mkb.cpp`) drives the same scripted stick through the 360 code and logs the yaw per deflection; it has not been run in a level yet.

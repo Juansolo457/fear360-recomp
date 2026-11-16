@@ -2,7 +2,9 @@
 
 Milestone 1 of [PC-PLAN.md](PC-PLAN.md): the 360's controller on Windows PC F.E.A.R. (base game). Findings, with the binary hashes they apply to: [PC-FINDINGS.md](PC-FINDINGS.md). Nothing here has been pushed.
 
-## Where it stands (2026-11-06)
+## Where it stands (2026-11-15)
+
+Handoff for the next session: [PC-HANDOFF.md](PC-HANDOFF.md).
 
 | Step | State |
 | --- | --- |
@@ -12,8 +14,25 @@ Milestone 1 of [PC-PLAN.md](PC-PLAN.md): the 360's controller on Windows PC F.E.
 | 4. Loading | Done. `pc/tools/launch.ps1`: `-archcfg` plus a folder of our DLLs, `-userdirectory` for saves. The game folder is not written. Checked: the menu, Interval 01's opening and Interval 02 load and play with our DLLs; autosaves are written. Not checked: an interval played to the end. |
 | 5. Input path | Done, in PC-FINDINGS.md. |
 | 6. Pad input | Play-tested with an Xbox Series X controller (Bluetooth): good, except X never reloaded (fixed and confirmed in a second session). SDL3 (static), the 360's Normal and Lean layouts, menus by pad, X as use-or-reload, Start for the menu, rumble (second version, confirmed working in play). |
-| 7. 360 look | Done and measured: turn rates in the running game match the 360's curve at every deflection tested. The edge ramp, soft lock and sensitivity are console variables. Not measured: the recomp with the same scripted stick. |
-| 8. Play test | First pass done (2026-11-06), see below. |
+| 7. 360 look | Done (2026-11-15): follows the 360's own stick code (PC-FINDINGS.md), play-tested good on Windows and the Steam Deck. #139 closed. |
+| 8. Play test | Five play tests, see below. |
+
+### Play test 5 (2026-11-15): the stick fixed
+
+- After the rewrite below, played with a controller on a GTX 1650 laptop (Windows) and on the Steam Deck (Proton Experimental, the Steam copy). Both felt great, smoother than the 360. #139 closed.
+- The laptop also ran the recomp 1.7 for comparison: 30 fps at 3x resolution, which felt poor (#149).
+- No logs from either PC run: the PC game writes none, and `PadLookLog` was off.
+
+### Play test 4 (2026-11-11): still floaty
+
+Felt floaty and delayed, sometimes missed input, the view jerked, and the yaw ran ahead of the thumb. Reading the 360's code (PC-FINDINGS.md, "The 360's right stick, from its code") found four differences, all fixed:
+
+- The PC lacked the 360's x2.04 sensitivity (Medium), so Off felt slow and Full speed made up for it by jumping to 360 deg/s at the edge: the yaw running ahead.
+- `PadSoftLock` slowed turning by 70% whenever `GetEnemyTarget()` flickered on; the 360 doesn't slow down at all. Now off by default.
+- The dead zone and curve were radial; the 360's are per axis.
+- Look acceleration now defaults to Off, as in the recomp.
+
+`pc/core/tests/core_tests.cpp` checks the new model (183.45 deg/s at full stick at Medium, the per-axis dead zone, the edge ramp).
 
 ### Controller screen
 
@@ -56,9 +75,10 @@ Console variables (in the game's console, or `+Name value` on the command line t
 | --- | --- | --- |
 | `PadEnabled` | 1 | 0 ignores pads |
 | `PadLayout` | 0 | 0 the 360's Normal layout, 1 its Lean layout |
-| `PadLookRamp` | 2 | 0 the 360's edge ramp as shipped, 1 ramp without the wait, 2 full boost at the edge, 3 off (the recomp's default) |
-| `PadLookSensitivity` | 1 | multiplies the 360's turn rates |
-| `PadSoftLock` | 1 | slow turning with an enemy under the crosshair |
+| `PadLookRamp` | 3 | 0 the 360's edge ramp as shipped, 1 ramp without the wait, 2 full boost at the edge, 3 off (the recomp's default) |
+| `PadLookSensitivity` | 1 | multiplies the 360's turn rates; 1 is the 360's Medium (x2.04) |
+| `PadSoftLock` | 0 | the older slowdown with an enemy under the crosshair; not the 360's behaviour |
+| `PadLookLog` | 0 | 1 writes `<user dir>\pad_look_log.txt` once a second: frame times, stick, yaw, soft-lock switching |
 | `PadRumble` | 1 | vibration strength, 0 to 1 (0 off) |
 | `PadMeasure` | 0 | 1 runs the turn-rate measurement into `<user dir>\pad_measure.txt`; N > 1 waits N seconds into play first |
 
@@ -82,7 +102,11 @@ copies the three DLLs to `~/fear-pc/overlay` on the Deck (over SSH, host `deck-t
 %command% -archcfg "Z:\home\deck\fear-pc\fearpc.archcfg" -userdirectory "Z:\home\deck\fear-pc\user"
 ```
 
-Clearing the launch option plays the game as shipped; the game folder isn't changed. The Deck's install (2026-11-06) is byte-identical to the Windows Steam copy (`FEAR.exe` with the Steam wrapper, build 15017) and has no EchoPatch. First deployed 2026-11-06; not yet run there. Untested so far: the Steam `FEAR.exe` with our DLLs (Windows tests used the GOG one), and SDL3 reading the Deck's controls through Proton (Steam Input presents them as an Xbox pad).
+Clearing the launch option plays the game as shipped; the game folder isn't changed. The Deck's install (2026-11-06) is byte-identical to the Windows Steam copy (`FEAR.exe` with the Steam wrapper, build 15017) and has no EchoPatch. Played there 2026-11-15 under Proton Experimental: the Steam `FEAR.exe` loads our DLLs, SDL3 reads the Deck's controls, and the stick felt great. Tailscale SSH to the Deck asks for a browser approval the first time in a while; the deploy waits on it.
+
+## Low-end laptop
+
+`jj-low-laptop` on Tailscale (GTX 1650 Max-Q, Windows 11), SSH as `onecu`. OpenSSH Server was reinstalled there 2026-11-15. `C:\recomp\fear-pc` holds a copy of the dev game folder, the three DLLs in `overlay\`, the 32-bit VC++ runtime in `runtime\` and `Play.bat` (writes the archive list, sets `-userdirectory user`). To update it, copy `build\pc\game\{GameClient.dll,GameServer.dll,ClientFx.fxd}` to `C:/recomp/fear-pc/overlay/` with scp. `C:\recomp\fear-1.7-20261115\run-fear.bat` is the recomp 1.7 (shared data in `C:\recomp\fear-assets`, saves in `fear-user`); running `fear.exe` directly fails with "--game_data_root was not provided".
 
 ## Play-test checklist (step 8)
 
@@ -99,7 +123,7 @@ Turn the controller on, check `fearpc_pad_probe.exe` sees it, then `launch.ps1`.
 
 - Button prompts still show the PC's key names (milestone: glyphs).
 - Rumble is ours, not the 360's: the 360's comes from rumble effects in its effect files, which the PC game doesn't have. The strengths (shots, damage, shake) are first guesses to tune by feel.
-- The 360's `AimAssist` (40 degrees, 25 to 50%) and the strafing soft-lock factors are not reproduced; soft lock uses `CTargetMgr::GetEnemyTarget()`, not the 360's enlarged target box (`TurningSoftLockDimsScale` 1.25).
-- `DefaultSensitivity` (60/80/100) is not mapped yet; `PadLookSensitivity 1` is the curve as stored.
+- The 360's aim assist (an added yaw toward the target, from the weapon's `TargetAssistance`) is not ported, nor zoom before the curve or the 0.5 s input blackout. See PC-FINDINGS.md.
+- #137 (hold X to pick up a weapon) has a fix in but hasn't been confirmed in play.
 - Multiplayer through GameSpy is compiled out (it has been offline since 2014).
 - The patches in `pc/game/patches` carry a few lines of the SDK as context. Whether that may be published is the licence question (plan, spike 6); until it is answered, nothing in `pc/` is pushed.

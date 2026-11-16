@@ -58,6 +58,9 @@ REXCVAR_DEFINE_DOUBLE(fear_mouse_smoothing, 0.0, "F.E.A.R.",
                       "raw movement)");
 REXCVAR_DEFINE_BOOL(fear_mkb_log, false, "F.E.A.R.",
                     "Testing: log each keyboard command as it goes on and the mouse look each second");
+REXCVAR_DEFINE_DOUBLE(fear_stick_measure, 0.0, "F.E.A.R.",
+                      "Testing: N > 0 waits N seconds into play, then holds the right stick at fixed "
+                      "deflections and logs the turn rate the game gives each (with fear_mkb)");
 
 // The PC's default keys (the 360's own profile defaults). Key names, comma separated: A-Z, 0-9,
 // F1-F24, Num0-Num9, Space, Enter, Escape, Backspace, Tab, Shift, Ctrl, Alt, Up, Down, Left,
@@ -401,6 +404,10 @@ using Clock = std::chrono::steady_clock;
 class Driver;
 Driver* g_driver = nullptr;
 
+// fear_stick_measure: the right stick the keyboard-and-mouse device reports while measuring
+// (0: none). Set by the turn update's hook.
+std::atomic<int16_t> g_measure_stick{0};
+
 // The game's side, set by the hooks.
 std::atomic<bool> g_gameplay{false};               // the binding manager is enabled
 std::atomic<int64_t> g_update_ticks{0};            // its last update, Clock ticks
@@ -503,8 +510,12 @@ class Driver final : public rex::input::InputDriver,
       std::memset(out, 0, sizeof(*out));
       if (buttons != last_buttons_) ++packet_;
       last_buttons_ = buttons;
+      const int16_t stick = g_measure_stick.load(std::memory_order_relaxed);
+      if (stick != last_stick_) ++packet_;
+      last_stick_ = stick;
       out->packet_number = packet_;
       out->gamepad.buttons = buttons;
+      out->gamepad.thumb_rx = stick;
     }
     return X_ERROR_SUCCESS;
   }
@@ -859,6 +870,7 @@ class Driver final : public rex::input::InputDriver,
   bool notch_on_[2] = {};
   bool notch_off_frame_[2] = {};
   uint16_t last_buttons_ = 0;
+  int16_t last_stick_ = 0;
   std::array<bool, 256> logged_on_{};
   uint32_t packet_ = 0;
   bool rebinding_ = false;
@@ -1142,6 +1154,65 @@ void FearMkbCommands(PPCRegister& r30) {
 //    its object for the ones whose command (the word at +8 of a record) is r4, and returns a float
 //    in f1.
 
+// fear_stick_measure: holds the right stick at each deflection in turn, 0.5 s to settle, then sums
+// the yaw the turn update leaves in CPlayerMgr's m_v2AxisOffsets (radians this frame, yaw at +504;
+// CPlayerMgr* at 0x833708DC) for 2 s and logs degrees per second. The PC build's PadMeasure does
+// the same on PC F.E.A.R., so the two can be compared number for number.
+constexpr uint32_t kPlayerMgrPointer = 0x833708DC;
+constexpr uint32_t kAxisOffsetYaw = 504;
+constexpr float kMeasureDeflections[] = {0.25f, 0.3f, 0.5f, 0.75f, 0.85f, 0.95f, 1.0f};
+struct StickMeasure {
+  Clock::time_point play_since{};
+  Clock::time_point step_since{};
+  int step = -1;  // -1: waiting for play; past the end: done
+  double yaw = 0.0;
+  int frames = 0;
+};
+StickMeasure g_measure;
+
+void MeasureStick(const uint8_t* base) {
+  const double wait = REXCVAR_GET(fear_stick_measure);
+  StickMeasure& m = g_measure;
+  if (wait <= 0.0 || m.step >= int(std::size(kMeasureDeflections))) return;
+  const Clock::time_point now = Clock::now();
+  const auto seconds = [&](Clock::time_point since) {
+    return std::chrono::duration<double>(now - since).count();
+  };
+  if (m.step < 0) {
+    if (m.play_since == Clock::time_point{}) m.play_since = now;
+    if (seconds(m.play_since) < wait) return;
+    m.step = 0;
+    m.step_since = now;
+    m.yaw = 0.0;
+    m.frames = 0;
+    g_measure_stick = int16_t(std::lround(kMeasureDeflections[0] * 32767.0f));
+    REXLOG_INFO("F.E.A.R. stick measure: started");
+    return;
+  }
+  const double elapsed = seconds(m.step_since);
+  if (elapsed >= 0.5) {
+    const uint32_t mgr = LoadWord(base, kPlayerMgrPointer);
+    if (mgr) {
+      m.yaw += std::bit_cast<float>(LoadWord(base, mgr + kAxisOffsetYaw));
+      ++m.frames;
+    }
+  }
+  if (elapsed < 2.5) return;
+  const double rate = m.yaw * 180.0 / std::numbers::pi / (elapsed - 0.5);
+  REXLOG_INFO("F.E.A.R. stick measure: deflection {:.2f} -> {:.2f} deg/s yaw ({} turn updates)",
+              kMeasureDeflections[m.step], rate, m.frames);
+  ++m.step;
+  m.step_since = now;
+  m.yaw = 0.0;
+  m.frames = 0;
+  if (m.step >= int(std::size(kMeasureDeflections))) {
+    g_measure_stick = 0;
+    REXLOG_INFO("F.E.A.R. stick measure: done");
+  } else {
+    g_measure_stick = int16_t(std::lround(kMeasureDeflections[m.step] * 32767.0f));
+  }
+}
+
 // CPlayerMgr's turn update: this frame's mouse movement, for its two reads below.
 REX_EXTERN(__imp__sub_8237DC88);
 REX_HOOK_RAW(sub_8237DC88) {
@@ -1171,6 +1242,7 @@ REX_HOOK_RAW(sub_8237DC88) {
     }
   }
   __imp__sub_8237DC88(ctx, base);
+  MeasureStick(base);
 }
 
 // CBindMgr's largest-magnitude command value: the mouse adds to Yaw and Pitch.

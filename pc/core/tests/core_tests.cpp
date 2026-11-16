@@ -51,39 +51,48 @@ float Turn(LookModel& m, const LookTuning& t, float x, float y, float seconds, f
 void TestLook() {
   LookTuning t;  // edge ramp off by default
   LookModel m;
-  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), 90.0f, 0.1f));    // full right: 90 deg/s
-  CHECK(Near(Turn(m, t, -0.75f, 0.0f, 1.0f), -45.0f, 0.1f));
+  // The 360's numbers: curve x 2.04 (Medium) x 0.01744 / (pi / 180).
+  const float k = 2.04f * 0.01744f / (3.14159265f / 180.0f);
+  CHECK(Near(t.aim_sensitivity, 2.04f));
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), 90.0f * k, 0.2f));  // full right: 183.4 deg/s
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), 183.45f, 0.3f));
+  // Per-axis dead zone, 25.9% of travel, the rest rescaled.
+  CHECK(Near(Turn(m, t, 0.25f, 0.0f, 1.0f), 0.0f));
+  const float live = (0.5f - 0.35f / 1.35f) / (1.0f - 0.35f / 1.35f);
+  CHECK(Near(Turn(m, t, -0.5f, 0.0f, 1.0f), -CurveRate(t, live) * k, 0.2f));
   float pitch = 0.0f;
   CHECK(Near(Turn(m, t, 0.0f, 1.0f, 1.0f, &pitch), 0.0f));   // straight up: no yaw
-  CHECK(Near(pitch, -45.0f, 0.1f));                           // looks up at half rate
+  CHECK(Near(pitch, -45.0f * k, 0.2f));                       // looks up at half rate
   CHECK(Near(Turn(m, t, 0.0f, 0.0f, 1.0f), 0.0f));
+  // The curve is per axis: a diagonal turns each axis at its own deflection's rate.
+  CHECK(Near(Turn(m, t, 0.7071f, 0.7071f, 1.0f), CurveRate(t, AxisDeadZone(t, 0.7071f)) * k, 0.2f));
+  // The player's sensitivity scales it.
+  t.sensitivity = 1.5f;
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), 90.0f * k * 1.5f, 0.3f));
+  t.sensitivity = 1.0f;
 
-  // As shipped: 0.3 s at the edge, then 0.4 s of ramp to 360 deg/s.
+  // As shipped: 0.3 s at the edge, then 0.4 s of blend toward 360 deg/s (not scaled by the
+  // sensitivity).
+  const float edge = 360.0f * k / 2.04f;
   t.edge_ramp = EdgeRamp::kConsole;
   m.Reset();
-  const float first = Turn(m, t, 1.0f, 0.0f, 0.3f);   // still the curve rate
-  CHECK(Near(first, 27.0f, 0.5f));
-  const float ramp = Turn(m, t, 1.0f, 0.0f, 0.4f);     // averages (90 + 360) / 2 over 0.4 s
-  CHECK(Near(ramp, 90.0f, 3.0f));
-  const float after = Turn(m, t, 1.0f, 0.0f, 1.0f);    // full boost
-  CHECK(Near(after, 360.0f, 0.5f));
-  // Letting go restarts the wait.
-  Turn(m, t, 0.0f, 0.0f, 0.1f);
-  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 0.3f), 27.0f, 0.5f));
-
-  t.edge_ramp = EdgeRamp::kInstant;
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 0.3f), 90.0f * k * 0.3f, 1.0f));  // still the curve
+  Turn(m, t, 1.0f, 0.0f, 0.4f);
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), edge, 0.5f));            // full boost
+  Turn(m, t, 0.0f, 0.0f, 0.1f);                                     // letting go restarts the wait
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 0.3f), 90.0f * k * 0.3f, 1.0f));
+  // Pushed mostly up at the edge: no boost.
   m.Reset();
-  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), 360.0f, 0.5f));
-  CHECK(Near(Turn(m, t, 0.9f, 0.0f, 1.0f), CurveRate(t, 0.9f), 0.5f));  // below the edge: no boost
-  float up_pitch = 0.0f;
-  CHECK(Near(Turn(m, t, 0.0f, 1.0f, 1.0f, &up_pitch), 0.0f));         // straight up at the edge: no spin
+  t.edge_ramp = EdgeRamp::kInstant;
+  CHECK(Near(Turn(m, t, 0.0f, 1.0f, 1.0f), 0.0f));
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), edge, 0.5f));
+  CHECK(Near(Turn(m, t, 0.9f, 0.0f, 1.0f), CurveRate(t, AxisDeadZone(t, 0.9f)) * k, 0.3f));
 
-  // Soft lock slows turning.
+  // The old soft-lock slowdown, still there behind its setting.
   t.edge_ramp = EdgeRamp::kOff;
   float yaw = 0.0f, p = 0.0f;
-  m.Update(t, 1.0f, -1.0f, 1.0f, true, &yaw, &p);
-  CHECK(Near(yaw, 90.0f * 0.7071f * 0.3f, 0.1f));
-  CHECK(Near(p, 90.0f * 0.7071f * 0.5f * 0.5f, 0.1f));
+  m.Update(t, 1.0f, 0.0f, 1.0f, true, &yaw, &p);
+  CHECK(Near(yaw, 90.0f * k * 0.3f, 0.2f));
 }
 
 void TestDeadZones() {

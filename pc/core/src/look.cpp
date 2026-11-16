@@ -6,6 +6,11 @@
 
 namespace fearpc {
 
+namespace {
+// The 360 turns degrees into radians with 0.01744; the caller uses pi / 180.
+constexpr float kConsoleDegree = 0.01744f / (3.14159265358979f / 180.0f);
+}  // namespace
+
 float CurveRate(const LookTuning& tuning, float deflection) {
   const float* x = tuning.curve_deflection;
   const float* y = tuning.curve_rate;
@@ -21,28 +26,34 @@ float CurveRate(const LookTuning& tuning, float deflection) {
   return y[n - 1];
 }
 
+float AxisDeadZone(const LookTuning& tuning, float value) {
+  const float magnitude = std::min(std::fabs(value), 1.0f);
+  if (magnitude <= tuning.dead_zone) return 0.0f;
+  const float live = (magnitude - tuning.dead_zone) / (1.0f - tuning.dead_zone);
+  return value < 0.0f ? -live : live;
+}
+
 void LookModel::Update(const LookTuning& tuning, float x, float y, float dt, bool soft_lock,
                        float* yaw_degrees, float* pitch_degrees) {
-  // Square pads report corners past 1: the length is clamped, the direction kept.
-  const float length = std::sqrt(x * x + y * y);
-  const float deflection = std::min(length, 1.0f);
-  if (length <= 0.0f || dt <= 0.0f) {
-    if (length <= 0.0f) edge_time_ = 0.0f;
-    *yaw_degrees = 0.0f;
-    *pitch_degrees = 0.0f;
-    return;
-  }
-  const float dir_x = x / length, dir_y = y / length;
+  *yaw_degrees = 0.0f;
+  *pitch_degrees = 0.0f;
+  x = AxisDeadZone(tuning, x);
+  y = AxisDeadZone(tuning, y);
+  if (dt <= 0.0f) return;
 
-  // The curve gives the rate along the stick's direction.
-  const float rate = CurveRate(tuning, deflection);
-  float yaw_rate = rate * dir_x;
-  const float pitch_rate = -rate * dir_y * tuning.pitch_ratio;
+  // Each axis through the curve on its own, signed.
+  const float cx = (x < 0.0f ? -1.0f : 1.0f) * CurveRate(tuning, std::fabs(x));
+  const float cy = (y < 0.0f ? -1.0f : 1.0f) * CurveRate(tuning, std::fabs(y));
+  const float sens = tuning.aim_sensitivity * tuning.sensitivity;
+  float yaw = cx * sens * dt;
+  const float pitch = -cy * sens * tuning.pitch_ratio * dt;
 
-  // Edge boost, on yaw only (as the PC code's edge acceleration).
-  if (deflection >= tuning.edge_threshold && tuning.edge_ramp != EdgeRamp::kOff) {
+  // Edge boost: the yaw blended toward the edge's turn rate.
+  const float magnitude = std::sqrt(x * x + y * y);
+  if (magnitude > tuning.edge_threshold && std::fabs(y) < tuning.edge_max_vertical &&
+      tuning.edge_ramp != EdgeRamp::kOff) {
     edge_time_ += dt;
-    float boost = 0.0f;  // 0: curve rate .. 1: edge_max_rate
+    float boost = 0.0f;  // 0: the curve's yaw .. 1: edge_max_rate
     switch (tuning.edge_ramp) {
       case EdgeRamp::kInstant:
         boost = 1.0f;
@@ -58,25 +69,23 @@ void LookModel::Update(const LookTuning& tuning, float x, float y, float dt, boo
       case EdgeRamp::kOff:
         break;
     }
-    const float speed = std::fabs(yaw_rate);
-    if (boost > 0.0f && speed < tuning.edge_max_rate) {
-      // Weighted by how sideways the push is, so a stick held straight up doesn't turn.
-      const float sideways = std::fabs(dir_x);
-      const float gain = (tuning.edge_max_rate - speed) * boost * sideways;
-      yaw_rate = (yaw_rate < 0.0f ? -1.0f : 1.0f) * (speed + gain);
+    if (boost > 0.0f) {
+      const float speed = std::fabs(yaw);
+      const float edge = tuning.edge_max_rate * dt;
+      yaw = (yaw < 0.0f ? -1.0f : 1.0f) * (speed + (edge - speed) * boost);
     }
   } else {
     edge_time_ = 0.0f;
   }
 
-  float yaw_scale = tuning.sensitivity;
-  float pitch_scale = tuning.sensitivity;
+  float yaw_scale = kConsoleDegree;
+  float pitch_scale = kConsoleDegree;
   if (soft_lock) {
     yaw_scale *= tuning.soft_lock_yaw;
     pitch_scale *= tuning.soft_lock_pitch;
   }
-  *yaw_degrees = yaw_rate * yaw_scale * dt;
-  *pitch_degrees = pitch_rate * pitch_scale * dt;
+  *yaw_degrees = yaw * yaw_scale;
+  *pitch_degrees = pitch * pitch_scale;
 }
 
 }  // namespace fearpc
