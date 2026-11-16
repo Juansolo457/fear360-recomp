@@ -1156,7 +1156,12 @@ void FearMkbCommands(PPCRegister& r30) {
 
 // fear_stick_measure: holds the right stick at each deflection in turn, 0.5 s to settle, then sums
 // the yaw the turn update leaves in CPlayerMgr's m_v2AxisOffsets (radians this frame, yaw at +504;
-// CPlayerMgr* at 0x833708DC) for 2 s and logs degrees per second. The PC build's PadMeasure does
+// CPlayerMgr* at 0x833708DC) for 2 s and logs degrees per second. The window opens on the first
+// turn update after the settle and that update's yaw is left out (its frame began before the
+// window), so the sum covers exactly the time it is divided by. The stick is merged with any
+// connected pad's (the larger magnitude wins) and the merged packet number is the highest of the
+// devices', so with a pad connected the driver's bump may not show; the game's turn update reads
+// the stick whether or not the packet number moved. The PC build's PadMeasure does
 // the same on PC F.E.A.R., so the two can be compared number for number.
 constexpr uint32_t kPlayerMgrPointer = 0x833708DC;
 constexpr uint32_t kAxisOffsetYaw = 504;
@@ -1164,6 +1169,7 @@ constexpr float kMeasureDeflections[] = {0.25f, 0.3f, 0.5f, 0.75f, 0.85f, 0.95f,
 struct StickMeasure {
   Clock::time_point play_since{};
   Clock::time_point step_since{};
+  Clock::time_point window_since{};  // the first turn update after the settle; unset before it
   int step = -1;  // -1: waiting for play; past the end: done
   double yaw = 0.0;
   int frames = 0;
@@ -1183,6 +1189,7 @@ void MeasureStick(const uint8_t* base) {
     if (seconds(m.play_since) < wait) return;
     m.step = 0;
     m.step_since = now;
+    m.window_since = {};
     m.yaw = 0.0;
     m.frames = 0;
     g_measure_stick = int16_t(std::lround(kMeasureDeflections[0] * 32767.0f));
@@ -1192,17 +1199,21 @@ void MeasureStick(const uint8_t* base) {
   const double elapsed = seconds(m.step_since);
   if (elapsed >= 0.5) {
     const uint32_t mgr = LoadWord(base, kPlayerMgrPointer);
-    if (mgr) {
+    if (m.window_since == Clock::time_point{}) {
+      m.window_since = now;
+    } else if (mgr) {
       m.yaw += std::bit_cast<float>(LoadWord(base, mgr + kAxisOffsetYaw));
       ++m.frames;
     }
   }
   if (elapsed < 2.5) return;
-  const double rate = m.yaw * 180.0 / std::numbers::pi / (elapsed - 0.5);
+  const double window = seconds(m.window_since);
+  const double rate = window > 0.0 ? m.yaw * 180.0 / std::numbers::pi / window : 0.0;
   REXLOG_INFO("F.E.A.R. stick measure: deflection {:.2f} -> {:.2f} deg/s yaw ({} turn updates)",
               kMeasureDeflections[m.step], rate, m.frames);
   ++m.step;
   m.step_since = now;
+  m.window_since = {};
   m.yaw = 0.0;
   m.frames = 0;
   if (m.step >= int(std::size(kMeasureDeflections))) {

@@ -46,7 +46,8 @@ struct PadState {
 };
 
 // Dead zones, as fractions of full travel. The defaults are XInput's recommended ones, which
-// the 360 itself used.
+// the 360 itself used. A stick's dead zone of 0 returns that stick exactly as the pad reports
+// it (each axis -1..1, so a corner can be longer than 1), for a caller with its own dead zone.
 struct PadDeadZones {
   float left_stick = 7849.0f / 32767.0f;
   float right_stick = 8689.0f / 32767.0f;

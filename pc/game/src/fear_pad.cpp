@@ -51,7 +51,10 @@ const uint32 kRumbleDurationMs = 250;  // each send's motor time, so a stall can
 
 // PadMeasure 1: holds the right stick at each deflection in turn (no pad needed), measures how
 // fast the camera actually turns, and writes pad_measure.txt to the user directory. This checks
-// the whole path, the engine's smoothing and zoom included, against the 360's numbers.
+// the whole path, the engine's smoothing and zoom included, against the 360's numbers. The
+// deflections are the recomp's (fear_stick_measure in port-nx/src/fear_mkb.cpp); 0.25 is inside
+// the dead zone. The expected rate is the look model's own over the same window, so it follows
+// PadLookRamp too.
 // PadMeasure N (2 or more) waits N seconds into play first, past a level's opening cutscene.
 struct Measure {
 	bool bActive = false;
@@ -60,11 +63,12 @@ struct Measure {
 	double fYaw = 0.0;          // unwrapped camera yaw, degrees
 	double fLastRawYaw = 0.0;
 	double fWindowStartYaw = 0.0;
+	double fWindowStart = 0.0;  // when the window opened, real time
 	bool bWindowOpen = false;
 	FILE* pFile = NULL;
 };
 Measure g_Measure;
-const float kMeasureDeflections[] = { 0.25f, 0.5f, 0.75f, 0.85f, 0.95f, 1.0f };
+const float kMeasureDeflections[] = { 0.25f, 0.3f, 0.5f, 0.75f, 0.85f, 0.95f, 1.0f };
 const int kMeasureSteps = sizeof(kMeasureDeflections) / sizeof(kMeasureDeflections[0]);
 const double kMeasureSettle = 0.5, kMeasureWindow = 2.0;
 
@@ -84,6 +88,7 @@ fearpc::LookModel g_Look;
 struct LookLog
 {
 	FILE* pFile = NULL;
+	bool bOpenFailed = false;  // tried and couldn't: not again until PadLookLog goes off and on
 	double fSince = -1.0;
 	int nCalls = 0, nZeroDt = 0, nSoftLockOn = 0, nSoftLockSwitches = 0;
 	bool bLastSoftLock = false;
@@ -97,12 +102,13 @@ void LogLook(float fDt, float fStickX, float fStickY, bool bSoftLock, float fYaw
 	if (g_vtPadLookLog.GetFloat() < 0.5f)
 	{
 		if (l.pFile)
-		{
 			fclose(l.pFile);
+		if (l.pFile || l.bOpenFailed)
 			l = LookLog();
-		}
 		return;
 	}
+	if (l.bOpenFailed)
+		return;
 	const double fNow = RealTimeTimer::Instance().GetTimerAccumulatedS();
 	if (!l.pFile)
 	{
@@ -112,7 +118,11 @@ void LogLook(float fDt, float fStickX, float fStickY, bool bSoftLock, float fYaw
 		l = LookLog();
 		l.pFile = fopen(szPath, "w");
 		if (!l.pFile)
+		{
+			l.bOpenFailed = true;
+			g_pLTClient->CPrint("PadLookLog: could not write %s", szPath);
 			return;
+		}
 		fprintf(l.pFile, "# time calls zero_dt min_dt_ms max_dt_ms max_stick yaw_deg max_yaw_step_deg softlock_on_pct softlock_switches (PadLookRamp %g, sensitivity %g, PadSoftLock %g)\n",
 			g_vtPadLookRamp.GetFloat(), g_vtPadLookSensitivity.GetFloat(), g_vtPadSoftLock.GetFloat());
 		l.fSince = fNow;
@@ -336,6 +346,24 @@ fearpc::LookTuning Tuning()
 	return tuning;
 }
 
+// What the look model gives for a held deflection over the measurement's window, in degrees a
+// second: a model of its own stepped through the settle and the window, as PadMeasure runs it.
+float ExpectedRate(const fearpc::LookTuning& tuning, float fDeflection)
+{
+	fearpc::LookModel model;
+	const float fDt = 1.0f / 120.0f;
+	const int nSettle = (int)(kMeasureSettle / fDt + 0.5), nWindow = (int)(kMeasureWindow / fDt + 0.5);
+	float fTotal = 0.0f;
+	for (int i = 0; i < nSettle + nWindow; ++i)
+	{
+		float fYaw = 0.0f, fPitch = 0.0f;
+		model.Update(tuning, fDeflection, 0.0f, fDt, false, &fYaw, &fPitch);
+		if (i >= nSettle)
+			fTotal += fYaw;
+	}
+	return fTotal / (float)kMeasureWindow;
+}
+
 double CameraYawDegrees()
 {
 	const LTVector vForward = g_pPlayerMgr->GetPlayerCamera()->GetCameraRotation().Forward();
@@ -381,15 +409,16 @@ void UpdateMeasure()
 	{
 		m.bWindowOpen = true;
 		m.fWindowStartYaw = m.fYaw;
+		m.fWindowStart = fNow;
 	}
 	if (fElapsed < kMeasureSettle + kMeasureWindow)
 		return;
 
 	const float fDeflection = kMeasureDeflections[m.nStep];
-	const double fRate = (m.fYaw - m.fWindowStartYaw) / kMeasureWindow;
-	const fearpc::LookTuning tuning = Tuning();
-	const float fExpected = fearpc::CurveRate(tuning, fearpc::AxisDeadZone(tuning, fDeflection)) *
-		tuning.aim_sensitivity * tuning.sensitivity * (0.01744f / (MATH_PI / 180.0f));
+	// Over the time the window really covered: it opens and closes on frames, not on the marks.
+	const double fWindow = fNow - m.fWindowStart;
+	const double fRate = fWindow > 0.0 ? (m.fYaw - m.fWindowStartYaw) / fWindow : 0.0;
+	const float fExpected = ExpectedRate(Tuning(), fDeflection);
 	if (m.pFile)
 		fprintf(m.pFile, "%.2f %.2f %.2f\n", fDeflection, fRate, fExpected);
 	g_pLTClient->CPrint("PadMeasure: %.2f -> %.1f deg/s (360: %.1f)", fDeflection, fRate, fExpected);
@@ -430,6 +459,16 @@ void SettingsPath(char* szPath, uint32 nSize)
 	LTStrCat(szPath, "fearpc_pad.txt", nSize);
 }
 
+// The file's "Version" line. 2: the look follows the 360's code (sensitivity 1 turns 2.04 times
+// as fast as before, look acceleration and the slowdown default to off). An older file's look
+// settings were chosen against the old look, so they are dropped for the new defaults.
+const int kSettingsVersion = 2;
+
+bool IsLookSetting(const VarTrack* pVar)
+{
+	return pVar == &g_vtPadLookRamp || pVar == &g_vtPadLookSensitivity || pVar == &g_vtPadSoftLock;
+}
+
 void LoadSettings()
 {
 	char szPath[MAX_PATH * 2];
@@ -439,10 +478,17 @@ void LoadSettings()
 		return;
 	char szName[64];
 	float fValue;
+	int nVersion = 1;  // files from before the line existed
+	while (fscanf(pFile, "%63s %f", szName, &fValue) == 2)
+	{
+		if (LTStrIEquals(szName, "Version"))
+			nVersion = (int)fValue;
+	}
+	rewind(pFile);
 	while (fscanf(pFile, "%63s %f", szName, &fValue) == 2)
 	{
 		for (const SavedVar& var : kSavedVars)
-			if (LTStrIEquals(var.szName, szName))
+			if (LTStrIEquals(var.szName, szName) && (nVersion >= kSettingsVersion || !IsLookSetting(var.pVar)))
 				var.pVar->SetFloat(fValue);
 	}
 	fclose(pFile);
@@ -455,6 +501,7 @@ void SaveSettings()
 	FILE* pFile = fopen(szPath, "w");
 	if (!pFile)
 		return;
+	fprintf(pFile, "Version %d\n", kSettingsVersion);
 	for (const SavedVar& var : kSavedVars)
 		fprintf(pFile, "%s %g\n", var.szName, var.pVar->GetFloat());
 	fclose(pFile);
@@ -515,7 +562,8 @@ void FearPadFrame()
 	Start();
 
 	g_LastState = g_State;
-	// The right stick comes raw: the look applies the 360's own per-axis dead zone.
+	// The right stick comes as the pad reports it, not pulled in to the unit circle: the look
+	// applies the 360's own per-axis dead zone, and the 360 reads each axis on its own.
 	fearpc::PadDeadZones deadZones;
 	deadZones.right_stick = 0.0f;
 	const fearpc::PadState& polled = fearpc::PadUpdate(deadZones);

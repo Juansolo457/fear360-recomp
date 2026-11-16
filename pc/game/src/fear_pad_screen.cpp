@@ -101,7 +101,9 @@ bool CScreenJoystick::Build()
 		pCycle->AddString(choice.szLabel);
 
 	tcs.pbValue = &g_bSoftLock;
-	pToggle = AddToggle(L"Aim assist", tcs);
+	// PadSoftLock. Not called aim assist: the 360's assist pulls toward the target, and this slows
+	// the turn instead.
+	pToggle = AddToggle(L"Slow turn on enemies", tcs);
 	pToggle->SetOnString(L"On");
 	pToggle->SetOffString(L"Off");
 

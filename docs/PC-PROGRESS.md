@@ -36,7 +36,7 @@ Felt floaty and delayed, sometimes missed input, the view jerked, and the yaw ra
 
 ### Controller screen
 
-Options > Controls > Configure joystick/gamepad is the Controller screen when the pad code is built in (`pc/game/src/fear_pad_screen.cpp`, patch 0005 compiles the PC's DirectInput joystick page out): Controller on/off, Button layout (Normal, Lean), Look sensitivity (25 to 200%), Look acceleration (Off, Xbox 360, Immediate, Full speed, named as in the recomp's settings), Aim assist, Vibration (0 to 100%). Leaving the screen applies the settings and saves them to `fearpc_pad.txt` in the user directory, read at the next start. Checked in game: values shown, saved on leaving. It is the first piece of the recomp's settings menu; the other options come later.
+Options > Controls > Configure joystick/gamepad is the Controller screen when the pad code is built in (`pc/game/src/fear_pad_screen.cpp`, patch 0005 compiles the PC's DirectInput joystick page out): Controller on/off, Button layout (Normal, Lean), Look sensitivity (25 to 200%), Look acceleration (Off, Xbox 360, Immediate, Full speed, named as in the recomp's settings), Slow turn on enemies (`PadSoftLock`, called Aim assist before 2026-11-15), Vibration (0 to 100%). Leaving the screen applies the settings and saves them to `fearpc_pad.txt` in the user directory, read at the next start. Checked in game: values shown, saved on leaving. It is the first piece of the recomp's settings menu; the other options come later.
 
 ### Play test 3 (2026-11-06)
 
@@ -82,6 +82,8 @@ Console variables (in the game's console, or `+Name value` on the command line t
 | `PadRumble` | 1 | vibration strength, 0 to 1 (0 off) |
 | `PadMeasure` | 0 | 1 runs the turn-rate measurement into `<user dir>\pad_measure.txt`; N > 1 waits N seconds into play first |
 
+The Controller screen saves its settings to `<user dir>\fearpc_pad.txt`, which starts with `Version 2`. A file without that line is from before the look followed the 360's code: its `PadLookRamp`, `PadLookSensitivity` and `PadSoftLock` are ignored, so the defaults above apply, and the rest (on/off, layout, vibration) is kept.
+
 ## EchoPatch
 
 Not in the first pass (decided 2026-11-06): the goal is the 360's controller, and EchoPatch has its own SDL controller support with the PC's layout and stick code, which would double every input alongside ours. Briefly tried in the dev copy with `SDLGamepadSupport = 0`, then taken out again. It may come back later as a toggle, with its controller support off whenever ours is on.
@@ -115,7 +117,7 @@ Turn the controller on, check `fearpc_pad_probe.exe` sees it, then `launch.ps1`.
 - Menus: D-pad and left stick move, A picks, B backs out, Start picks. The A that starts a level doesn't also jump.
 - Every button in the Normal layout does what the 360 does (table in `pc/core/include/fearpc/layout.h`). X opens doors and picks up weapons when aimed at them (hold it), otherwise reloads.
 - Start opens the menu in play, and the Start that opens it doesn't also pick an item.
-- Looking: does it feel like the 360? Try Look acceleration Xbox 360 (as shipped) and Off on the Controller screen, and Aim assist on and off in a fight.
+- Looking: does it feel like the 360? Try Look acceleration Xbox 360 (as shipped) and Off on the Controller screen, and Slow turn on enemies on and off in a fight.
 - Keyboard and mouse still work at the same time.
 - Note anything that differs from the recomp in PC-PROGRESS.md.
 

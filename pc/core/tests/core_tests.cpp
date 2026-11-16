@@ -88,6 +88,12 @@ void TestLook() {
   CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), edge, 0.5f));
   CHECK(Near(Turn(m, t, 0.9f, 0.0f, 1.0f), CurveRate(t, AxisDeadZone(t, 0.9f)) * k, 0.3f));
 
+  // A sensitivity whose curve rate passes the edge's 360 deg/s: the boost doesn't slow it.
+  t.sensitivity = 2.0f;
+  m.Reset();
+  CHECK(Near(Turn(m, t, 1.0f, 0.0f, 1.0f), 90.0f * k * 2.0f, 0.5f));
+  t.sensitivity = 1.0f;
+
   // The old soft-lock slowdown, still there behind its setting.
   t.edge_ramp = EdgeRamp::kOff;
   float yaw = 0.0f, p = 0.0f;

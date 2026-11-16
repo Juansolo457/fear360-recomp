@@ -57,9 +57,23 @@ PadFamily Family(SDL_Gamepad* pad) {
   }
 }
 
-bool AnyInput(const PadState& s) {
-  for (float v : s.value) {
-    if (std::fabs(v) > 0.0f) return true;
+// Whether the pad is being used. A stick asked for raw (dead zone 0) rarely rests at exactly 0,
+// so it counts only past the default dead zone; otherwise an idle pad would always be in use.
+bool AnyInput(const PadState& s, const PadDeadZones& dz) {
+  const PadDeadZones defaults;
+  const struct {
+    PadInput x, y;
+    float asked, rest;
+  } sticks[] = {
+      {PadInput::kLeftX, PadInput::kLeftY, dz.left_stick, defaults.left_stick},
+      {PadInput::kRightX, PadInput::kRightY, dz.right_stick, defaults.right_stick},
+  };
+  for (const auto& stick : sticks) {
+    const float x = s[stick.x], y = s[stick.y];
+    if (std::sqrt(x * x + y * y) > (stick.asked > 0.0f ? 0.0f : stick.rest)) return true;
+  }
+  for (int i = static_cast<int>(PadInput::kLeftTrigger); i < static_cast<int>(PadInput::kCount); ++i) {
+    if (s.value[i] > 0.0f) return true;
   }
   return false;
 }
@@ -69,8 +83,10 @@ void Read(SDL_Gamepad* pad, const PadDeadZones& dz, PadState* s) {
   s->family = Family(pad);
   float lx = Axis(pad, SDL_GAMEPAD_AXIS_LEFTX), ly = -Axis(pad, SDL_GAMEPAD_AXIS_LEFTY);
   float rx = Axis(pad, SDL_GAMEPAD_AXIS_RIGHTX), ry = -Axis(pad, SDL_GAMEPAD_AXIS_RIGHTY);
-  ApplyStickDeadZone(dz.left_stick, &lx, &ly);
-  ApplyStickDeadZone(dz.right_stick, &rx, &ry);
+  // A dead zone of 0 asks for the stick as the pad reports it, corners past the unit circle
+  // included: ApplyStickDeadZone would pull those back to the circle.
+  if (dz.left_stick > 0.0f) ApplyStickDeadZone(dz.left_stick, &lx, &ly);
+  if (dz.right_stick > 0.0f) ApplyStickDeadZone(dz.right_stick, &rx, &ry);
   s->value[static_cast<int>(PadInput::kLeftX)] = lx;
   s->value[static_cast<int>(PadInput::kLeftY)] = ly;
   s->value[static_cast<int>(PadInput::kRightX)] = rx;
@@ -127,7 +143,7 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
       first_id = ids[i];
     }
     if (ids[i] == g_active) last_used = s;
-    if (!in_use.connected && AnyInput(s)) {
+    if (!in_use.connected && AnyInput(s, dead_zones)) {
       in_use = s;
       in_use_id = ids[i];
     }

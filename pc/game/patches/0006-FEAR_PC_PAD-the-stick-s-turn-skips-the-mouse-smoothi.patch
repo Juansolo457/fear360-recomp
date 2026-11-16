@@ -32,8 +32,8 @@ index 7986c4f..0113fd8 100644
 +		fPadPitch /= fVal;
 +		if( pSettings->MouseInvertY() )
 +			fPadPitch *= -1;
-+		fPadYaw *= fSloMoDampen * fMeleeDampen * fDeathDampen * fAimDampen;
-+		fPadPitch *= fSloMoDampen * fMeleeDampen * fDeathDampen * fAimDampen;
++		fPadYaw *= fMeleeDampen * fDeathDampen;
++		fPadPitch *= fMeleeDampen * fDeathDampen;
  	}
  #endif
  

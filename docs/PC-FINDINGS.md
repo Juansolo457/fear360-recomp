@@ -69,7 +69,7 @@ From `default.xex` SHA-256 `e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fc
 
 - **Dead zone, per axis.** The pad binding maps n = short / 32768 to 1.35 n and takes 0.35 off, so v = sign(n) (1.35 |n| - 0.35), zero below |n| = 0.2593. Not radial.
 - **Curve, per axis.** `AimInputCurve` ((0, 0), (0.75, 45), (0.95, 90), (1, 90) deg/s) is applied to each axis on its own, keeping its sign.
-- **Sensitivity.** `GPadAimSensitivity` = the profile's sensitivity x 0.0255: Low 60 is 1.53, Medium 80 (the default) 2.04, High 100 2.55. So full stick turns 90 x 2.04 = 183.45 deg/s of yaw at Medium, not 90.
+- **Sensitivity.** `GPadAimSensitivity` = the profile's sensitivity x 0.0255: Low 60 is 1.53, Medium 80 (the default) 2.04, High 100 2.55. So full stick turns 90 x 2.04 = 183.6 deg/s of yaw at Medium, not 90 (183.46 with the 360's degree, next).
 - **Degrees to radians** with 0.01744, not pi / 180 (0.08% slower); kept in our code.
 - **Pitch** times `GPadAimAspectRatio` 0.5: 91.7 deg/s at full stick.
 - **Edge boost, yaw only.** When the stick's magnitude is over 0.95 and |y| under 0.5: after 0.3 s, blended over 0.4 s toward 360 x dt (not times the sensitivity).
@@ -79,4 +79,4 @@ From `default.xex` SHA-256 `e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fc
 - **A 0.5 s input blackout** after an event not yet identified (`0x833721C8`).
 - **Soft lock is not a slowdown.** `TurningSoftLock*Factor` only switch on a turning target manager (`CPlayerMgr+0x5B4`). Its effect is an added yaw toward the target, from the weapon's `TargetAssistance` inner and outer angles, strength and rate.
 
-The PC build's look (`pc/core/src/look.cpp`) follows this since 2026-11-15, except for the target-assist pull, zoom before the curve and the blackout. `fear_stick_measure=N` in the recomp (`port-nx/src/fear_mkb.cpp`) drives the same scripted stick through the 360 code and logs the yaw per deflection; it has not been run in a level yet.
+The PC build's look (`pc/core/src/look.cpp`) follows this since 2026-11-15, except for the target-assist pull, zoom before the curve and the blackout. Since the review of 2026-11-15 the stick's turn also takes only the melee and death dampers (patch 0006 had applied `MouseSloMoDampen` and `MouseAimDampen` to it too), and the right stick reaches the look as the pad reports it, without the pull back to the unit circle that slowed full diagonals. `fear_stick_measure=N` in the recomp (`port-nx/src/fear_mkb.cpp`) drives the same scripted stick through the 360 code and logs the yaw per deflection; it has not been run in a level yet.

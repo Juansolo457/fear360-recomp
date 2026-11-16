@@ -9,9 +9,12 @@
 // Console variables (also settable as +Name value on the command line):
 //   PadEnabled          1   0 ignores pads
 //   PadLayout           0   0 the 360's Normal layout, 1 its Lean layout (pc/core layout.h)
-//   PadLookRamp         2   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
-//   PadLookSensitivity  1   scales the 360's turn rates
-//   PadSoftLock         1   slow turning with an enemy under the crosshair, as the 360 does
+//   PadLookRamp         3   0 as the 360 shipped, 1 no delay, 2 instant, 3 off (pc/core look.h)
+//   PadLookSensitivity  1   scales the 360's turn rates; 1 is its Medium
+//   PadSoftLock         0   slow turning with an enemy under the crosshair (not what the 360 does:
+//                           its soft lock pulls toward the target, which isn't ported yet)
+//   PadLookLog          0   1 logs the look once a second to pad_look_log.txt in the user directory
+//   PadMeasure          0   1 measures the turn rate per deflection into pad_measure.txt
 //   PadRumble           1   vibration strength, 0 to 1 (0 off)
 //
 // Vibration: the PC game computes motor strengths from rumble effects but sends them nowhere,
@@ -32,7 +35,7 @@ struct FearPadSettings
 	uint8	nLayout;		// 0 Normal, 1 Lean
 	uint8	nLookRamp;		// PadLookRamp: 0 as shipped, 1 no delay, 2 instant, 3 off
 	int		nSensitivity;	// percent of the 360's turn rates
-	bool	bSoftLock;
+	bool	bSoftLock;		// PadSoftLock: the slowdown on enemies
 	int		nRumble;		// percent
 };
 FearPadSettings FearPadGetSettings();

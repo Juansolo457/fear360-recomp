@@ -71,7 +71,9 @@ void LookModel::Update(const LookTuning& tuning, float x, float y, float dt, boo
     }
     if (boost > 0.0f) {
       const float speed = std::fabs(yaw);
-      const float edge = tuning.edge_max_rate * dt;
+      // Never below the curve's own rate: a sensitivity near 2 passes edge_max_rate, and the
+      // boost must not slow the turn.
+      const float edge = std::max(tuning.edge_max_rate * dt, speed);
       yaw = (yaw < 0.0f ? -1.0f : 1.0f) * (speed + (edge - speed) * boost);
     }
   } else {
