@@ -47,12 +47,12 @@ Build and test with `pwsh -NoProfile -File pc/tools/build.ps1`, which also runs 
 3. **#140** Look sensitivity doesn't adjust correctly: recheck now that 1 = the 360's Medium.
 4. **#144** Choose the controls, the 360's or EchoPatch's (#138 for EchoPatch's other features).
 5. **#146** A settings screen like the recomp's, with PC / 360 / PS3 presets (#141 for its look).
-6. **#145** Xbox and PlayStation glyphs.
+6. **#145** Xbox and PlayStation glyphs: first pass in and seen working on the Deck (PC-PROGRESS.md "Button glyphs"); the PlayStation set is untested with a real pad. **#151** all of the recomp's settings in the game's menus, with a field of view slider. **#152** measure what EchoPatch costs in frame rate.
 7. **#147** Console-only weapons and the two bonus levels (#133 Instant Action).
 8. **Stick, still to port:** the 360's target-assist pull, zoom before the curve, and the 0.5 s blackout (PC-FINDINGS.md).
 9. **Questions:** #148 (a native Linux build of the PC version) and #149 (low-end PCs, Sandy Bridge at the oldest).
 
-For #145 and #147: a local clone of the taken-down F.E.A.R. Exclusive Console Content mod (Go) is at `E:\fear-pc-dev\ecc\src`. Its `internal/hudicon` and `internal/consolefont` cover the glyphs; `sfodworld`, `holworld`, `iaworld` and `dbmerge` cover the content. Its licence allows free use but not re-uploading it as is, so use it as a reference and ask its authors before copying code.
+For #145 and #147: a local clone of the taken-down F.E.A.R. Exclusive Console Content mod (Go) is at `E:\fear-pc-dev\ecc\src`. Its `internal/hudicon` is weapon HUD icons and `internal/consolefont` the Instant Action results fonts (no button glyphs); `sfodworld`, `holworld`, `iaworld` and `dbmerge` cover the content. Its licence allows free use but not re-uploading it as is, so use it as a reference and ask its authors before copying code.
 
 ## Test machines
 

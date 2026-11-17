@@ -1,6 +1,7 @@
 # Builds the PC game DLLs (GameClient.dll, GameServer.dll, ClientFx.fxd) as 32-bit from the
 # public tools source in third_party/fear-publictools, with VS 2022's x86 toolset.
-# Output: build/pc/game/{GameClient.dll,GameServer.dll,ClientFx.fxd}.
+# Output: build/pc/game/{GameClient.dll,GameServer.dll,ClientFx.fxd}, and the button picture
+# for prompts, build/pc/game/Interface/FearPC/PadGlyphs.dds (pc/tools/make_glyphs.py).
 param(
     [switch]$Clean,
     [string]$Config = 'Release'
@@ -32,6 +33,10 @@ Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-ar
 if ($LASTEXITCODE -ne 0) { throw "Configure failed ($LASTEXITCODE)." }
 & $cmake --build $build -- -k 0
 if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)." }
+$glyphs = Join-Path $build 'Interface\FearPC'
+New-Item -ItemType Directory -Force $glyphs | Out-Null
+& python -I (Join-Path $PSScriptRoot 'make_glyphs.py') (Join-Path $glyphs 'PadGlyphs.dds')
+if ($LASTEXITCODE -ne 0) { throw 'Drawing the button picture failed (it needs Python with Pillow).' }
 & (Join-Path $build 'core\fearpc_core_tests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'pc/core unit tests failed.' }
 Get-ChildItem $build -Include GameClient.dll, GameServer.dll, ClientFx.fxd -Recurse | Select-Object Name, Length

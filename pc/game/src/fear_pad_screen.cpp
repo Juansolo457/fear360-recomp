@@ -7,8 +7,10 @@
 #include "stdafx.h"
 
 #include "ScreenJoystick.h"
+#include "ScreenCommands.h"
 #include "ScreenMgr.h"
 #include "fear_pad.h"
+#include "fearpc/layout.h"
 
 namespace
 {
@@ -19,6 +21,7 @@ namespace
 	uint8 g_nLook = 0;		// index into kLook
 	int g_nSensitivity = 100;
 	int g_nRumble = 100;
+	uint8 g_nGlyphs = 1;	// PadGlyphs
 
 	// Look acceleration, named as in the recomp's settings, and the PadLookRamp of each.
 	struct LookChoice
@@ -32,6 +35,42 @@ namespace
 		{ L"Immediate", 1 },
 		{ L"Full speed", 2 },
 	};
+
+	// Under the settings, what each button does in the chosen layout: two actions a row, each
+	// its button (drawn by CLTGUIString from the 360's button character) and its name.
+	struct LegendEntry
+	{
+		fearpc::PadAction eAction;
+		const wchar_t* szName;
+	};
+	const LegendEntry kLegend[][2] = {
+		{ { fearpc::PadAction::kFire, L"Fire" },				{ fearpc::PadAction::kThrowGrenade, L"Throw grenade" } },
+		{ { fearpc::PadAction::kJump, L"Jump" },				{ fearpc::PadAction::kMelee, L"Melee" } },
+		{ { fearpc::PadAction::kUseOrReload, L"Use, reload" },	{ fearpc::PadAction::kMedkit, L"Medkit" } },
+		{ { fearpc::PadAction::kSlowMo, L"Slow-mo" },			{ fearpc::PadAction::kNextWeapon, L"Next weapon" } },
+		{ { fearpc::PadAction::kNextGrenade, L"Next grenade" },	{ fearpc::PadAction::kFlashlight, L"Flashlight" } },
+		{ { fearpc::PadAction::kLeanLeft, L"Lean left" },		{ fearpc::PadAction::kLeanRight, L"Lean right" } },
+		{ { fearpc::PadAction::kCrouch, L"Crouch" },			{ fearpc::PadAction::kZoom, L"Zoom" } },
+		{ { fearpc::PadAction::kObjectives, L"Objectives" },	{ fearpc::PadAction::kMenu, L"Menu" } },
+	};
+	const int kLegendRows = LTARRAYSIZE(kLegend);
+	CLTGUIColumnCtrl* g_pLegend[kLegendRows] = {};
+	const uint32 kCmdLayout = CMD_CUSTOM + 1;
+
+	void UpdateLegend()
+	{
+		const fearpc::PadLayout eLayout = g_nLayout ? fearpc::PadLayout::kLeaner : fearpc::PadLayout::kNormal;
+		for (int nRow = 0; nRow < kLegendRows; ++nRow)
+		{
+			if (!g_pLegend[nRow])
+				continue;
+			for (int nSide = 0; nSide < 2; ++nSide)
+			{
+				wchar_t szGlyph[2] = { (wchar_t)fearpc::ButtonGlyph(fearpc::LayoutInput(eLayout, kLegend[nRow][nSide].eAction)), 0 };
+				g_pLegend[nRow]->SetString((uint8)(nSide * 2), szGlyph);
+			}
+		}
+	}
 
 	const wchar_t* PercentText(int nPos, void* /*pUserData*/)
 	{
@@ -85,9 +124,13 @@ bool CScreenJoystick::Build()
 	pToggle->SetOffString(L"Off");
 
 	ccs.pnValue = &g_nLayout;
+	ccs.nCommandID = kCmdLayout;	// sent when the choice changes: the legend follows it
+	ccs.pCommandHandler = this;
 	CLTGUICycleCtrl* pCycle = AddCycle(L"Button layout", ccs);
 	pCycle->AddString(L"Normal");
 	pCycle->AddString(L"Lean");
+	ccs.nCommandID = 0;
+	ccs.pCommandHandler = NULL;
 
 	scs.pnValue = &g_nSensitivity;
 	scs.nMin = 25;
@@ -113,6 +156,31 @@ bool CScreenJoystick::Build()
 	scs.nIncrement = 10;
 	AddSlider(L"Vibration", scs);
 
+	ccs.pnValue = &g_nGlyphs;
+	pCycle = AddCycle(L"Button prompts", ccs);
+	pCycle->AddString(L"Keyboard");
+	pCycle->AddString(L"Automatic");
+	pCycle->AddString(L"Xbox");
+	pCycle->AddString(L"PlayStation");
+
+	// The legend, in smaller text so the screen holds it all.
+	const uint32 nLegendHeight = LTMAX(nHeight * 2 / 3, 12);
+	const uint32 nGlyphWidth = nLegendHeight * 2, nNameWidth = (uint32)(nGap + nWidth) / 2 - nGlyphWidth;
+	CLTGUICtrl_create lcs;
+	lcs.rnBaseRect.m_vMin.Init();
+	lcs.rnBaseRect.m_vMax = LTVector2n(nGap + nWidth, (int32)nLegendHeight);
+	for (int nRow = 0; nRow < kLegendRows; ++nRow)
+	{
+		CLTGUIColumnCtrl* pRow = AddColumnCtrl(lcs, false, NULL, nLegendHeight);
+		for (int nSide = 0; nSide < 2; ++nSide)
+		{
+			pRow->AddColumn(L"", nGlyphWidth);
+			pRow->AddColumn(kLegend[nRow][nSide].szName, nNameWidth);
+		}
+		pRow->Enable(false);
+		g_pLegend[nRow] = pRow;
+	}
+
 	if (!CBaseScreen::Build())
 		return false;
 	UseBack(true, true);
@@ -129,11 +197,13 @@ void CScreenJoystick::OnFocus(bool bFocus)
 		g_nSensitivity = s.nSensitivity;
 		g_bSoftLock = s.bSoftLock;
 		g_nRumble = s.nRumble;
+		g_nGlyphs = s.nGlyphs;
 		g_nLook = 0;
 		for (uint8 i = 0; i < LTARRAYSIZE(kLook); ++i)
 			if (kLook[i].nRamp == s.nLookRamp)
 				g_nLook = i;
 		UpdateData(false);
+		UpdateLegend();
 	}
 	else
 	{
@@ -145,6 +215,7 @@ void CScreenJoystick::OnFocus(bool bFocus)
 		s.nSensitivity = g_nSensitivity;
 		s.bSoftLock = g_bSoftLock;
 		s.nRumble = g_nRumble;
+		s.nGlyphs = g_nGlyphs;
 		FearPadSetSettings(s);
 	}
 	CBaseScreen::OnFocus(bFocus);
@@ -152,5 +223,11 @@ void CScreenJoystick::OnFocus(bool bFocus)
 
 uint32 CScreenJoystick::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwParam2)
 {
+	if (dwCommand == kCmdLayout)
+	{
+		UpdateData();
+		UpdateLegend();
+		return 1;
+	}
 	return CBaseScreen::OnCommand(dwCommand, dwParam1, dwParam2);
 }

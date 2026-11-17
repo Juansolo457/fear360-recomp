@@ -58,4 +58,16 @@ const PadBinding* LayoutBindings(PadLayout layout, size_t* count);
 // The input an action is on in a layout, or PadInput::kCount if none.
 PadInput LayoutInput(PadLayout layout, PadAction action);
 
+// The character the 360 game writes in its text for a button (Interface/XenonButtons,
+// IconGlyph): A U+E000, B E001, X E002, Y E003, Start E004, Back E005, L3 E006, R3 E007,
+// LB E008, RB E009, D-pad up/down/left/right E00A to E00D, LT E010, RT E011. The 360 has none
+// for a stick's movement; ours are E00E (left stick) and E00F (right stick), which it leaves
+// unused. 0 for PadInput::kCount.
+char16_t ButtonGlyph(PadInput input);
+// Cells in the glyph picture, one per character from kGlyphFirst: 8 across, the Xbox set in
+// the first kGlyphsPerSet cells and the PlayStation set in the next.
+constexpr char16_t kGlyphFirst = 0xE000;
+constexpr int kGlyphColumns = 8;
+constexpr int kGlyphsPerSet = 32;
+
 }  // namespace fearpc

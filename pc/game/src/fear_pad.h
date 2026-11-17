@@ -16,6 +16,13 @@
 //   PadLookLog          0   1 logs the look once a second to pad_look_log.txt in the user directory
 //   PadMeasure          0   1 measures the turn rate per deflection into pad_measure.txt
 //   PadRumble           1   vibration strength, 0 to 1 (0 off)
+//   PadGlyphs           1   button prompts: 0 the PC's key names, 1 by the controller in use
+//                           (key names with none), 2 Xbox buttons, 3 PlayStation buttons
+//
+// Button prompts: with a controller in use, the name of a command's key (in "Press E to ..."
+// and the like) is the 360's character for the button the command is on, and CLTGUIString
+// draws the button there from Interface\FearPC\PadGlyphs.dds, our own picture of both button
+// sets (pc/tools/make_glyphs.py).
 //
 // Vibration: the PC game computes motor strengths from rumble effects but sends them nowhere,
 // and its effect files have none, so the pad also rumbles for your shots, damage you take and
@@ -37,6 +44,7 @@ struct FearPadSettings
 	int		nSensitivity;	// percent of the 360's turn rates
 	bool	bSoftLock;		// PadSoftLock: the slowdown on enemies
 	int		nRumble;		// percent
+	uint8	nGlyphs;		// PadGlyphs
 };
 FearPadSettings FearPadGetSettings();
 void FearPadSetSettings(const FearPadSettings& settings);
@@ -47,6 +55,13 @@ void FearPadFrame();
 void FearPadCameraEffects(const LTRigidTransform& tEffect, const float* pMotors);
 bool FearPadCommandOn(uint32 nCommand);
 float FearPadCommandValue(uint32 nCommand);
+// The button a command is on, as a one-character string for CLTGUIString; NULL when prompts
+// show key names or the command has no button.
+const wchar_t* FearPadGlyph(uint32 nCommand);
+// Which buttons to draw: 0 none, 1 Xbox, 2 PlayStation.
+int FearPadGlyphSet();
+// CLTGUIString's glyph renderer (fear_pad_glyphs.cpp).
+void FearPadGlyphRender(uint32 nGlyph, float fX, float fY, float fSize, uint32 nColor);
 // The turn for this frame in radians (yaw positive right, pitch positive down); false when no
 // pad is in use.
 bool FearPadLook(float fFrameTime, float* pYaw, float* pPitch);

@@ -9,11 +9,15 @@
 #include "ClientWeaponMgr.h"
 #include "CommandIDs.h"
 #include "GameClientShell.h"
+#include "HUDMgr.h"
+#include "HUDSwap.h"
+#include "HUDWeaponList.h"
 #include "InterfaceMgr.h"
 #include "MsgIDs.h"
 #include "PlayerCamera.h"
 #include "PlayerMgr.h"
 #include "PlayerStats.h"
+#include "ProfileMgr.h"
 #include "TargetMgr.h"
 #include "VarTrack.h"
 #include "ltfileoperations.h"
@@ -34,6 +38,7 @@ VarTrack g_vtPadSoftLock;
 VarTrack g_vtPadMeasure;
 VarTrack g_vtPadLookLog;
 VarTrack g_vtPadRumble;
+VarTrack g_vtPadGlyphs;
 
 // Vibration, per motor (0 the large low-frequency one, 1 the small high-frequency one).
 float g_fFxMotors[2] = {};    // from rumble effects, this camera update
@@ -451,6 +456,7 @@ const SavedVar kSavedVars[] = {
 	{ &g_vtPadLookSensitivity, "PadLookSensitivity" },
 	{ &g_vtPadSoftLock, "PadSoftLock" },
 	{ &g_vtPadRumble, "PadRumble" },
+	{ &g_vtPadGlyphs, "PadGlyphs" },
 };
 
 void SettingsPath(char* szPath, uint32 nSize)
@@ -524,6 +530,8 @@ void Start()
 	g_vtPadMeasure.Init(g_pLTClient, "PadMeasure", NULL, 0.0f);
 	g_vtPadLookLog.Init(g_pLTClient, "PadLookLog", NULL, 0.0f);
 	g_vtPadRumble.Init(g_pLTClient, "PadRumble", NULL, 1.0f);
+	g_vtPadGlyphs.Init(g_pLTClient, "PadGlyphs", NULL, 1.0f);
+	CLTGUIString::SetGlyphRenderer(FearPadGlyphRender);
 	LoadSettings();
 	if (!fearpc::PadInit())
 		g_pLTClient->CPrint("Pads: SDL could not start; controllers disabled.");
@@ -542,6 +550,7 @@ FearPadSettings FearPadGetSettings()
 	s.nSensitivity = (int)(g_vtPadLookSensitivity.GetFloat() * 100.0f + 0.5f);
 	s.bSoftLock = g_vtPadSoftLock.GetFloat() >= 0.5f;
 	s.nRumble = (int)(LTCLAMP(g_vtPadRumble.GetFloat(), 0.0f, 1.0f) * 100.0f + 0.5f);
+	s.nGlyphs = (uint8)LTCLAMP((int)(g_vtPadGlyphs.GetFloat() + 0.5f), 0, 3);
 	return s;
 }
 
@@ -554,12 +563,80 @@ void FearPadSetSettings(const FearPadSettings& s)
 	g_vtPadLookSensitivity.SetFloat(s.nSensitivity / 100.0f);
 	g_vtPadSoftLock.SetFloat(s.bSoftLock ? 1.0f : 0.0f);
 	g_vtPadRumble.SetFloat(s.nRumble / 100.0f);
+	g_vtPadGlyphs.SetFloat((float)s.nGlyphs);
 	SaveSettings();
+}
+
+int FearPadGlyphSet()
+{
+	Start();
+	switch ((int)(g_vtPadGlyphs.GetFloat() + 0.5f))
+	{
+		case 1:
+		{
+			// The pad as SDL sees it, not g_State: prompts keep their buttons while the game
+			// is behind another window.
+			const fearpc::PadState& pad = fearpc::PadCurrent();
+			if (g_vtPadEnabled.GetFloat() < 0.5f || !pad.connected)
+				return 0;
+			return pad.family == fearpc::PadFamily::kPlayStation ? 2 : 1;
+		}
+		case 2:		return 1;
+		case 3:		return 2;
+		default:	return 0;
+	}
+}
+
+const wchar_t* FearPadGlyph(uint32 nCommand)
+{
+	if (!FearPadGlyphSet())
+		return NULL;
+	PadAction action;
+	switch (nCommand)
+	{
+		case COMMAND_ID_FIRING:			action = PadAction::kFire; break;
+		case COMMAND_ID_THROW_GRENADE:	action = PadAction::kThrowGrenade; break;
+		case COMMAND_ID_NEXT_WEAPON:	action = PadAction::kNextWeapon; break;
+		case COMMAND_ID_SLOWMO:			action = PadAction::kSlowMo; break;
+		case COMMAND_ID_JUMP:			action = PadAction::kJump; break;
+		case COMMAND_ID_ALT_FIRING:		action = PadAction::kMelee; break;
+		case COMMAND_ID_ACTIVATE:
+		case COMMAND_ID_RELOAD:			action = PadAction::kUseOrReload; break;
+		case COMMAND_ID_MEDKIT:			action = PadAction::kMedkit; break;
+		case COMMAND_ID_NEXT_GRENADE:	action = PadAction::kNextGrenade; break;
+		case COMMAND_ID_FLASHLIGHT:		action = PadAction::kFlashlight; break;
+		case COMMAND_ID_LEAN_LEFT:		action = PadAction::kLeanLeft; break;
+		case COMMAND_ID_LEAN_RIGHT:		action = PadAction::kLeanRight; break;
+		case COMMAND_ID_DUCK:			action = PadAction::kCrouch; break;
+		case COMMAND_ID_ZOOM_IN:		action = PadAction::kZoom; break;
+		case COMMAND_ID_MISSION:		action = PadAction::kObjectives; break;
+		case COMMAND_ID_FORWARD_AXIS:	action = PadAction::kMoveY; break;
+		case COMMAND_ID_STRAFE_AXIS:	action = PadAction::kMoveX; break;
+		default:						return NULL;
+	}
+	static wchar_t s_szGlyph[2];
+	s_szGlyph[0] = (wchar_t)fearpc::ButtonGlyph(fearpc::LayoutInput(Layout(), action));
+	s_szGlyph[1] = 0;
+	return s_szGlyph[0] ? s_szGlyph : NULL;
 }
 
 void FearPadFrame()
 {
 	Start();
+
+	// The HUD keeps some key names (the pick-up prompt, the weapon list): have it ask again
+	// when the buttons to show change, with a pad plugged in or the layout switched.
+	static int s_nShown = -1;
+	const int nShown = FearPadGlyphSet() * 2 + (int)Layout();
+	if (nShown != s_nShown && g_pHUDMgr && g_pProfileMgr && g_pProfileMgr->GetCurrentProfile())
+	{
+		s_nShown = nShown;
+		CHUDSwap::UpdateTriggerName();
+		if (g_pHUDWeaponList)
+			g_pHUDWeaponList->UpdateTriggerNames();
+		if (g_pHUDGrenadeList)
+			g_pHUDGrenadeList->UpdateTriggerNames();
+	}
 
 	g_LastState = g_State;
 	// The right stick comes as the pad reports it, not pulled in to the unit circle: the look

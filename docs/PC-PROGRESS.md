@@ -2,7 +2,7 @@
 
 Milestone 1 of [PC-PLAN.md](PC-PLAN.md): the 360's controller on Windows PC F.E.A.R. (base game). Findings, with the binary hashes they apply to: [PC-FINDINGS.md](PC-FINDINGS.md). Nothing here has been pushed.
 
-## Where it stands (2026-11-15)
+## Where it stands (2026-11-17)
 
 Handoff for the next session: [PC-HANDOFF.md](PC-HANDOFF.md).
 
@@ -16,6 +16,7 @@ Handoff for the next session: [PC-HANDOFF.md](PC-HANDOFF.md).
 | 6. Pad input | Play-tested with an Xbox Series X controller (Bluetooth): good, except X never reloaded (fixed and confirmed in a second session). SDL3 (static), the 360's Normal and Lean layouts, menus by pad, X as use-or-reload, Start for the menu, rumble (second version, confirmed working in play). |
 | 7. 360 look | Done (2026-11-15): follows the 360's own stick code (PC-FINDINGS.md), play-tested good on Windows and the Steam Deck. #139 closed. |
 | 8. Play test | Five play tests, see below. |
+| 9. Button glyphs | First pass done (2026-11-17, #145): prompts show the pad's button, seen working on the Steam Deck (the pick-up prompt shows X). See "Button glyphs". |
 
 ### Play test 5 (2026-11-15): the stick fixed
 
@@ -84,6 +85,16 @@ Console variables (in the game's console, or `+Name value` on the command line t
 
 The Controller screen saves its settings to `<user dir>\fearpc_pad.txt`, which starts with `Version 2`. A file without that line is from before the look followed the 360's code: its `PadLookRamp`, `PadLookSensitivity` and `PadSoftLock` are ignored, so the defaults above apply, and the rest (on/off, layout, vibration) is kept.
 
+## Button glyphs
+
+With a controller in use, a command's key name is the 360's character for the button it is on (U+E000 and up, `pc/core` `ButtonGlyph`), so the pick-up and use prompts, the health hint and the loading-screen tips all get it from `CUserProfile::GetTriggerNameFromCommandID`. `CLTGUIString` (patch 0007) keeps spaces where a button character is, sized to the font, and draws the button over them from `Interface\FearPC\PadGlyphs.dds`.
+
+- The picture is our own art, both an Xbox and a PlayStation set, drawn by `pc/tools/make_glyphs.py` during `build.ps1` (Python with Pillow). It is a loose file in the overlay, beside the DLLs; `launch.ps1` and `deploy-deck.ps1` copy it. Nothing comes from either console's files.
+- `PadGlyphs` (Controller screen, "Button prompts"): Keyboard, Automatic (by the connected pad; the Deck's controls report as Xbox), Xbox, PlayStation. The Controller screen also lists each action with its button for the chosen layout.
+- The glyph members of `CLTGUIString` are not under `FEAR_PC_PAD`. The first build had them under it, and `Game_Shared_Client` (compiled without it) then read `CGameClientShell::m_sfxMgr` at the wrong offset: the game crashed when the first shot was traced. Any change to a class in a header shared between the libraries must be the same in all of them.
+- Not done: the weapon list's hotkeys still show keyboard numbers; menus have no button bar; the PlayStation set has not been seen with a PlayStation pad; a button character in a string that takes its glyphs from another string's texture is left blank.
+- The taken-down console content mod's source has no button glyph code (its `hudicon` is weapon icons and its `consolefont` the Instant Action results fonts); what it draws for buttons is inside its closed DLL.
+
 ## EchoPatch
 
 Not in the first pass (decided 2026-11-06): the goal is the 360's controller, and EchoPatch has its own SDL controller support with the PC's layout and stick code, which would double every input alongside ours. Briefly tried in the dev copy with `SDLGamepadSupport = 0`, then taken out again. It may come back later as a toggle, with its controller support off whenever ours is on.
@@ -123,7 +134,7 @@ Turn the controller on, check `fearpc_pad_probe.exe` sees it, then `launch.ps1`.
 
 ## Known gaps
 
-- Button prompts still show the PC's key names (milestone: glyphs).
+- The weapon list's hotkeys still show the keyboard's numbers with a pad (the pad has no button for them).
 - Rumble is ours, not the 360's: the 360's comes from rumble effects in its effect files, which the PC game doesn't have. The strengths (shots, damage, shake) are first guesses to tune by feel.
 - The 360's aim assist (an added yaw toward the target, from the weapon's `TargetAssistance`) is not ported, nor zoom before the curve or the 0.5 s input blackout. See PC-FINDINGS.md.
 - #137 (hold X to pick up a weapon) has a fix in but hasn't been confirmed in play.

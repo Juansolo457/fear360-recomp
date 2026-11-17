@@ -54,4 +54,30 @@ PadInput LayoutInput(PadLayout layout, PadAction action) {
   return PadInput::kCount;
 }
 
+char16_t ButtonGlyph(PadInput input) {
+  switch (input) {
+    case I::kA: return 0xE000;
+    case I::kB: return 0xE001;
+    case I::kX: return 0xE002;
+    case I::kY: return 0xE003;
+    case I::kStart: return 0xE004;
+    case I::kBack: return 0xE005;
+    case I::kLeftStick: return 0xE006;
+    case I::kRightStick: return 0xE007;
+    case I::kLeftShoulder: return 0xE008;
+    case I::kRightShoulder: return 0xE009;
+    case I::kDpadUp: return 0xE00A;
+    case I::kDpadDown: return 0xE00B;
+    case I::kDpadLeft: return 0xE00C;
+    case I::kDpadRight: return 0xE00D;
+    case I::kLeftX:
+    case I::kLeftY: return 0xE00E;
+    case I::kRightX:
+    case I::kRightY: return 0xE00F;
+    case I::kLeftTrigger: return 0xE010;
+    case I::kRightTrigger: return 0xE011;
+    default: return 0;
+  }
+}
+
 }  // namespace fearpc

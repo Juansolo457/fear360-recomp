@@ -1,0 +1,270 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Tue, 17 Nov 2026 12:32:09 -0800
+Subject: [PATCH] FEAR_PC_PAD: controller button glyphs in text (CLTGUIString),
+ a command's key name is its button
+
+---
+ Game/ClientShellDLL/ProfileMgr.cpp |   8 ++
+ Game/Libs/LTGUIMgr/ltguistring.cpp | 131 ++++++++++++++++++++++++++++-
+ Game/Libs/LTGUIMgr/ltguistring.h   |  31 ++++++-
+ 3 files changed, 166 insertions(+), 4 deletions(-)
+
+diff --git a/Game/ClientShellDLL/ProfileMgr.cpp b/Game/ClientShellDLL/ProfileMgr.cpp
+index cf0271d..0d1b32c 100644
+--- a/Game/ClientShellDLL/ProfileMgr.cpp
++++ b/Game/ClientShellDLL/ProfileMgr.cpp
+@@ -46,6 +46,9 @@
+ 
+ #include "iltinput.h"
+ #include "bindmgr.h"
++#if defined(FEAR_PC_PAD)
++#include "fear_pad.h"
++#endif
+ 
+ static ILTInput *g_pLTInput;
+ define_holder(ILTInput, g_pLTInput);
+@@ -1296,6 +1299,11 @@ void CUserProfile::Term()
+ 
+ const wchar_t* CUserProfile::GetTriggerNameFromCommandID(int nCommand)
+ {
++#ifdef FEAR_PC_PAD
++	// With a controller in use, the button the command is on, as the 360's button character.
++	if (const wchar_t* pGlyph = FearPadGlyph((uint32)nCommand))
++		return pGlyph;
++#endif
+ 	SetBindings();
+ 	static CBindMgr::TBindingList s_aBindings;
+ 	s_aBindings.resize(0);
+diff --git a/Game/Libs/LTGUIMgr/ltguistring.cpp b/Game/Libs/LTGUIMgr/ltguistring.cpp
+index 58f1eb3..bc411fb 100644
+--- a/Game/Libs/LTGUIMgr/ltguistring.cpp
++++ b/Game/Libs/LTGUIMgr/ltguistring.cpp
+@@ -35,6 +35,123 @@ static float GetRandom(float min, float max)
+ //the interface to the client
+ extern ILTClient*			g_pLTClient;
+ 
++CLTGUIString::GlyphRenderFn CLTGUIString::s_pGlyphRenderer = NULL;
++
++static bool IsGlyph(wchar_t c)
++{
++	return c >= CLTGUIString::kGlyphFirst && c <= CLTGUIString::kGlyphLast;
++}
++
++void CLTGUIString::SetGlyphText(const wchar_t* pText)
++{
++	m_sGlyphSource.erase();
++	m_Glyphs.clear();
++	for (const wchar_t* p = pText; *p; ++p)
++	{
++		if (IsGlyph(*p))
++		{
++			m_sGlyphSource = pText;
++			BuildGlyphString(m_nGlyphSpaces);
++			return;
++		}
++	}
++	m_sString = pText;
++}
++
++// m_sString from m_sGlyphSource, with nSpaces spaces for each button.
++void CLTGUIString::BuildGlyphString(uint32 nSpaces)
++{
++	m_nGlyphSpaces = nSpaces;
++	m_sString.erase();
++	m_Glyphs.clear();
++	for (const wchar_t* p = m_sGlyphSource.c_str(); *p; ++p)
++	{
++		if (!IsGlyph(*p))
++		{
++			m_sString += *p;
++			continue;
++		}
++		SGlyph glyph;
++		glyph.m_nIndex = (uint32)m_sString.length();
++		glyph.m_nGlyph = (uint32)(*p - kGlyphFirst);
++		m_Glyphs.push_back(glyph);
++		m_sString.append(nSpaces, L' ');
++	}
++}
++
++// How wide a space is depends on the font, so once the texture exists, measure one and give
++// each button enough of them for a square as tall as the text.
++void CLTGUIString::FitGlyphs()
++{
++	if (m_Glyphs.empty() || !m_hString)
++		return;
++
++	LTRect2n rPlacementRect;
++	LTRect2n rBlackBox;
++	LTVector2 vUVPos;
++	LTVector2 vUVDims;
++	if (g_pTextureString->GetCharRect(m_hString, m_Glyphs[0].m_nIndex, rPlacementRect, rBlackBox, vUVPos, vUVDims) != LT_OK)
++		return;
++	int32 nSpace = rPlacementRect.GetWidth();
++	int32 nSize = m_Font.m_nHeight ? (int32)m_Font.m_nHeight : rPlacementRect.GetHeight();
++	if (nSpace <= 0 || nSize <= 0)
++		return;
++
++	uint32 nSpaces = (uint32)((nSize + nSize / 4 + nSpace - 1) / nSpace);
++	if (nSpaces == m_nGlyphSpaces)
++		return;
++	BuildGlyphString(nSpaces);
++
++	LTRESULT res;
++	if (m_hSourceString)
++		res = g_pTextureString->RecreateTextureSubstring(m_hString, m_sString.c_str(), m_hSourceString);
++	else
++		res = g_pTextureString->RecreateTextureString(m_hString, m_sString.c_str(), m_Font);
++	if (res != LT_OK)
++		FlushTexture();
++	else if (m_nWidth)
++		g_pTextureString->WordWrapString(m_hString, m_nWidth);
++}
++
++void CLTGUIString::RenderGlyphs(uint32 nColor, const LTVector2& vAnchorScale, const LTRect2n* pClipRect)
++{
++	if (m_Glyphs.empty() || !m_hString || !s_pGlyphRenderer)
++		return;
++
++	// Where the string's own space starts on screen: the anchor is a fraction of its extents.
++	LTRect2n rExtents;
++	if (g_pTextureString->GetStringExtents(m_hString, rExtents) != LT_OK)
++		return;
++	float fX = m_vPos.x - ((float)rExtents.Left() + vAnchorScale.x * (float)rExtents.GetWidth());
++	float fY = m_vPos.y - ((float)rExtents.Top() + vAnchorScale.y * (float)rExtents.GetHeight());
++
++	for (uint32 n = 0; n < m_Glyphs.size(); ++n)
++	{
++		LTRect2n rFirst, rLast, rBlackBox;
++		LTVector2 vUVPos, vUVDims;
++		uint32 nFirst = m_Glyphs[n].m_nIndex;
++		if (g_pTextureString->GetCharRect(m_hString, nFirst, rFirst, rBlackBox, vUVPos, vUVDims) != LT_OK)
++			continue;
++		if (g_pTextureString->GetCharRect(m_hString, nFirst + m_nGlyphSpaces - 1, rLast, rBlackBox, vUVPos, vUVDims) != LT_OK
++			|| rLast.Top() != rFirst.Top())
++		{
++			// word wrap split the run: keep the button on the first line
++			rLast = rFirst;
++		}
++
++		float fSize = m_Font.m_nHeight ? (float)m_Font.m_nHeight : (float)rFirst.GetHeight();
++		float fLineHeight = rFirst.GetHeight() > 0 ? (float)rFirst.GetHeight() : fSize;
++		float fLeft = floorf(fX + ((float)rFirst.Left() + (float)rLast.Right() - fSize) * 0.5f);
++		float fTop = floorf(fY + (float)rFirst.Top() + (fLineHeight - fSize) * 0.5f);
++
++		if (pClipRect && (fLeft < (float)pClipRect->Left() || fTop < (float)pClipRect->Top() ||
++			fLeft + fSize > (float)pClipRect->Right() || fTop + fSize > (float)pClipRect->Bottom()))
++			continue;
++
++		s_pGlyphRenderer(m_Glyphs[n].m_nGlyph, fLeft, fTop, fSize, nColor);
++	}
++}
++
+ CLTGUIString::CLTGUIString() :
+ 	m_hString(NULL),
+ 	m_hSourceString(NULL),
+@@ -49,6 +166,7 @@ CLTGUIString::CLTGUIString() :
+ 	m_vGlowSize(1.2f,1.2f),
+ 	m_fTransMod(-1.0f),
+ 	m_bEllipsis(false)
++	,m_nGlyphSpaces(2)
+ {	
+ 	m_vPos.Init();
+ }
+@@ -101,14 +219,16 @@ void CLTGUIString::SetText(const wchar_t *pText, bool bEllipsis)
+ 	{
+ 		FlushTexture();
+ 		m_sString.erase();
++		m_sGlyphSource.erase();
++		m_Glyphs.clear();
+ 		return;
+ 	}
+ 
+ 	// Ignore if it's the same string.
+-	if( LTStrEquals( m_sString.c_str( ), pText ))
++	if( LTStrEquals( GetText( ), pText ))
+ 		return;
+ 
+-	m_sString = pText;
++	SetGlyphText(pText);
+ 
+ 	//if we already have a texture, rebuild it
+ 	if (IsValid())
+@@ -244,6 +364,8 @@ void CLTGUIString::CreateTexture()
+ 	{
+ 		g_pTextureString->WordWrapString(m_hString, m_nWidth);
+ 	}
++
++	FitGlyphs();
+ }
+ 
+ LTRESULT CLTGUIString::Render()
+@@ -287,7 +409,9 @@ LTRESULT CLTGUIString::Render()
+ 		RenderString( m_vPos, FadeARGB(m_nColor,fAlpha), vAnchorScale,LTVector2(1.0f,0.0f), LTVector2(0.0f,1.0f), vScale );
+ 	}
+ 
+-	return RenderString( m_vPos, m_nColor, vAnchorScale );
++	LTRESULT res = RenderString( m_vPos, m_nColor, vAnchorScale );
++	RenderGlyphs(m_nColor, vAnchorScale, NULL);
++	return res;
+ }
+ 
+ LTRESULT CLTGUIString::RenderClipped( const LTRect2n& rClipRect )
+@@ -329,6 +453,7 @@ LTRESULT CLTGUIString::RenderClipped( const LTRect2n& rClipRect )
+ 	}
+ 	
+ 
++	RenderGlyphs(m_nColor, vAnchorScale, &rClipRect);
+ 	 return res;
+ }
+ 
+diff --git a/Game/Libs/LTGUIMgr/ltguistring.h b/Game/Libs/LTGUIMgr/ltguistring.h
+index 5a15298..236be6d 100644
+--- a/Game/Libs/LTGUIMgr/ltguistring.h
++++ b/Game/Libs/LTGUIMgr/ltguistring.h
+@@ -39,7 +39,21 @@ public:
+ 	void SetText(const wchar_t *pText, bool bEllipsis = false);
+ 
+ 
+-	const wchar_t* GetText() const {return m_sString.c_str(); }
++	// The text as it was set, button characters included.
++	const wchar_t* GetText() const {return m_sGlyphSource.empty() ? m_sString.c_str() : m_sGlyphSource.c_str(); }
++
++	// Controller button glyphs. The Xbox 360 game writes a button into its text as a character
++	// of its font (U+E000 A, E001 B, E002 X, E003 Y, E004 Start, E005 Back, E006 L3, E007 R3,
++	// E008 LB, E009 RB, E00A to E00D D-pad up/down/left/right, E010 LT, E011 RT). The PC's
++	// fonts have no such characters, so a string holds spaces in their place and asks this
++	// function to draw each button over them: its number (the character less U+E000), the
++	// square to fill and the text's color.
++	// None of this is under FEAR_PC_PAD: every library that includes this header must see the
++	// same class (CGameClientShell holds strings by value, and shared code reads members that
++	// come after them).
++	enum { kGlyphFirst = 0xE000, kGlyphLast = 0xE01F };
++	typedef void (*GlyphRenderFn)(uint32 nGlyph, float fX, float fY, float fSize, uint32 nColor);
++	static void SetGlyphRenderer(GlyphRenderFn pFn) { s_pGlyphRenderer = pFn; }
+ 
+ 
+ 	//does nothing if source string is used
+@@ -102,6 +116,21 @@ private:
+ 
+ 	void		RecalcEllipsis( const LTRect2n& rClipRect );
+ 
++	struct SGlyph
++	{
++		uint32	m_nIndex;	// of its first space in m_sString
++		uint32	m_nGlyph;
++	};
++	void		SetGlyphText(const wchar_t* pText);
++	void		BuildGlyphString(uint32 nSpaces);
++	void		FitGlyphs();
++	void		RenderGlyphs(uint32 nColor, const LTVector2& vAnchorScale, const LTRect2n* pClipRect);
++
++	std::wstring		m_sGlyphSource;		// the text with its button characters; empty if it has none
++	std::vector<SGlyph>	m_Glyphs;
++	uint32				m_nGlyphSpaces;		// spaces standing in for each button
++	static GlyphRenderFn s_pGlyphRenderer;
++
+ 	CFontInfo		m_Font;
+ 	HTEXTURESTRING	m_hString;
+ 	HTEXTURESTRING	m_hSourceString;

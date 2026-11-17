@@ -35,6 +35,10 @@ if (-not $Retail) {
         if (-not (Test-Path $built)) { throw "Missing $built. Run pc/tools/build.ps1." }
         Copy-Item $built $overlay
     }
+    # Loose files the DLLs read, at their resource paths (the button picture for prompts).
+    $interface = Join-Path $out 'game\Interface'
+    if (-not (Test-Path $interface)) { throw "Missing $interface. Run pc/tools/build.ps1." }
+    Copy-Item -Recurse -Force $interface $overlay
     $lines += $overlay
 }
 $archcfg = Join-Path $out 'fearpc.archcfg'

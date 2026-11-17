@@ -121,6 +121,16 @@ void TestLayouts() {
   CHECK(LayoutInput(PadLayout::kNormal, PadAction::kUseOrReload) == PadInput::kX);
   CHECK(LayoutInput(PadLayout::kLeaner, PadAction::kLeanLeft) == PadInput::kLeftShoulder);
   CHECK(LayoutInput(PadLayout::kLeaner, PadAction::kSlowMo) == PadInput::kY);
+  // The 360's button characters, and every input has one inside the first set of cells.
+  CHECK(ButtonGlyph(PadInput::kA) == 0xE000);
+  CHECK(ButtonGlyph(PadInput::kRightShoulder) == 0xE009);
+  CHECK(ButtonGlyph(PadInput::kDpadRight) == 0xE00D);
+  CHECK(ButtonGlyph(PadInput::kRightTrigger) == 0xE011);
+  CHECK(ButtonGlyph(PadInput::kCount) == 0);
+  for (int i = 0; i < static_cast<int>(PadInput::kCount); ++i) {
+    const char16_t c = ButtonGlyph(static_cast<PadInput>(i));
+    CHECK(c >= kGlyphFirst && c < kGlyphFirst + kGlyphsPerSet);
+  }
   // Every action has exactly one input, and no input carries two actions.
   for (PadLayout layout : {PadLayout::kNormal, PadLayout::kLeaner}) {
     size_t count = 0;
