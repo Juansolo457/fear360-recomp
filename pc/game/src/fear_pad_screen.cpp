@@ -36,22 +36,24 @@ namespace
 		{ L"Full speed", 2 },
 	};
 
-	// Under the settings, what each button does in the chosen layout: two actions a row, each
-	// its button (drawn by CLTGUIString from the 360's button character) and its name.
+	// Under the settings, what each button does in the chosen layout: four actions a row, each
+	// its button (drawn by CLTGUIString from the 360's button character) and its name. Four rows
+	// is what fits under the settings at 720p.
 	struct LegendEntry
 	{
 		fearpc::PadAction eAction;
 		const wchar_t* szName;
 	};
-	const LegendEntry kLegend[][2] = {
-		{ { fearpc::PadAction::kFire, L"Fire" },				{ fearpc::PadAction::kThrowGrenade, L"Throw grenade" } },
-		{ { fearpc::PadAction::kJump, L"Jump" },				{ fearpc::PadAction::kMelee, L"Melee" } },
-		{ { fearpc::PadAction::kUseOrReload, L"Use, reload" },	{ fearpc::PadAction::kMedkit, L"Medkit" } },
-		{ { fearpc::PadAction::kSlowMo, L"Slow-mo" },			{ fearpc::PadAction::kNextWeapon, L"Next weapon" } },
-		{ { fearpc::PadAction::kNextGrenade, L"Next grenade" },	{ fearpc::PadAction::kFlashlight, L"Flashlight" } },
-		{ { fearpc::PadAction::kLeanLeft, L"Lean left" },		{ fearpc::PadAction::kLeanRight, L"Lean right" } },
-		{ { fearpc::PadAction::kCrouch, L"Crouch" },			{ fearpc::PadAction::kZoom, L"Zoom" } },
-		{ { fearpc::PadAction::kObjectives, L"Objectives" },	{ fearpc::PadAction::kMenu, L"Menu" } },
+	const int kLegendColumns = 4;
+	const LegendEntry kLegend[][kLegendColumns] = {
+		{ { fearpc::PadAction::kFire, L"Fire" },				{ fearpc::PadAction::kThrowGrenade, L"Throw grenade" },
+		  { fearpc::PadAction::kJump, L"Jump" },				{ fearpc::PadAction::kMelee, L"Melee" } },
+		{ { fearpc::PadAction::kUseOrReload, L"Use, reload" },	{ fearpc::PadAction::kMedkit, L"Medkit" },
+		  { fearpc::PadAction::kSlowMo, L"Slow-mo" },			{ fearpc::PadAction::kNextWeapon, L"Next weapon" } },
+		{ { fearpc::PadAction::kNextGrenade, L"Next grenade" },	{ fearpc::PadAction::kFlashlight, L"Flashlight" },
+		  { fearpc::PadAction::kLeanLeft, L"Lean left" },		{ fearpc::PadAction::kLeanRight, L"Lean right" } },
+		{ { fearpc::PadAction::kCrouch, L"Crouch" },			{ fearpc::PadAction::kZoom, L"Zoom" },
+		  { fearpc::PadAction::kObjectives, L"Objectives" },	{ fearpc::PadAction::kMenu, L"Menu" } },
 	};
 	const int kLegendRows = LTARRAYSIZE(kLegend);
 	CLTGUIColumnCtrl* g_pLegend[kLegendRows] = {};
@@ -64,7 +66,7 @@ namespace
 		{
 			if (!g_pLegend[nRow])
 				continue;
-			for (int nSide = 0; nSide < 2; ++nSide)
+			for (int nSide = 0; nSide < kLegendColumns; ++nSide)
 			{
 				wchar_t szGlyph[2] = { (wchar_t)fearpc::ButtonGlyph(fearpc::LayoutInput(eLayout, kLegend[nRow][nSide].eAction)), 0 };
 				g_pLegend[nRow]->SetString((uint8)(nSide * 2), szGlyph);
@@ -165,14 +167,16 @@ bool CScreenJoystick::Build()
 
 	// The legend, in smaller text so the screen holds it all.
 	const uint32 nLegendHeight = LTMAX(nHeight * 2 / 3, 12);
-	const uint32 nGlyphWidth = nLegendHeight * 2, nNameWidth = (uint32)(nGap + nWidth) / 2 - nGlyphWidth;
+	// Wider than the settings rows: the longest name ("Throw grenade") needs about 135 at this size.
+	const uint32 nLegendWidth = (uint32)(nGap + nWidth) + 160;
+	const uint32 nGlyphWidth = nLegendHeight * 2, nNameWidth = nLegendWidth / kLegendColumns - nGlyphWidth;
 	CLTGUICtrl_create lcs;
 	lcs.rnBaseRect.m_vMin.Init();
-	lcs.rnBaseRect.m_vMax = LTVector2n(nGap + nWidth, (int32)nLegendHeight);
+	lcs.rnBaseRect.m_vMax = LTVector2n((int32)nLegendWidth, (int32)nLegendHeight);
 	for (int nRow = 0; nRow < kLegendRows; ++nRow)
 	{
 		CLTGUIColumnCtrl* pRow = AddColumnCtrl(lcs, false, NULL, nLegendHeight);
-		for (int nSide = 0; nSide < 2; ++nSide)
+		for (int nSide = 0; nSide < kLegendColumns; ++nSide)
 		{
 			pRow->AddColumn(L"", nGlyphWidth);
 			pRow->AddColumn(kLegend[nRow][nSide].szName, nNameWidth);
