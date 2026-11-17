@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <initializer_list>
 
+#include "fearpc/instant_action.h"
 #include "fearpc/layout.h"
 #include "fearpc/look.h"
 #include "fearpc/pad.h"
@@ -144,9 +145,45 @@ void TestLayouts() {
   }
 }
 
+// The 360's Instant Action score: each term on its own, then together.
+void TestInstantAction() {
+  InstantActionRun run;
+  CHECK(Near(InstantActionScore(run), 0.0f));
+  CHECK(Near(InstantActionHitRate(run), 0.0f));  // no shots
+
+  const int combos[] = {2, 3, 1};  // a "combo" of 1 doesn't count
+  run.completed = true;
+  run.seconds = 300.0f;
+  run.shots = 100;
+  run.hits = 50;
+  run.enemy_kills = 20;
+  run.medkits = 3;
+  run.armor = 40.0f;
+  run.boosters = 1;
+  run.combos = combos;
+  run.combo_count = 3;
+  CHECK(Near(InstantActionTimeRemaining(run), 600.0f));
+  CHECK(Near(InstantActionHitRate(run), 0.5f));
+  CHECK(InstantActionComboKills(run) == 5);
+  // 30 medkits + 50 hit rate + 40 armor + 10 booster + 5*(4+9) combos + 200 kills + 300 time
+  CHECK(Near(InstantActionScore(run), 695.0f));
+
+  // A failed run keeps everything but the time.
+  run.completed = false;
+  CHECK(Near(InstantActionTimeRemaining(run), 0.0f));
+  CHECK(Near(InstantActionScore(run), 395.0f));
+
+  // Past the clock the time is worth nothing, not less.
+  run.completed = true;
+  run.seconds = 1000.0f;
+  CHECK(Near(InstantActionTimeRemaining(run), 0.0f));
+  CHECK(Near(InstantActionScore(run), 395.0f));
+}
+
 }  // namespace
 
 int main() {
+  TestInstantAction();
   TestCurve();
   TestLook();
   TestDeadZones();

@@ -80,3 +80,40 @@ From `default.xex` SHA-256 `e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fc
 - **Soft lock is not a slowdown.** `TurningSoftLock*Factor` only switch on a turning target manager (`CPlayerMgr+0x5B4`). Its effect is an added yaw toward the target, from the weapon's `TargetAssistance` inner and outer angles, strength and rate.
 
 The PC build's look (`pc/core/src/look.cpp`) follows this since 2026-11-15, except for the target-assist pull, zoom before the curve and the blackout. Since the review of 2026-11-15 the stick's turn also takes only the melee and death dampers (patch 0006 had applied `MouseSloMoDampen` and `MouseAimDampen` to it too), and the right stick reaches the look as the pad reports it, without the pull back to the unit circle that slowed full diagonals. `fear_stick_measure=N` in the recomp (`port-nx/src/fear_mkb.cpp`) drives the same scripted stick through the 360 code and logs the yaw per deflection; it has not been run in a level yet.
+
+## Instant Action on the 360, from its code (title `565507D9`)
+
+Read 2026-11-17 from the recompiled executable (XEX `e7fccdf6…2792`), `Loki.gamedb` and the string database in `uberCatalog.cat`, in one pass that has not been cross-checked in play. "Inferred" marks what was not read directly.
+
+**`PitFight*` is not Instant Action.** `PitFight` (server object, vtable `0x82042C24`) and the `CPitFight*` scenes are a developer tool for spawning AI, and no world on the disc holds a PitFight object. The earlier guess in PC-PLAN.md and ARCHITECTURE.md was wrong.
+
+Instant Action is four ordinary scripted levels, a clock, and a results screen computed on the client from a larger `MissionStats`.
+
+- **Screens.** `CScreenInstantAction` (vtable `0x8202973C`, Build `sub_824C4FB0`, launch `sub_824C4E48`): four maps, Leaderboards and a difficulty list. `CScreenInstantActionSummary` (vtable `0x82029924`, Build `sub_824C62C0`, score `sub_824C7928`, retry `sub_824C6048`). No score item on the HUD; the clock is `CHUDTimerMain`.
+- **Start.** The launch sets a mode flag in the client mission manager, tells the server (message 255, one bit) and loads `Worlds\Release\InstantActionN`. On entering the world the HUD timer is set to 900 s (`sub_823685B0`); the server clears the stats and stamps the start time (`sub_82587598`).
+- **End.** Success is the world's own `msg player exitlevel`; death (mission failed) ends the run too. Both go straight to the summary screen, with no reload. When the clock runs out it only turns red; no forced end was found (not checked exhaustively).
+- **Saves** are refused while the server's mode flag is set (`sub_825A2F08`, inferred to be `CanSaveGame`).
+- **Score** (`sub_824C7928`, floats, shown with one decimal):
+  `10 x medkits + 100 x hit rate + armor + 10 x boosters + sum of 5 x c^2 + 10 x enemy kills + 0.5 x time remaining`
+  - time remaining = 900 less the run's length, not below 0, and 0 on a failed run;
+  - hit rate = hits / shots, 0 to 1;
+  - c = each combo of 2 or more: enemies killed by one shot or one explosion ("killed" inferred);
+  - medkits held, current armor, and the Health and Reflex boosters picked up (one of each per map).
+  - No difficulty multiplier, headshot, health or slow-mo term, and no ranks.
+- **Summary rows:** result (completed or failed), time remaining, enemies killed with the split by melee, firearm and explosive (damage types 8/10, 1/14, 5/17), total combo kills, hit rate, favorite weapon (most kills), armor remaining, medkits remaining, "You found the Booster!", score. Retry restarts the map.
+- **Stats the 360 adds to `MissionStats`** (server `CPlayerObj+9588`): kills by melee, firearm and explosive, per-weapon shots, hits and kills, start and end time, six collectable bytes, and a list of combo sizes. Combos come from the weapon and explosion code as messages 281 and 278 with a count; the client keeps counts above 1.
+- **Database.** `Missions/Missions/InstantAction1..4` (Layout `DefaultMP`, `ResetPlayer` 0, no default weapons) and `Missions/Levels/InstantAction1..4` (Name `IDS_INSTANT_ACTION_MAPn`, Help `IDS_BUMPER_LOADING`). `Interface/Screens/ScreenInstantAction` (FontSize 27, two lists 200 wide) and `ScreenInstantActionSummary` (row positions at x 65, y 113, 142, 239, 290, then the score at 364 or 394 with a booster). `Interface/HUD/HUDTimerMain` at (320, 22), size 27, centred.
+- **Strings:** "Instant action", "Map 1 - Distribution", "Map 2 - Rooftop", "Map 3 - Construction", "Map 4 - Vault", and the `INSTANT_ACTION_RESULT_*` row labels ("Enemies killed:", "Via melee:", "Via fire-arm:", "Via explosive:", "Total Combo Kills:", "Hit rate:", "Favorite weapon:", "Armor remaining:", "Medkits remaining:", "Time remaining:", "Score:", "Mission Completed!", "Mission Failed!").
+- **Loadouts are scripted in each world:** map 1 shotgun, full slow-mo and frag grenades; map 2 full health, full slow-mo, submachine gun; map 3 as map 1; map 4 full slow-mo only.
+- **Leaderboards** take the map index and the score as an integer; a failed run is submitted too.
+
+### What the PC source already has
+
+- A world launches from its path alone (`CMissionMgr::StartGameFromLevel`); a Missions record is optional and only adds a loadout and a name.
+- `MissionStats` (`Shared/SharedMission.h`) counts shots, hits, enemy kills and deaths, and reaches the client as `MID_PLAYER_SUMMARY`. It lacks the kill split, per-weapon records, combos, collectables and times.
+- `SCREEN_ID_END_MISSION` is in the screen list and single player switches to it at the end of a custom level, but no screen class exists for it: the place for the summary.
+- `CHUDTimer` / `g_pMainTimer->SetTime` for the clock; `CServerSaveLoadMgr::CanSaveGame` for the saves.
+
+### The maps
+
+The four maps exist only as 360 worlds (`InstantActionN.wld`, `.wldclnt`, `.wldsrvr`, big-endian). The taken-down console content mod converted them on the player's machine; its converter (Go, about 3,000 lines, of which about 1,900 are general 360-to-PC world conversion) is in the local clone, and its output from the test of 2026-11-07 is on this PC. Its maps are edited for its own closed hook (each `exitlevel` became a mission-failed message with a code), so they are a stand-in for development, not what we would ship a converter for. Its licence allows reusing its installer source in a free project that credits it, links its original page and carries its licence for the reused parts.

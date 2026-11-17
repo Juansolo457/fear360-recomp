@@ -35,6 +35,14 @@ Invoke-Deck "mkdir -p '$Dest/overlay' '$Dest/user'" | Out-Null
 if ($LASTEXITCODE) { throw 'Copying the DLLs failed.' }
 & scp -q -r -o BatchMode=yes $interface "${SshHost}:$Dest/overlay/"
 if ($LASTEXITCODE) { throw 'Copying Interface failed.' }
+# The Instant Action maps, if pc/tools/convert_ia.py has made them (build/pc/ia): converted
+# from the player's own 360 files, copied only between the player's own machines.
+$maps = Join-Path $repo 'build\pc\ia\Worlds\Release'
+if (Test-Path $maps) {
+    Invoke-Deck "mkdir -p '$Dest/overlay/Worlds/Release'" | Out-Null
+    & scp -q -o BatchMode=yes (Join-Path $maps '*.World00p') "${SshHost}:$Dest/overlay/Worlds/Release/"
+    if ($LASTEXITCODE) { throw 'Copying the Instant Action maps failed.' }
+}
 
 $archives = Invoke-Deck "cat '$GameDir/Default.archcfg'" |
     ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith(';') } |
