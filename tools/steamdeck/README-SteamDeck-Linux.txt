@@ -6,8 +6,8 @@ backend straight on the Deck's GPU driver. This package holds everything to play
 program, your game data (from your own disc) and its starting settings. It contains your game data
 and a program made from your disc: keep it to yourself.
 
-F.E.A.R. Files (Extraction Point and Perseus Mandate) comes in a later release: the menu lists it
-as coming later.
+F.E.A.R. Files (Extraction Point and Perseus Mandate) is in the package made with --files, and
+the menu then lists it as a game to play; otherwise the menu lists it as coming later.
 
 What's in it (FEAR360-SteamDeck/)
   fear-linux.sh                   the launcher: the collection menu, logs, the frame rate

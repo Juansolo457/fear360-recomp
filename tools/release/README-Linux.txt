@@ -1,4 +1,4 @@
-F.E.A.R. 360 Recompiled 1.6 for Linux and the Steam Deck
+F.E.A.R. 360 Recompiled 1.7 for Linux and the Steam Deck
 ========================================================
 
 The Xbox 360 version of F.E.A.R., statically recompiled to run natively on Linux: no Proton, no
@@ -6,6 +6,10 @@ Wine. It draws with Vulkan straight on the GPU driver, at up to 120 fps.
 
 This package holds the game's program only. It contains no game data: you need your own Xbox 360
 disc of F.E.A.R., and the game reads its files from it.
+
+It also holds the program for F.E.A.R. Files (Extraction Point and Perseus Mandate), to play with
+your own Xbox 360 disc of F.E.A.R. Files: see "F.E.A.R. Files" below. It's optional, and still
+being play-tested.
 
 What you need
   - A Steam Deck, or an x86-64 Linux PC with a Vulkan 1.3 GPU and an x86-64-v3 CPU (AVX2, FMA and BMI),
@@ -40,6 +44,17 @@ menu, along with the frame rate, field of view and the rest. It starts at the De
 Only this version of the disc is supported (default.xex SHA-256):
   e7fccdf6dd57bb58d10efbdd0b2ca567b8cece5b6a3fc696c7fca879aaea2792
 
+F.E.A.R. Files
+  With your own F.E.A.R. Files disc for Xbox 360 as a disc image, unpack it into fearfiles/assets
+  the same way:
+    python3 -I xdvdfs.py "<your F.E.A.R. Files ISO>" extract fearfiles/assets
+  fearfiles/assets should then hold default.xex and a Game folder, directly. The menu the game
+  starts at then lists F.E.A.R. Files as a game to play, and Switch Game in either game's main
+  menu goes to the other. Without the disc, the menu lists it as coming later.
+  Supported (default.xex SHA-256):
+    a51deed1dc0842af32a3a2b811674552f4ae5b6339ce8b9abe0eabe14ba6c7eb
+  Not every level has been played to the end yet. Its logs are in fearfiles/logs.
+
 PC textures and sharper text
   Recompilation Settings > PC textures uses the PC version's textures and redraws the game's text
   sharply. You build them from your own copy of the PC game with the builder in texture-pack/
@@ -48,6 +63,7 @@ PC textures and sharper text
 
 Launch options (Steam: Properties > Shortcut > LAUNCH OPTIONS):
   FEAR_FPS=60 %command%      this frame rate instead of Recompilation Settings'
+  FEAR_START=files %command% skip the menu and start F.E.A.R. Files (fear: F.E.A.R.)
 
 The first run builds shaders as they first appear (brief hitches the first time an area or effect
 is seen); they are kept in fear/cache, so later runs are smooth.

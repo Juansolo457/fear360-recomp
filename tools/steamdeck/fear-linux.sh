@@ -3,11 +3,11 @@
 # graw-linux.sh. Sits at the top of the FEAR360-SteamDeck folder, next to fear/ (the Linux
 # program, assets/ and user/).
 # Starts the collection menu in F.E.A.R. (fear/fear), through collection-linux.toml, which this
-# script writes. 1.0 is F.E.A.R. alone: the menu lists F.E.A.R. Files as coming later.
+# script writes. F.E.A.R. Files (fearfiles/) is a game to play there once its own disc is unpacked
+# into fearfiles/assets; until then the menu lists it as coming later.
 #   FEAR_FPS=60       the frame rate for this start (default: Recompilation Settings' Frame rate
 #                     limit, 120 until changed there); a timer at twice it paces the game
-# Development, with a fearfiles/ folder (make_package.py --linux --files):
-#   FEAR_FILES=1      list F.E.A.R. Files as a game to play; Switch Game goes between the two
+#   FEAR_FILES=0      list F.E.A.R. Files as coming later even with its disc there
 #   FEAR_START=files  skip the menu and start F.E.A.R. Files (fear: F.E.A.R.)
 # Extra arguments go to the game, e.g.  ./fear-linux.sh --no-fullscreen
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -29,9 +29,12 @@ args=(--resolution 720p --anisotropic_override 5 --game_data_root assets --user_
 # no tearing. ReXGlue's presenter takes immediate first when it may.)
 # An unzip that dropped the executable bits.
 chmod +x "$here/fear/fear" "$here/fearfiles/fearfiles" 2>/dev/null
+# F.E.A.R. Files: its program and its disc, both there. Switch Game goes between the two.
 files_playable=0
-if [ "$FEAR_FILES" = 1 ] || [ "$FEAR_START" = files ]; then
-  [ -x "$here/fearfiles/fearfiles" ] && files_playable=1
+if [ -x "$here/fearfiles/fearfiles" ] && [ "$FEAR_FILES" != 0 ]; then
+  if [ -f "$here/fearfiles/assets/default.xex" ] || [ "$FEAR_START" = files ]; then
+    files_playable=1
+  fi
 fi
 {
   echo "# The F.E.A.R. collection menu, native Linux: written by fear-linux.sh at each start."

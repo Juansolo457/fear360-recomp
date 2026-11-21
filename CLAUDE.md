@@ -4,7 +4,7 @@ Native Windows (then Linux) build of the Xbox 360 **F.E.A.R.**, statically recom
 
 ## Hard rules
 - Never commit game data: ISOs, XEX files, extracted assets, generated translations (`port*/generated/<name>/`), shader warm-up lists (`port*/warmup/`), logs or saves. All are gitignored. Run `python -I tools/audit_repo.py` before every commit and push (CI runs it too); it reads git's blobs, so a clean run means nothing tracked or staged is game material.
-- Releases are source only: never attach builds, game files or the private packages from `tools/steamdeck/make_package.py` (they contain game data) to a release or upload them anywhere.
+- A release carries the source and the program-only zips from `tools/steamdeck/make_package.py --release [--linux]`, built from the release's tag (since 1.5; no game data in them). Never attach game files or that script's other packages (the private ones: they contain game data) to a release, or upload them anywhere.
 - The user's disc image is at `D:\x360-recomps\FEAR 1\` and the PC Ultimate Shooter Edition (base + Extraction Point + Perseus Mandate) at `E:\SteamLibrary\steamapps\common\FEAR Ultimate Shooter Edition`. Both are read-only references; never modify them.
 - Never close or kill the user's running game. Ask them to quit it.
 - Don't record where game copies came from.

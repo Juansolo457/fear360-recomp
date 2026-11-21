@@ -165,9 +165,10 @@ Steam as a non-Steam game, and leave Proton off. The zip contains your game data
 made from your disc: keep it to yourself. Later updates: `--linux --programs` makes a small zip of
 just the program to extract over it. The menu lists *F.E.A.R. Files* as coming later.
 
-*F.E.A.R. Files* for development (not part of 1.0): `tools/build-deck.sh --project port-files`
-with its disc in `port-files/assets`, then `make_package.py --linux --files`; `FEAR_FILES=1
-./fear-linux.sh` lists it in the menu.
+*F.E.A.R. Files* too: `tools/build-deck.sh --project port-files` with its disc in
+`port-files/assets`, then `make_package.py --linux --files`. The menu lists it as a game to play
+when its program and its disc are both there (`FEAR_FILES=0 ./fear-linux.sh` lists it as coming
+later again). The Linux release zip has its program since 1.7.
 
 **Play on your own Linux PC:** the same package runs on an x86-64 Linux with a CPU with AVX2 and
 FMA (x86-64-v3), glibc 2.35 or newer, libstdc++ 13 or newer (`GLIBCXX_3.4.32`; SteamOS and
