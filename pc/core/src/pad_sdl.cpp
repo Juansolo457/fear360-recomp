@@ -3,7 +3,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace fearpc {
 
@@ -12,6 +14,7 @@ namespace {
 bool g_started = false;
 PadState g_state;
 SDL_JoystickID g_active = 0;  // the pad used last
+std::vector<SDL_Gamepad*> g_opened;  // pads this file opened, closed once disconnected
 
 constexpr struct {
   SDL_GamepadButton button;
@@ -116,6 +119,8 @@ bool PadInit() {
 
 void PadShutdown() {
   if (!g_started) return;
+  for (SDL_Gamepad* pad : g_opened) SDL_CloseGamepad(pad);
+  g_opened.clear();
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_HAPTIC);
   g_started = false;
   g_state = PadState();
@@ -125,6 +130,14 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
   g_state = PadState();
   if (!g_started) return g_state;
   SDL_UpdateGamepads();
+  // A pad unplugged comes back with a new ID: close the old one's handle.
+  g_opened.erase(std::remove_if(g_opened.begin(), g_opened.end(),
+                                [](SDL_Gamepad* pad) {
+                                  if (SDL_GamepadConnected(pad)) return false;
+                                  SDL_CloseGamepad(pad);
+                                  return true;
+                                }),
+                 g_opened.end());
 
   // The state is the pad used last: a pad with any input takes over; with none in use, the last
   // one used, else the first.
@@ -134,7 +147,7 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
   SDL_JoystickID first_id = 0, in_use_id = 0;
   for (int i = 0; ids && i < count; ++i) {
     SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
-    if (!pad) pad = SDL_OpenGamepad(ids[i]);
+    if (!pad && (pad = SDL_OpenGamepad(ids[i]))) g_opened.push_back(pad);
     if (!pad) continue;
     PadState s;
     Read(pad, dead_zones, &s);

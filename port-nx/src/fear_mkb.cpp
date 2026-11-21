@@ -1179,7 +1179,15 @@ StickMeasure g_measure;
 void MeasureStick(const uint8_t* base) {
   const double wait = REXCVAR_GET(fear_stick_measure);
   StickMeasure& m = g_measure;
-  if (wait <= 0.0 || m.step >= int(std::size(kMeasureDeflections))) return;
+  if (wait <= 0.0) {
+    // Switched off, perhaps mid-measurement: let go of the stick, start over if switched on.
+    if (m.step >= 0 || m.play_since != Clock::time_point{}) {
+      g_measure_stick = 0;
+      m = StickMeasure();
+    }
+    return;
+  }
+  if (m.step >= int(std::size(kMeasureDeflections))) return;
   const Clock::time_point now = Clock::now();
   const auto seconds = [&](Clock::time_point since) {
     return std::chrono::duration<double>(now - since).count();
