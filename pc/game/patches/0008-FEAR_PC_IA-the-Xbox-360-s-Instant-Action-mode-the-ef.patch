@@ -1,0 +1,625 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fear-pc <fear-pc@localhost>
+Date: Tue, 17 Nov 2026 14:42:34 -0800
+Subject: [PATCH] FEAR_PC_IA: the Xbox 360's Instant Action mode; the effects
+ DLL no longer releases through the engine at unload
+
+---
+ Game/ClientFxDLL/ClientFXVertexDeclMgr.cpp |  6 ++++-
+ Game/ClientShellDLL/ClientSaveLoadMgr.cpp  | 15 ++++++++++++
+ Game/ClientShellDLL/GameClientShell.cpp    |  6 +++++
+ Game/ClientShellDLL/InterfaceMgr.cpp       | 19 +++++++++++++++
+ Game/ClientShellDLL/LoadingScreen.cpp      | 20 ++++++++++++++++
+ Game/ClientShellDLL/MissionMgr.cpp         |  9 +++++++
+ Game/ClientShellDLL/ScreenEnum.h           |  6 +++++
+ Game/ClientShellDLL/ScreenMain.cpp         | 28 ++++++++++++++++++++++
+ Game/ClientShellDLL/ScreenMgr.cpp          |  9 +++++++
+ Game/ClientShellDLL/ScreenPostload.cpp     | 11 +++++++++
+ Game/ObjectDLL/Destructible.cpp            |  6 +++++
+ Game/ObjectDLL/Explosion.cpp               | 10 ++++++++
+ Game/ObjectDLL/GameServerShell.cpp         |  6 +++++
+ Game/ObjectDLL/PlayerInventory.cpp         |  9 +++++++
+ Game/ObjectDLL/PlayerObj.cpp               | 19 +++++++++++++++
+ Game/ObjectDLL/Projectile.cpp              |  6 +++++
+ Game/ObjectDLL/ServerMissionMgr.cpp        |  8 +++++++
+ Game/ObjectDLL/ServerSaveLoadMgr.cpp       | 10 ++++++++
+ Game/Shared/MsgIDs.h                       |  1 +
+ 19 files changed, 203 insertions(+), 1 deletion(-)
+
+diff --git a/Game/ClientFxDLL/ClientFXVertexDeclMgr.cpp b/Game/ClientFxDLL/ClientFXVertexDeclMgr.cpp
+index 8a49a0b..b3d2618 100644
+--- a/Game/ClientFxDLL/ClientFXVertexDeclMgr.cpp
++++ b/Game/ClientFxDLL/ClientFXVertexDeclMgr.cpp
+@@ -16,7 +16,11 @@ CClientFXVertexDeclMgr::CClientFXVertexDeclMgr() :
+ 
+ CClientFXVertexDeclMgr::~CClientFXVertexDeclMgr()
+ {
+-	Term();
++	// This object is a global, destroyed when the DLL unloads. If the game quit without calling
++	// fxTermDLLRuntime, the engine's renderer is already gone by then and releasing through it
++	// crashes (an access violation here on quitting from a level). Only fxTermDLLRuntime, which
++	// runs while the engine is alive, releases the declaration.
++	m_hTexTangentSpace = NULL;
+ }
+ 
+ //called to initialize this object. This will return true if all vertex formats
+diff --git a/Game/ClientShellDLL/ClientSaveLoadMgr.cpp b/Game/ClientShellDLL/ClientSaveLoadMgr.cpp
+index 4216757..f7c8e57 100644
+--- a/Game/ClientShellDLL/ClientSaveLoadMgr.cpp
++++ b/Game/ClientShellDLL/ClientSaveLoadMgr.cpp
+@@ -25,6 +25,9 @@
+ #include "PlayerCamera.h"
+ #include "PlayerBodyMgr.h"
+ #include "LadderMgr.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ // 
+ // Globals...
+@@ -283,6 +286,12 @@ bool CClientSaveLoadMgr::CanSaveGame()	const
+ 	return false;
+ #endif
+ 
++#if defined(FEAR_PC_IA)
++	// No saving in Instant Action (pc/game/src/fear_ia.h).
++	if( FearIAActive( ))
++		return false;
++#endif
++
+ 	//can't save while on the mission summary screen, because we're between worlds
+ 	if (g_pMissionMgr->IsExitingLevel() || g_pMissionMgr->IsGameOver())
+ 		return false;
+@@ -322,6 +331,12 @@ bool CClientSaveLoadMgr::CanSaveGame()	const
+ 
+ bool CClientSaveLoadMgr::CanLoadGame( ) const
+ { 
++#if defined(FEAR_PC_IA)
++	// No quick load in Instant Action (pc/game/src/fear_ia.h).
++	if( FearIAActive( ))
++		return false;
++#endif
++
+ 	//can't load while on the mission summary screen
+ 	if (g_pMissionMgr->IsExitingLevel())
+ 		return false;
+diff --git a/Game/ClientShellDLL/GameClientShell.cpp b/Game/ClientShellDLL/GameClientShell.cpp
+index 7995835..c708a08 100644
+--- a/Game/ClientShellDLL/GameClientShell.cpp
++++ b/Game/ClientShellDLL/GameClientShell.cpp
+@@ -101,6 +101,9 @@
+ #if defined(FEAR_PC_PAD)
+ #include "fear_pad.h"
+ #endif
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ static ILTGameUtil *g_pLTGameUtil;
+ define_holder(ILTGameUtil, g_pLTGameUtil);
+ #endif // !defined(PLATFORM_XENON)
+@@ -2712,6 +2715,9 @@ void CGameClientShell::OnMessage(ILTMessage_Read *pMsg)
+ 		case MID_PLAYER_LADDER:			HandleMsgLadder				(cSubMsg);	break;
+ 		case MID_PUNKBUSTER_MSG:		HandleMsgPunkBuster			(cSubMsg);  break;
+ 		case MID_VOTE:			ClientVoteMgr::Instance().HandleMsgVote(cSubMsg); break;
++#if defined(FEAR_PC_IA)
++		case MID_INSTANT_ACTION:		FearIAClientOnMessage		(cSubMsg);	break;
++#endif
+ 
+ 
+ 		default: 					break;
+diff --git a/Game/ClientShellDLL/InterfaceMgr.cpp b/Game/ClientShellDLL/InterfaceMgr.cpp
+index 11b8dd9..ecf5751 100644
+--- a/Game/ClientShellDLL/InterfaceMgr.cpp
++++ b/Game/ClientShellDLL/InterfaceMgr.cpp
+@@ -60,6 +60,9 @@
+ #include "lttimeutils.h"
+ #include "ltgamecfg.h"
+ #include "ScreenMutePlayer.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ #if !defined(PLATFORM_XENON)
+ #include "ILTGameUtil.h"
+@@ -3207,6 +3210,11 @@ bool CInterfaceMgr::PrePlayingState(GameState eCurState)
+ 
+     m_bUseInterfaceCamera = false;
+ 
++#if defined(FEAR_PC_IA)
++	// Instant Action: the clock starts the first time play does.
++	FearIAClientPlaying();
++#endif
++
+     return true;
+ }
+ 
+@@ -3993,6 +4001,12 @@ bool CInterfaceMgr::ForceScreenUpdate(eScreenID screenID)
+ 
+ void CInterfaceMgr::MissionFailed(const char* szFailStringId)
+ {
++#if defined(FEAR_PC_IA)
++	// Instant Action: a failed run ends in its summary screen instead.
++	if( FearIAClientMissionFailed( ))
++		return;
++#endif
++
+ 	// The player is no longer in the world...
+ 	g_pGameClientShell->SetWorldNotLoaded();
+ 
+@@ -5572,6 +5586,11 @@ void CInterfaceMgr::HandlePlayerTeamChange()
+ 
+ bool CInterfaceMgr::StartingNewGame( )
+ {
++#if defined(FEAR_PC_IA)
++	// Only a start from the Instant Action screens is a run (pc/game/src/fear_ia.h).
++	FearIAClientStartingNewGame();
++#endif
++
+ 	GetClientInfoMgr()->RemoveAllClients();
+ 
+ 	/*
+diff --git a/Game/ClientShellDLL/LoadingScreen.cpp b/Game/ClientShellDLL/LoadingScreen.cpp
+index 6db7777..420795c 100644
+--- a/Game/ClientShellDLL/LoadingScreen.cpp
++++ b/Game/ClientShellDLL/LoadingScreen.cpp
+@@ -11,6 +11,9 @@
+ // ----------------------------------------------------------------------- //
+ 
+ #include "stdafx.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ #include "LoadingScreen.h"
+ #include "InterfaceMgr.h"
+ #include "GameClientShell.h"
+@@ -181,6 +184,10 @@ bool CLoadingScreen::Init()
+ 		m_ServerMsg.SetString(L"");
+ 		m_Help.SetString(L"");
+ 		m_BriefingHeader.Show(false);
++#if defined(FEAR_PC_IA)
++		if (FearIALoading())
++			m_Briefing.SetString(FearIABriefing());
++#endif
+ 		m_ServerMsgHeader.Show(false);
+ 
+ 	}
+@@ -458,6 +465,10 @@ void CLoadingScreen::UpdateMissionInfo()
+ 	{
+ 		m_Briefing.SetString(LoadString("IDS_PERFORMANCE_TEST_BRIEF"));
+ 	}
++#if defined(FEAR_PC_IA)
++	if (FearIALoading())
++		m_Briefing.SetString(FearIABriefing());
++#endif
+ 
+ 
+ 	LeaveCriticalSection(&m_MissionUpdate);
+@@ -764,6 +775,15 @@ void CLoadingScreen::UpdateSessionName( )
+ 			wchar_t szWorldTitle[MAX_PATH] = L"";
+ 			_wsplitpath( MPA2W(g_pMissionMgr->GetCurrentWorldName( )).c_str(), NULL, NULL, szWorldTitle, NULL );
+ 			m_LevelName.SetString(szWorldTitle);
++#if defined(FEAR_PC_IA)
++			// An Instant Action map is a level outside the missions database: name it.
++			if (FearIALoading())
++			{
++				m_MissionName.SetString(L"Instant action");
++				m_LevelName.SetString(FearIAMapName(FearIAMap()));
++				m_Briefing.SetString(FearIABriefing());
++			}
++#endif
+ 		}
+ 	}
+ }
+diff --git a/Game/ClientShellDLL/MissionMgr.cpp b/Game/ClientShellDLL/MissionMgr.cpp
+index fa69c65..9510072 100644
+--- a/Game/ClientShellDLL/MissionMgr.cpp
++++ b/Game/ClientShellDLL/MissionMgr.cpp
+@@ -32,6 +32,9 @@
+ #include "HUDScores.h"
+ #include "MissionDB.h"
+ #include "ScreenVote.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ extern VarTrack g_vtScreenFadeInTime;
+ 
+@@ -271,6 +274,12 @@ bool CMissionMgr::FinishStartGameFromLevel()
+ 	if( !SendStartGameMessage( ))
+ 		return false;
+ 
++#if defined(FEAR_PC_IA)
++	// Instant Action: tell the server before it loads the level, after the start game
++	// message that clears its flag.
++	FearIAClientStartLevel();
++#endif
++
+ 	// Tell the server to start with this level.
+ 	CAutoMessage cMsg;
+ 	cMsg.Writeuint8( MID_START_LEVEL );
+diff --git a/Game/ClientShellDLL/ScreenEnum.h b/Game/ClientShellDLL/ScreenEnum.h
+index dbe522b..0965a41 100644
+--- a/Game/ClientShellDLL/ScreenEnum.h
++++ b/Game/ClientShellDLL/ScreenEnum.h
+@@ -80,6 +80,12 @@ ADD_SCREEN(END_MISSION,ScreenEndMission)
+ ADD_SCREEN(PRELOAD,ScreenPreload)
+ ADD_SCREEN(POSTLOAD,ScreenPostload)
+ 
++// Instant Action's screens (FEAR_PC_IA, pc/game/src/fear_ia_screens.cpp). The game database has
++// no layout record for them, so they are named for the Joystick screen's and take that one.
++// Not under the switch: every file that sees this enum must see the same one.
++ADD_SCREEN(INSTANT_ACTION,ScreenJoystick)
++ADD_SCREEN(INSTANT_ACTION_SUMMARY,ScreenJoystick)
++
+ //this must be the last id
+ ADD_SCREEN(UNASSIGNED,GenericScreen)
+ 
+diff --git a/Game/ClientShellDLL/ScreenMain.cpp b/Game/ClientShellDLL/ScreenMain.cpp
+index f994a53..d8bb6bd 100644
+--- a/Game/ClientShellDLL/ScreenMain.cpp
++++ b/Game/ClientShellDLL/ScreenMain.cpp
+@@ -24,6 +24,9 @@
+ #include "ltprofileutils.h"
+ #include "PerformanceMgr.h"
+ #include "ltgamecfg.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ namespace
+ {
+@@ -38,6 +41,9 @@ namespace
+ 		CMD_PROFILE,
+ 		CMD_EXIT, 
+ 		CMD_QUIT,
++#if defined(FEAR_PC_IA)
++		CMD_INSTANT_ACTION,
++#endif
+ 	};
+ 
+ 	void QuitCallBack(bool bReturn, void *pData, void* pUserData)
+@@ -102,6 +108,16 @@ bool CScreenMain::Build()
+ 
+ #endif // !defined( _DEMO ) || defined( _SPDEMO )
+ 
++#if defined(FEAR_PC_IA)
++	// Instant Action (pc/game/src/fear_ia.h), when any of its maps is installed.
++	if( !IsMultiplayerGameClient( ) && FearIAAvailable( ))
++	{
++		cs.nCommandID = CMD_INSTANT_ACTION;
++		cs.szHelpID = "";
++		AddTextItem(L"Instant action", cs );
++	}
++#endif
++
+ /*
+ 	cs.nCommandID = CMD_CONTINUE_GAME;
+ 	cs.nHelpID = IDS_HELP_CONTINUE_GAME;
+@@ -182,6 +198,11 @@ void CScreenMain::OnFocus(bool bFocus)
+ 		//since can get here from various points in the game, let's make sure that we're not fading in or out...
+ 		g_pInterfaceMgr->AbortScreenFade();
+ 
++#if defined(FEAR_PC_IA)
++		// Back at the main menu: no Instant Action run.
++		FearIAClear();
++#endif
++
+ 
+ 		SetSelection(-1);
+ 
+@@ -272,6 +293,13 @@ uint32 CScreenMain::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwParam2
+ 			break;
+ 		}
+ 
++#if defined(FEAR_PC_IA)
++	case CMD_INSTANT_ACTION:
++		{
++			m_pScreenMgr->SetCurrentScreen(SCREEN_ID_INSTANT_ACTION);
++			break;
++		}
++#endif
+ 	case CMD_MAIN_OPTIONS:
+ 		{
+ 			m_pScreenMgr->SetCurrentScreen(SCREEN_ID_OPTIONS);
+diff --git a/Game/ClientShellDLL/ScreenMgr.cpp b/Game/ClientShellDLL/ScreenMgr.cpp
+index 4fdaaba..8020803 100644
+--- a/Game/ClientShellDLL/ScreenMgr.cpp
++++ b/Game/ClientShellDLL/ScreenMgr.cpp
+@@ -71,6 +71,9 @@ extern CGameClientShell* g_pGameClientShell;
+ #include "ScreenFailure.h"
+ #include "ScreenPreload.h"
+ #include "ScreenPostload.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ #include "GameClientShell.h"
+ extern CGameClientShell* g_pGameClientShell;
+@@ -688,6 +691,12 @@ void CScreenMgr::AddScreen(eScreenID screenID)
+ 	case SCREEN_ID_PERFORMANCE_GPU	:
+ 		pScreen = debug_new(CScreenPerformanceGPU);
+ 		break;
++#if defined(FEAR_PC_IA)
++	case SCREEN_ID_INSTANT_ACTION:
++	case SCREEN_ID_INSTANT_ACTION_SUMMARY:
++		pScreen = FearIACreateScreen(screenID);
++		break;
++#endif
+ 	}
+ 
+ 	if (pScreen)
+diff --git a/Game/ClientShellDLL/ScreenPostload.cpp b/Game/ClientShellDLL/ScreenPostload.cpp
+index 032129b..696fae7 100644
+--- a/Game/ClientShellDLL/ScreenPostload.cpp
++++ b/Game/ClientShellDLL/ScreenPostload.cpp
+@@ -11,6 +11,9 @@
+ 
+ 
+ #include "stdafx.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ #include "ScreenPostload.h"
+ #include "ScreenMgr.h"
+ #include "ScreenCommands.h"
+@@ -188,6 +191,14 @@ void CScreenPostload::OnFocus(bool bFocus)
+ 					wchar_t szWorldTitle[MAX_PATH] = L"";
+ 					_wsplitpath( MPA2W(g_pMissionMgr->GetCurrentWorldName( )).c_str(), NULL, NULL, szWorldTitle, NULL );
+ 					m_LevelName.SetString(szWorldTitle);
++#if defined(FEAR_PC_IA)
++					// An Instant Action map is a level outside the missions database: name it.
++					if (FearIALoading())
++					{
++						m_MissionName.SetString(L"Instant action");
++						m_LevelName.SetString(FearIAMapName(FearIAMap()));
++					}
++#endif
+ 				}
+ 			}
+ 
+diff --git a/Game/ObjectDLL/Destructible.cpp b/Game/ObjectDLL/Destructible.cpp
+index 9f6c97e..a3b1233 100644
+--- a/Game/ObjectDLL/Destructible.cpp
++++ b/Game/ObjectDLL/Destructible.cpp
+@@ -25,6 +25,9 @@
+ #include "sys/win/mpstrconv.h"
+ #include "GameModeMgr.h"
+ #include "ServerConnectionMgr.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ #define MAXIMUM_BLOCK_PRIORITY	255.0f
+ #define MINIMUM_FRICTION		5.0f
+@@ -1308,6 +1311,9 @@ void CDestructible::HandleDestruction(HOBJECT hDamager)
+ 		{
+ 			//TODO: verify alignment
+ 			pPlayer->GetMissionStats()->dwNumEnemyKills++;
++#if defined(FEAR_PC_IA)
++			FearIAServerKill( m_eDeathType, m_hDeathAmmo );
++#endif
+ 		}
+ 	}
+ 
+diff --git a/Game/ObjectDLL/Explosion.cpp b/Game/ObjectDLL/Explosion.cpp
+index 746ced1..6e57183 100644
+--- a/Game/ObjectDLL/Explosion.cpp
++++ b/Game/ObjectDLL/Explosion.cpp
+@@ -29,6 +29,9 @@
+ #include "PlayerObj.h"
+ #include "ServerConnectionMgr.h"
+ #include "CharacterDB.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ static VarTrack s_vtExplosionForce;
+ static VarTrack s_vtExplosionForceDirMinY;
+@@ -196,7 +199,14 @@ void Explosion::Start(HOBJECT hFiredFrom)
+ 
+ 	if (m_fDamageRadius > 0.0f && m_fMaxDamage > 0.0f)
+ 	{
++#if defined(FEAR_PC_IA)
++		// Instant Action: what this blast kills is one combo (pc/game/src/fear_ia.h).
++		FearIAServerComboBegin();
+ 		AreaDamageObjectsInSphere();
++		FearIAServerComboEnd();
++#else
++		AreaDamageObjectsInSphere();
++#endif
+ 	}
+ 
+ 	// Progressively damage the objects caught in the blast...
+diff --git a/Game/ObjectDLL/GameServerShell.cpp b/Game/ObjectDLL/GameServerShell.cpp
+index a3e2cac..f6b598c 100644
+--- a/Game/ObjectDLL/GameServerShell.cpp
++++ b/Game/ObjectDLL/GameServerShell.cpp
+@@ -115,6 +115,9 @@ define_holder(ILTServerContentTransfer, g_pLTServerContentTransfer);
+ static ILTGameUtil *g_pLTGameUtil;
+ define_holder(ILTGameUtil, g_pLTGameUtil);
+ #endif // !defined(PLATFORM_XENON)
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ // Stuff to create a GameServerShell.
+ 
+@@ -1205,6 +1208,9 @@ void CGameServerShell::OnMessage(HCLIENT hSender, ILTMessage_Read *pMsg)
+ 		case MID_PERFORMANCE_SETTING:		HandlePerformanceSettingMessage	(hSender, pMsg);	break;
+ 		case MID_PUNKBUSTER_MSG:			HandlePunkBusterMessage			(hSender, pMsg);	break;
+ 		case MID_VOTE:				ServerVoteMgr::Instance().HandleMsgVote	(hSender, pMsg);	break;
++#if defined(FEAR_PC_IA)
++		case MID_INSTANT_ACTION:			FearIAServerOnMessage			(pMsg);				break;
++#endif
+ 		default:																				break;
+ 	}
+ }
+diff --git a/Game/ObjectDLL/PlayerInventory.cpp b/Game/ObjectDLL/PlayerInventory.cpp
+index ec10bad..b24ce1d 100644
+--- a/Game/ObjectDLL/PlayerInventory.cpp
++++ b/Game/ObjectDLL/PlayerInventory.cpp
+@@ -29,6 +29,9 @@
+ #include "SlowMoDB.h"
+ #include "NavMarker.h"
+ #include "NavMarkerTypeDB.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ static VarTrack s_vtWeaponDropImpulse;
+ static VarTrack s_vtWeaponDropVel;
+@@ -1472,6 +1475,12 @@ bool CPlayerInventory::PickupGear(HOBJECT hSender, ILTMessage_Read *pMsg)
+ 
+ 	}
+ 
++#if defined(FEAR_PC_IA)
++	// Instant Action counts the boosters picked up (pc/game/src/fear_ia.h).
++	if (bAdded)
++		FearIAServerGear( hGear );
++#endif
++
+ 	return bAdded;
+ }
+ 
+diff --git a/Game/ObjectDLL/PlayerObj.cpp b/Game/ObjectDLL/PlayerObj.cpp
+index 331804b..e897d46 100644
+--- a/Game/ObjectDLL/PlayerObj.cpp
++++ b/Game/ObjectDLL/PlayerObj.cpp
+@@ -72,6 +72,9 @@
+ #include "ObjectiveDB.h"
+ #include "GameStartPoint.h"
+ #include "GameStartPointMgr.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ LINKFROM_MODULE( PlayerObj );
+ 
+@@ -1674,6 +1677,12 @@ void CPlayerObj::HandleExitLevelMsg( HOBJECT hSender, const CParsedMsg &crParsed
+ 		bExitMission = !!atoi( crParsedMsg.GetArg( 1 ).c_str( ));
+ 	}
+ 
++#if defined(FEAR_PC_IA)
++	// Instant Action: the map's exitlevel ends the run (pc/game/src/fear_ia.h).
++	if( FearIAServerExitLevel( ))
++		return;
++#endif
++
+ 	// Go to next mission or next level in the same mission.
+ 	if( bExitMission )
+ 	{
+@@ -6803,7 +6812,14 @@ void CPlayerObj::HandleWeaponFireMessage(ILTMessage_Read *pMsg)
+ 		// Find out how much ammo we use for this fire to update our interface data.
+ 		int32 nAmmoCount = m_Arsenal.GetAmmoCount( hAmmo );
+ 
++#if defined(FEAR_PC_IA)
++		// Instant Action: what this shot kills is one combo (pc/game/src/fear_ia.h).
++		FearIAServerComboBegin();
+ 		pWeapon->Fire(weaponFireInfo);	
++		FearIAServerComboEnd();
++#else
++		pWeapon->Fire(weaponFireInfo);	
++#endif
+ 
+ 		// Update the client stats so we don't end
+ 		// up sending ammo messages for what the client already knows.
+@@ -6826,6 +6842,9 @@ void CPlayerObj::HandleWeaponFireMessage(ILTMessage_Read *pMsg)
+ 	if( IsAccuracyType( g_pWeaponDB->GetAmmoInstDamageType( hAmmo ) ))
+ 	{
+ 		m_Stats.dwNumShotsFired += g_pWeaponDB->GetInt32( hWeaponData, WDB_WEAPON_nVectorsPerRound );
++#if defined(FEAR_PC_IA)
++		FearIAServerShot( hWeapon, g_pWeaponDB->GetInt32( hWeaponData, WDB_WEAPON_nVectorsPerRound ));
++#endif
+ 	}
+ 
+ 	// Reset the weapon state to none, firing takes priority
+diff --git a/Game/ObjectDLL/Projectile.cpp b/Game/ObjectDLL/Projectile.cpp
+index 8a185c2..fe12a07 100644
+--- a/Game/ObjectDLL/Projectile.cpp
++++ b/Game/ObjectDLL/Projectile.cpp
+@@ -49,6 +49,9 @@
+ #include "ServerConnectionMgr.h"
+ #include "ObjectTransformHistory.h"
+ #include "ltintersect.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ LINKFROM_MODULE( Projectile );
+ 
+@@ -2269,6 +2272,9 @@ void CProjectile::ImpactDamageObject(HOBJECT hDamager, HOBJECT hObj, const LTVec
+ 		if (pPlayer && pChar)
+ 		{
+ 			pPlayer->GetMissionStats()->dwNumHits++;
++#if defined(FEAR_PC_IA)
++			FearIAServerHit( m_Shared.m_hWeapon );
++#endif
+ 
+ 			ModelsDB::HNODE hModelNode = pChar->GetModelNodeLastHit();
+ 
+diff --git a/Game/ObjectDLL/ServerMissionMgr.cpp b/Game/ObjectDLL/ServerMissionMgr.cpp
+index 23d750f..7c58340 100644
+--- a/Game/ObjectDLL/ServerMissionMgr.cpp
++++ b/Game/ObjectDLL/ServerMissionMgr.cpp
+@@ -29,6 +29,9 @@
+ #include "iltfilemgr.h"
+ #include "ServerDB.h"
+ #include "igamespy.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ 
+ CServerMissionMgr* g_pServerMissionMgr = NULL;
+ VarTrack g_vtDifficultyFactorPlayerIncrease;
+@@ -294,6 +297,11 @@ bool CServerMissionMgr::OnMessage( HCLIENT hSender, ILTMessage_Read& msg )
+ 
+ bool CServerMissionMgr::HandleStartGame( HCLIENT hSender, ILTMessage_Read& msg )
+ {
++#if defined(FEAR_PC_IA)
++	// A new game is not an Instant Action run until the client says so (pc/game/src/fear_ia.h).
++	FearIAServerStartGame();
++#endif
++
+ 	ServerMissionSettings ss = m_ServerSettings;
+ 	ss.m_nMPDifficulty = (uint8)g_pGameServerShell->GetDifficulty();
+ 	SetServerSettings(ss);
+diff --git a/Game/ObjectDLL/ServerSaveLoadMgr.cpp b/Game/ObjectDLL/ServerSaveLoadMgr.cpp
+index 6af8b9c..18c18ed 100644
+--- a/Game/ObjectDLL/ServerSaveLoadMgr.cpp
++++ b/Game/ObjectDLL/ServerSaveLoadMgr.cpp
+@@ -32,6 +32,9 @@
+ 
+ //ILTLoadingProgress for access to the loading bar
+ #include "iltloadingprogress.h"
++#if defined(FEAR_PC_IA)
++#include "fear_ia.h"
++#endif
+ static ILTLoadingProgress* g_pILTLoadingProgress;
+ define_holder(ILTLoadingProgress, g_pILTLoadingProgress);
+ 
+@@ -704,6 +707,13 @@ bool CServerSaveLoadMgr::CanSaveGame()	const
+ 	return false;
+ #endif
+ 
++#if defined(FEAR_PC_IA)
++	// No saving in Instant Action: quick saves, checkpoints and the level's reload save
++	// (pc/game/src/fear_ia.h).
++	if( FearIAServerActive( ))
++		return false;
++#endif
++
+     // [KLS 8/28/02] Don't save if we're doing a performance test...
+ 	if (g_pGameServerShell->IsPerformanceTest()) 
+ 		return false;
+diff --git a/Game/Shared/MsgIDs.h b/Game/Shared/MsgIDs.h
+index 18a29e3..2827cdc 100644
+--- a/Game/Shared/MsgIDs.h
++++ b/Game/Shared/MsgIDs.h
+@@ -212,6 +212,7 @@ enum PerformanceSettingMsg
+ };
+ 
+ #define MID_MAPLIST								165 // Server -> Client
++#define MID_INSTANT_ACTION						166 // Both ways: Instant Action (FEAR_PC_IA, pc/game/src/fear_ia.h)
+ 
+ #define MID_PLAYER_GEAR							170 // Client <-> Server
+ enum GearMsgType

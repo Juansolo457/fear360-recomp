@@ -39,6 +39,15 @@ if (-not $Retail) {
     $interface = Join-Path $out 'game\Interface'
     if (-not (Test-Path $interface)) { throw "Missing $interface. Run pc/tools/build.ps1." }
     Copy-Item -Recurse -Force $interface $overlay
+    # The Instant Action maps, if pc/tools/convert_ia.py has made them (build/pc/ia). They are
+    # converted from the player's own 360 files; without them the menu entry stays hidden.
+    $maps = Join-Path $out 'ia\Worlds\Release'
+    $mapsTo = Join-Path $overlay 'Worlds\Release'
+    if (Test-Path $mapsTo) { Remove-Item -Recurse -Force (Join-Path $overlay 'Worlds') }
+    if (Test-Path $maps) {
+        New-Item -ItemType Directory -Force $mapsTo | Out-Null
+        Copy-Item (Join-Path $maps '*.World00p') $mapsTo
+    }
     $lines += $overlay
 }
 $archcfg = Join-Path $out 'fearpc.archcfg'

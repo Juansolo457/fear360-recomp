@@ -4,6 +4,12 @@ Status: milestone 1 built and play-tested three times; refocused on the controll
 
 [Issue #133](https://github.com/Juansolo457/fear360-recomp/issues/133) asks for the Xbox 360's Instant Action mode in the original PC game. This plan covers that plus the rest of what you listed: controller support, Xbox and PlayStation glyphs, the game switcher and the Recompilation Settings, across F.E.A.R., Extraction Point and Perseus Mandate.
 
+## Direction update (2026-11-17)
+
+The 360 recomp is on ice; the PC build is the one being worked on. The 360's controls and button glyphs are in and play-tested on the Steam Deck. Next, in this order: **Instant Action** (#133), then the **PS3 content** (the PS3's glyph set is already drawn; its mission and weapon remain), with the settings screen and field of view slider (#151) alongside. Optimisation and minimum specs come after the content.
+
+Instant Action is ours to build after all: the console content mod below was taken down, and it could not run with our source-built DLLs anyway. What the mode is on the 360 turned out to be small (PC-FINDINGS.md, "Instant Action on the 360"): four scripted levels, a 15 minute clock and a summary screen with a score. The `PitFight*` classes this plan pointed at are a developer tool, not the mode. Sections below that say otherwise are superseded.
+
 ## Direction (2026-11-06, after the first play tests)
 
 The PC version is the one to build on: it has more going on than the 360 (its AI is more fluid and harder; the 360's was tuned down). The goal is the definitive F.E.A.R. on PC, a free fan project, by porting the console versions' features to it. In order, as players on Reddit and YouTube ask most:

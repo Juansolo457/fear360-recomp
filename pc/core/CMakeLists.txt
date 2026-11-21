@@ -6,7 +6,7 @@ set(FEAR_SDL3_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/rexglue-sdk-nx/
     CACHE PATH "SDL3 source tree")
 set(FEAR_SDL3_COMMIT 8bf3b7215ad9fc3deb583c6a3a37c6c67f2e24e4)  # SDL 3.5.0, as the recomp's SDK
 
-add_library(fearpc_core_logic STATIC src/layout.cpp src/look.cpp src/pad_math.cpp)
+add_library(fearpc_core_logic STATIC src/instant_action.cpp src/layout.cpp src/look.cpp src/pad_math.cpp)
 target_include_directories(fearpc_core_logic PUBLIC include)
 # Private: the headers are plain C++11, and the game code that includes them builds as C++14.
 target_compile_features(fearpc_core_logic PRIVATE cxx_std_17)

@@ -71,6 +71,16 @@ target_include_directories(Game_ClientShell PRIVATE src)
 target_compile_definitions(Game_ClientShell PRIVATE FEAR_PC_PAD)
 target_link_libraries(Game_ClientShell PRIVATE fearpc_core)
 
+# FEAR_PC_IA: the Xbox 360's Instant Action mode (src/fear_ia.h). On the client it is patched
+# into the main menu, CScreenMgr, CMissionMgr, CInterfaceMgr and the save/load manager; on the
+# server into the player, weapon, explosion and pickup code and the save/load manager. The
+# score is pc/core's (fearpc_core_logic, which fearpc_core brings), worked out on the client.
+target_sources(Game_ClientShell PRIVATE src/fear_ia_client.cpp src/fear_ia_screens.cpp)
+target_sources(Game_ServerShell PRIVATE src/fear_ia_server.cpp)
+target_include_directories(Game_ServerShell PRIVATE src)
+target_compile_definitions(Game_ClientShell PRIVATE FEAR_PC_IA)
+target_compile_definitions(Game_ServerShell PRIVATE FEAR_PC_IA)
+
 set(_sdk_libs "${FEAR_SDK_LIBDIR}/Shared_CRC.lib" "${FEAR_SDK_LIBDIR}/Shared_Assert.lib")
 target_link_libraries(Game_Shared_Client PUBLIC Shared_Platform Shared_StdLith)
 target_link_libraries(Game_Shared_Server PUBLIC Shared_Platform Shared_StdLith)
