@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 namespace fearpc {
@@ -15,6 +16,12 @@ bool g_started = false;
 PadState g_state;
 SDL_JoystickID g_active = 0;  // the pad used last
 std::vector<SDL_Gamepad*> g_opened;  // pads this file opened, closed once disconnected
+// Each pad's state last update, to tell new input from a stick resting off centre.
+struct Seen {
+  SDL_JoystickID id;
+  PadState state;
+};
+std::vector<Seen> g_seen;
 
 constexpr struct {
   SDL_GamepadButton button;
@@ -62,6 +69,14 @@ PadFamily Family(SDL_Gamepad* pad) {
 
 // Whether the pad is being used. A stick asked for raw (dead zone 0) rarely rests at exactly 0,
 // so it counts only past the default dead zone; otherwise an idle pad would always be in use.
+// Whether a pad's input moved away from where it rested: a stick or button by more than noise.
+bool Moved(const PadState& s, const PadState& rest) {
+  for (int i = 0; i < static_cast<int>(PadInput::kCount); ++i) {
+    if (std::fabs(s.value[i] - rest.value[i]) > 0.1f) return true;
+  }
+  return false;
+}
+
 bool AnyInput(const PadState& s, const PadDeadZones& dz) {
   const PadDeadZones defaults;
   const struct {
@@ -121,6 +136,7 @@ void PadShutdown() {
   if (!g_started) return;
   for (SDL_Gamepad* pad : g_opened) SDL_CloseGamepad(pad);
   g_opened.clear();
+  g_seen.clear();
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_HAPTIC);
   g_started = false;
   g_state = PadState();
@@ -139,12 +155,14 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
                                 }),
                  g_opened.end());
 
-  // The state is the pad used last: a pad with any input takes over; with none in use, the last
-  // one used, else the first.
+  // The state is the pad used last: another pad takes over when its input moves from where it
+  // rested, so a stick drifting off centre on an idle pad (the Deck's own, beside a controller)
+  // can't hold on to it; with none taking over, the last one used, else the first.
   int count = 0;
   SDL_JoystickID* ids = SDL_GetGamepads(&count);
   PadState first, last_used, in_use;
   SDL_JoystickID first_id = 0, in_use_id = 0;
+  std::vector<Seen> seen;
   for (int i = 0; ids && i < count; ++i) {
     SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
     if (!pad && (pad = SDL_OpenGamepad(ids[i]))) g_opened.push_back(pad);
@@ -156,10 +174,16 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
       first_id = ids[i];
     }
     if (ids[i] == g_active) last_used = s;
-    if (!in_use.connected && AnyInput(s, dead_zones)) {
+    // Where this pad rested: its state when it was last left, or centred if new.
+    PadState rest;
+    for (const Seen& old : g_seen) {
+      if (old.id == ids[i]) rest = old.state;
+    }
+    if (!in_use.connected && ids[i] != g_active && AnyInput(s, dead_zones) && Moved(s, rest)) {
       in_use = s;
       in_use_id = ids[i];
     }
+    seen.push_back({ids[i], rest});
   }
   SDL_free(ids);
   // g_active is the pad the state came from, so rumble goes to it.
@@ -172,6 +196,11 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
     g_state = first;
     g_active = first_id;
   }
+  // The pad in use rests wherever it is now, so when another takes over, it has to move again.
+  for (Seen& pad : seen) {
+    if (pad.id == g_active) pad.state = g_state;
+  }
+  g_seen = std::move(seen);
   return g_state;
 }
 

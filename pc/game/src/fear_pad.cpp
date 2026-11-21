@@ -375,9 +375,28 @@ double CameraYawDegrees()
 	return atan2(vForward.x, vForward.z) * 180.0 / MATH_PI;
 }
 
+// Ends a measurement before its last step: switched off, or play left.
+void CancelMeasure(const char* szWhy)
+{
+	Measure& m = g_Measure;
+	if (!m.bActive)
+		return;
+	if (m.pFile)
+		fclose(m.pFile);
+	m = Measure();
+	g_vtPadMeasure.SetFloat(0.0f);
+	g_Look.Reset();
+	g_pLTClient->CPrint("PadMeasure: cancelled (%s)", szWhy);
+}
+
 void UpdateMeasure()
 {
 	Measure& m = g_Measure;
+	if (m.bActive && g_vtPadMeasure.GetFloat() < 0.5f)
+	{
+		CancelMeasure("switched off");
+		return;
+	}
 	const double fNow = RealTimeTimer::Instance().GetTimerAccumulatedS();
 	if (!m.bActive)
 	{
@@ -653,6 +672,7 @@ void FearPadFrame()
 		StopRumble();
 		if (bWasPlaying)
 			HoldMenuKeys(g_State);
+		CancelMeasure("left play");
 		g_Look.Reset();
 		UpdateMenuKeys(g_State);
 		return;
@@ -744,6 +764,8 @@ bool FearPadLook(float fFrameTime, float* pYaw, float* pPitch)
 	}
 	else if (!g_State.connected)
 	{
+		// Unplugged, switched off or the game in the background: no held boost to come back to.
+		g_Look.Reset();
 		return false;
 	}
 
