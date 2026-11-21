@@ -62,6 +62,8 @@ const wchar_t* FearPadGlyph(uint32 nCommand);
 int FearPadGlyphSet();
 // CLTGUIString's glyph renderer (fear_pad_glyphs.cpp).
 void FearPadGlyphRender(uint32 nGlyph, float fX, float fY, float fSize, uint32 nColor);
+// Whether loading the button picture was tried, on the first glyph drawn, and failed.
+bool FearPadGlyphsFailed();
 // The turn for this frame in radians (yaw positive right, pitch positive down); false when no
 // pad is in use.
 bool FearPadLook(float fFrameTime, float* pYaw, float* pPitch);

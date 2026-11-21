@@ -85,7 +85,7 @@ def main():
         lines.append(')')
         lines.append(f'set({name}_INCLUDES ' + ' '.join(f'"{cmake_path(i)}"' for i in incs) + ')')
         lines.append(f'set({name}_DEFINES ' + ' '.join(defs) + ')')
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
     with open(out, 'w', newline='\n') as f:
         f.write('\n'.join(lines) + '\n')
 

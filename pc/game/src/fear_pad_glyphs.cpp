@@ -23,7 +23,14 @@ namespace
 	bool g_bLoaded = false;
 }
 
-void FearPadGlyphRender(uint32 nGlyph, float fX, float fY, float fSize, uint32 nColor)
+bool FearPadGlyphsFailed()
+{
+	return g_bLoaded && !g_hPicture;
+}
+
+namespace
+{
+bool Load()
 {
 	if (!g_bLoaded)
 	{
@@ -31,9 +38,16 @@ void FearPadGlyphRender(uint32 nGlyph, float fX, float fY, float fSize, uint32 n
 		if (g_pILTTextureMgr->CreateTextureFromFile(g_hPicture, kPicture) != LT_OK)
 			g_hPicture = NULL;
 		if (!g_hPicture)
-			g_pLTClient->CPrint("Pads: no %s; button prompts are left blank.", kPicture);
+			g_pLTClient->CPrint("Pads: no %s; button prompts keep the key names.", kPicture);
 	}
-	if (!g_hPicture || nGlyph >= (uint32)fearpc::kGlyphsPerSet)
+	return g_hPicture != NULL;
+}
+}
+
+
+void FearPadGlyphRender(uint32 nGlyph, float fX, float fY, float fSize, uint32 nColor)
+{
+	if (!Load() || nGlyph >= (uint32)fearpc::kGlyphsPerSet)
 		return;
 
 	// A string made while one set showed can outlive it; draw whatever shows now, or the Xbox

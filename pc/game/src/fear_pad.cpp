@@ -101,17 +101,25 @@ struct LookLog
 };
 LookLog g_LookLog;
 
+// PadLookLog switched off: close the log and allow a new try. Run every frame, not only on look
+// updates, so it also happens in menus and with no pad. Returns whether logging is off.
+bool LogLookOff()
+{
+	LookLog& l = g_LookLog;
+	if (g_vtPadLookLog.GetFloat() >= 0.5f)
+		return false;
+	if (l.pFile)
+		fclose(l.pFile);
+	if (l.pFile || l.bOpenFailed)
+		l = LookLog();
+	return true;
+}
+
 void LogLook(float fDt, float fStickX, float fStickY, bool bSoftLock, float fYawDegrees)
 {
 	LookLog& l = g_LookLog;
-	if (g_vtPadLookLog.GetFloat() < 0.5f)
-	{
-		if (l.pFile)
-			fclose(l.pFile);
-		if (l.pFile || l.bOpenFailed)
-			l = LookLog();
+	if (LogLookOff())
 		return;
-	}
 	if (l.bOpenFailed)
 		return;
 	const double fNow = RealTimeTimer::Instance().GetTimerAccumulatedS();
@@ -608,7 +616,8 @@ int FearPadGlyphSet()
 
 const wchar_t* FearPadGlyph(uint32 nCommand)
 {
-	if (!FearPadGlyphSet())
+	// Without the button picture a glyph would draw as a blank: the key name stays instead.
+	if (!FearPadGlyphSet() || FearPadGlyphsFailed())
 		return NULL;
 	PadAction action;
 	switch (nCommand)
@@ -641,6 +650,7 @@ const wchar_t* FearPadGlyph(uint32 nCommand)
 
 void FearPadFrame()
 {
+	LogLookOff();
 	Start();
 
 	// The HUD keeps some key names (the pick-up prompt, the weapon list): have it ask again

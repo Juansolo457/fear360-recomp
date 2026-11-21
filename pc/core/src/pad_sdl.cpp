@@ -183,6 +183,11 @@ const PadState& PadUpdate(const PadDeadZones& dead_zones) {
       in_use = s;
       in_use_id = ids[i];
     }
+    // An input let go (centred, released) rests at that, so pressing it again counts as moving;
+    // a stick resting off centre keeps its rest, so drift alone never does.
+    for (int k = 0; k < static_cast<int>(PadInput::kCount); ++k) {
+      if (std::fabs(s.value[k]) < 0.1f) rest.value[k] = s.value[k];
+    }
     seen.push_back({ids[i], rest});
   }
   SDL_free(ids);

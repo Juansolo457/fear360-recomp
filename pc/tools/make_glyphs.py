@@ -84,7 +84,7 @@ def stick(label, moving, size=50):
     radius = 40 if moving else 54
     disc(draw, LIGHT, radius=radius)
     disc(draw, DARK, radius=radius - 9, rim=DARK, rim_width=0)
-    text(draw, label, size if not moving else size * 0.8, WHITE, (64, 66))
+    text(draw, label, size if not moving else round(size * 0.8), WHITE, (64, 66))
     if moving:
         for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
             tip = (64 + dx * 62, 64 + dy * 62)

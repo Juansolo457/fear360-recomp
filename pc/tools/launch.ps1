@@ -27,8 +27,8 @@ $out = Join-Path $repo 'build\pc'
 $overlay = Join-Path $out 'overlay'
 New-Item -ItemType Directory -Force $overlay | Out-Null
 Get-ChildItem $overlay -File | Remove-Item
-$lines = Get-Content (Join-Path $game 'Default.archcfg') | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith(';') } |
-    ForEach-Object { Join-Path $game $_.Trim() }
+$lines = @(Get-Content (Join-Path $game 'Default.archcfg') | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith(';') } |
+    ForEach-Object { Join-Path $game $_.Trim() })
 if (-not $Retail) {
     foreach ($n in 'GameClient.dll', 'GameServer.dll', 'ClientFx.fxd') {
         $built = Join-Path $out "game\$n"
@@ -42,7 +42,13 @@ if (-not $Retail) {
     $lines += $overlay
 }
 $archcfg = Join-Path $out 'fearpc.archcfg'
-Set-Content -Path $archcfg -Value $lines -Encoding ascii
+# The engine reads the list with the system's ANSI code page: write it in that, and stop on a
+# path it can't hold rather than write a broken one.
+$ansi = [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage,
+    [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+try { $bytes = $ansi.GetBytes(($lines -join "`r`n") + "`r`n") }
+catch { throw "A path in the archive list has characters the system's code page ($($ansi.WebName)) can't hold: move the checkout or the game to a plainer path." }
+[IO.File]::WriteAllBytes($archcfg, $bytes)
 
 $args = @('-archcfg', "`"$archcfg`"", '-userdirectory', "`"$user`"") + $Extra
 Write-Host "FEAR.exe $($args -join ' ')"

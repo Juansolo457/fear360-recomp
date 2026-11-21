@@ -510,7 +510,8 @@ class Driver final : public rex::input::InputDriver,
       std::memset(out, 0, sizeof(*out));
       if (buttons != last_buttons_) ++packet_;
       last_buttons_ = buttons;
-      const int16_t stick = g_measure_stick.load(std::memory_order_relaxed);
+      // Out of play (paused, a menu, loading) the measuring stick lets go.
+      const int16_t stick = InPlay() ? g_measure_stick.load(std::memory_order_relaxed) : 0;
       if (stick != last_stick_) ++packet_;
       last_stick_ = stick;
       out->packet_number = packet_;
@@ -1171,6 +1172,7 @@ struct StickMeasure {
   Clock::time_point step_since{};
   Clock::time_point window_since{};  // the first turn update after the settle; unset before it
   int step = -1;  // -1: waiting for play; past the end: done
+  Clock::time_point last_update{};  // the last turn update seen
   double yaw = 0.0;
   int frames = 0;
 };
@@ -1192,6 +1194,18 @@ void MeasureStick(const uint8_t* base) {
   const auto seconds = [&](Clock::time_point since) {
     return std::chrono::duration<double>(now - since).count();
   };
+  // A gap in turn updates (paused, loading) would count in the window with no turn in it: the
+  // step starts over.
+  const bool gap = m.last_update != Clock::time_point{} && seconds(m.last_update) > 0.25;
+  m.last_update = now;
+  if (gap && m.step >= 0) {
+    m.step_since = now;
+    m.window_since = {};
+    m.yaw = 0.0;
+    m.frames = 0;
+    REXLOG_INFO("F.E.A.R. stick measure: turn updates stopped; step {} starts over", m.step);
+    return;
+  }
   if (m.step < 0) {
     if (m.play_since == Clock::time_point{}) m.play_since = now;
     if (seconds(m.play_since) < wait) return;
