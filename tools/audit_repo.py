@@ -13,7 +13,8 @@ or the toolchain can't hide or add anything. It rejects:
   - game file types and executable or archive payloads, by extension and by the first bytes
     (XEX2, PE/MZ, ELF, ZIP, 7z, RAR, LithTech LTAR, DDS, Bink, Xbox packed resources);
   - recompiled game code (DEFINE_REX_FUNC(sub_...) functions, or many "// lis r.." instruction
-    comments), shader warm-up lists, the retail XEX key (by its SHA-256, which is all this file
+    comments), F.E.A.R. public tools source (by its copyright header), shader warm-up lists,
+    the retail XEX key (by its SHA-256, which is all this file
     holds), symlinks, submodules and anything over 2 MB, except the reviewed exceptions below.
 
 This catches the common accidents, not every copyright question: a clean run doesn't make a
@@ -66,6 +67,9 @@ HEX32 = re.compile(rb'(?<![0-9A-Fa-f])[0-9A-Fa-f]{32}(?![0-9A-Fa-f])')
 TRANSLATED_FUNCTION = re.compile(rb'DEFINE_REX_FUNC\(sub_[0-9A-Fa-f]{8}\)')
 INSTRUCTION_COMMENT = re.compile(rb'^\s*// (lis|addi|lwz|stw|bl|mtctr|rlwinm) ', re.M)
 WARMUP_LIST = b'R"WARMUP(' + b'warmup '  # in two parts, so this file doesn't match itself
+# The F.E.A.R. public tools source (pc/ builds from it) is EULA-licensed: its files carry this
+# header. It lives in third_party/fear-publictools, never in the repo.
+SDK_SOURCE = re.compile(rb'\(c\)[\d\s,\-]*' + rb'Monolith Productions', re.I)
 
 # Reviewed exceptions: (path regex, rule it is exempt from, why).
 EXCEPTIONS = [
@@ -146,6 +150,8 @@ def problems(mode, path, data):
         found.append(('content', 'recompiled game code'))
     if WARMUP_LIST in data:
         found.append(('content', 'shader warm-up list (derived from the game)'))
+    if SDK_SOURCE.search(data):
+        found.append(('content', 'F.E.A.R. public tools source (Monolith copyright header)'))
     for token in HEX32.findall(data):
         if hashlib.sha256(token.lower()).hexdigest() in KEY_FINGERPRINTS:
             found.append(('content', 'the retail XEX key'))
